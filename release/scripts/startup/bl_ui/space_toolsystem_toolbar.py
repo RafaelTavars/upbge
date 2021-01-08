@@ -360,7 +360,7 @@ class _defs_transform:
             idname="builtin.transform",
             label="Transform",
             description=(
-                "Supports any combination of grab, rotate & scale at once"
+                "Supports any combination of grab, rotate, and scale at once"
             ),
             icon="ops.transform.transform",
             widget="VIEW3D_GGT_xform_gizmo",
@@ -1424,7 +1424,7 @@ class _defs_sculpt:
 
         return dict(
             idname="builtin.mask_by_color",
-            label="Mask By Color",
+            label="Mask by Color",
             icon="ops.sculpt.mask_by_color",
             widget=None,
             keymap=(),
@@ -1514,12 +1514,22 @@ class _defs_weight_paint:
 
     @ToolDef.from_fn
     def sample_weight():
+        def draw_settings(context, layout, tool):
+            if context.tool_settings.unified_paint_settings.use_unified_weight:
+                weight = context.tool_settings.unified_paint_settings.weight
+            elif context.tool_settings.weight_paint.brush:
+                weight = context.tool_settings.weight_paint.brush.weight
+            else:
+                return
+            layout.label(text="Weight: %.3f" % weight)
         return dict(
             idname="builtin.sample_weight",
             label="Sample Weight",
             icon="ops.paint.weight_sample",
+            cursor='EYEDROPPER',
             widget=None,
             keymap=(),
+            draw_settings=draw_settings
         )
 
     @ToolDef.from_fn
@@ -1528,6 +1538,7 @@ class _defs_weight_paint:
             idname="builtin.sample_vertex_group",
             label="Sample Vertex Group",
             icon="ops.paint.weight_sample_group",
+            cursor='EYEDROPPER',
             widget=None,
             keymap=(),
         )
@@ -1654,7 +1665,7 @@ class _defs_image_uv_transform:
             idname="builtin.transform",
             label="Transform",
             description=(
-                "Supports any combination of grab, rotate & scale at once"
+                "Supports any combination of grab, rotate, and scale at once"
             ),
             icon="ops.transform.transform",
             widget="IMAGE_GGT_gizmo2d",
@@ -2570,9 +2581,12 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
         ],
         'OBJECT': [
             *_tools_default,
-
-            None,
-            _tools_view3d_add,
+            # Currently experimental.
+            # None, _tools_view3d_add,
+            lambda context: (
+                (None, VIEW3D_PT_tools_active._tools_view3d_add)
+                if (context is None or context.preferences.experimental.use_object_add_tool) else ()
+            ),
         ],
         'POSE': [
             *_tools_default,
@@ -2600,8 +2614,13 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
         ],
         'EDIT_MESH': [
             *_tools_default,
-            None,
-            _tools_view3d_add,
+
+            # Currently experimental.
+            # None, _tools_view3d_add,
+            lambda context: (
+                (None, VIEW3D_PT_tools_active._tools_view3d_add)
+                if (context is None or context.preferences.experimental.use_object_add_tool) else ()
+            ),
             None,
             (
                 _defs_edit_mesh.extrude,
@@ -2895,10 +2914,10 @@ class SEQUENCER_PT_tools_active(ToolSelectPanelHelper, Panel):
             _defs_sequencer_generic.blade,
         ],
         'SEQUENCER_PREVIEW': [
-            _defs_sequencer_generic.sample,
             *_tools_select,
-            *_tools_annotate,
             _defs_sequencer_generic.blade,
+            _defs_sequencer_generic.sample,
+            *_tools_annotate,
         ],
     }
 

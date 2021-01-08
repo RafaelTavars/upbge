@@ -16,7 +16,7 @@
  * Copyright 2011, Blender Foundation.
  */
 
-#include <string.h>
+#include <cstring>
 
 #include "DNA_node_types.h"
 
@@ -37,6 +37,7 @@
 #include "COM_ColorBalanceNode.h"
 #include "COM_ColorCorrectionNode.h"
 #include "COM_ColorCurveNode.h"
+#include "COM_ColorExposureNode.h"
 #include "COM_ColorMatteNode.h"
 #include "COM_ColorNode.h"
 #include "COM_ColorRampNode.h"
@@ -136,7 +137,7 @@ Node *Converter::convert(bNode *b_node)
   Node *node = nullptr;
 
   /* ignore undefined nodes with missing or invalid node data */
-  if (!nodeIsRegistered(b_node)) {
+  if (nodeTypeUndefined(b_node)) {
     return nullptr;
   }
 
@@ -410,6 +411,9 @@ Node *Converter::convert(bNode *b_node)
       break;
     case CMP_NODE_DENOISE:
       node = new DenoiseNode(b_node);
+      break;
+    case CMP_NODE_EXPOSURE:
+      node = new ExposureNode(b_node);
       break;
   }
   return node;

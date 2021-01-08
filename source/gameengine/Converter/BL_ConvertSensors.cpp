@@ -222,9 +222,9 @@ void BL_ConvertSensors(struct Object *blenderobject,
           if (eventmgr) {
             gamesensor = new SCA_KeyboardSensor(
                 eventmgr,
-                ConvertKeyCode(blenderkeybdsensor->key),
-                ConvertKeyCode(blenderkeybdsensor->qual),
-                ConvertKeyCode(blenderkeybdsensor->qual2),
+                BL_ConvertKeyCode(blenderkeybdsensor->key),
+                BL_ConvertKeyCode(blenderkeybdsensor->qual),
+                BL_ConvertKeyCode(blenderkeybdsensor->qual2),
                 (blenderkeybdsensor->type == SENS_ALL_KEYS),
                 blenderkeybdsensor->targetName,
                 blenderkeybdsensor->toggleName,
@@ -258,6 +258,18 @@ void BL_ConvertSensors(struct Object *blenderobject,
                 break;
               case BL_SENS_MOUSE_RIGHT_BUTTON:
                 keytype = SCA_MouseSensor::KX_MOUSESENSORMODE_RIGHTBUTTON;
+                break;
+              case BL_SENS_MOUSE_BUTTON4:
+                keytype = SCA_MouseSensor::KX_MOUSESENSORMODE_BUTTON4;
+                break;
+              case BL_SENS_MOUSE_BUTTON5:
+                keytype = SCA_MouseSensor::KX_MOUSESENSORMODE_BUTTON5;
+                break;
+              case BL_SENS_MOUSE_BUTTON6:
+                keytype = SCA_MouseSensor::KX_MOUSESENSORMODE_BUTTON6;
+                break;
+              case BL_SENS_MOUSE_BUTTON7:
+                keytype = SCA_MouseSensor::KX_MOUSESENSORMODE_BUTTON7;
                 break;
               case BL_SENS_MOUSE_WHEEL_UP:
                 keytype = SCA_MouseSensor::KX_MOUSESENSORMODE_WHEELUP;

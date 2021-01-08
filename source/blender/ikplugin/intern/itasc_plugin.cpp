@@ -23,8 +23,8 @@
  */
 
 #include <cmath>
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
 #include <vector>
 
 /* iTaSC headers */
@@ -73,12 +73,12 @@ struct IK_Data {
   struct IK_Scene *first;
 };
 
-typedef float Vector3[3];
-typedef float Vector4[4];
+using Vector3 = float[3];
+using Vector4 = float[4];
 struct IK_Target;
-typedef void (*ErrorCallback)(const iTaSC::ConstraintValues *values,
-                              unsigned int nvalues,
-                              IK_Target *iktarget);
+using ErrorCallback = void (*)(const iTaSC::ConstraintValues *values,
+                               unsigned int nvalues,
+                               IK_Target *iktarget);
 
 /* one structure for each target in the scene */
 struct IK_Target {
@@ -194,8 +194,8 @@ struct IK_Scene {
   {
     /* delete scene first */
     delete scene;
-    for (std::vector<IK_Target *>::iterator it = targets.begin(); it != targets.end(); ++it) {
-      delete (*it);
+    for (IK_Target *target : targets) {
+      delete target;
     }
     targets.clear();
     delete[] channels;
@@ -868,7 +868,7 @@ static bool joint_callback(const iTaSC::Timestamp &timestamp,
     float rmat[3][3];
 
     if (chan->rotmode > 0) {
-      /* euler rotations (will cause gimble lock, but this can be alleviated a bit with rotation
+      /* Euler rotations (will cause gimbal lock, but this can be alleviated a bit with rotation
        * orders) */
       eulO_to_mat3(rmat, chan->eul, chan->rotmode);
     }

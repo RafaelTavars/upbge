@@ -81,10 +81,19 @@ base class --- :class:`PyObjectPlus`
 
       The current active camera.
 
+      .. code-block:: python
+
+         import bge
+
+         own = bge.logic.getCurrentController().owner
+         scene = own.scene
+
+         scene.active_camera = scene.objects["Camera.001"]
+
       :type: :class:`KX_Camera`
-      
+
       .. note::
-         
+
          This can be set directly from python to avoid using the :class:`KX_SceneActuator`.
 
    .. attribute:: overrideCullingCamera
@@ -143,8 +152,20 @@ base class --- :class:`PyObjectPlus`
 
    .. attribute:: pre_draw_setup
 
-      A list of callables to be run before the drawing setup (i.e., before the model view and projection matrices are computed). 
+      A list of callables to be run before the drawing setup (i.e., before the model view and projection matrices are computed).
       The callbacks can take as argument the rendered camera, the camera could be temporary in case of stereo rendering.
+
+      :type: list
+
+   .. attribute:: onRemove
+
+      A list of callables to run when the scene is destroyed.
+
+         .. code-block:: python
+
+            @scene.onRemove.append
+            def callback(scene):
+                  print('exiting %s...' % scene.name)
 
       :type: list
 
@@ -158,21 +179,21 @@ base class --- :class:`PyObjectPlus`
 
       Used to avoid blur effect caused by temporal antialiasing when doing changes with bpy API.
 
-   .. code-block:: python
+      .. code-block:: python
 
-      import bpy, bge
+         import bpy, bge
 
-      # Get the timeline current frame
-      currentFrame = bpy.data.scenes["Scene"].frame_current
+         # Get the timeline current frame
+         currentFrame = bpy.data.scenes["Scene"].frame_current
 
-      # Max timeline frame
-      maxFrame = 250
+         # Max timeline frame
+         maxFrame = 250
 
-      # Increase timeline frame by 1 without going above maxFrame
-      bpy.data.scenes["Scene"].frame_set((currentFrame + 1) % maxFrame)
+         # Increase timeline frame by 1 without going above maxFrame
+         bpy.data.scenes["Scene"].frame_set((currentFrame + 1) % maxFrame)
 
-      # Reset temporal antialiasing samples to avoid blur
-      bge.logic.getCurrentScene().resetTaaSamples = True
+         # Reset temporal antialiasing samples to avoid blur
+         bge.logic.getCurrentScene().resetTaaSamples = True
 
       :type: boolean
 
@@ -233,6 +254,18 @@ base class --- :class:`PyObjectPlus`
       Note: When you append an Object with a "module" python controller, you need to append
       the script (Text) corresponding to the module too.
 
+   .. method:: convertBlenderObjectsList(blenderObjectsList, asynchronous)
+
+      Converts all bpy.types.Object inside a python List into its correspondent :class:`KX_GameObject` during runtime.
+      For example, you can append an Object List during bge runtime using: ob = object_data_add(...) and ML.append(ob) then convert the Objects 
+      inside the List into several KX_GameObject to have logic bricks, physics... converted. This is meant to replace libload. 
+      The conversion can be asynchronous or synchronous.
+
+      :arg blenderObjectsList: The Object list to be converted.
+      :type blenderObjectsList: bpy.types.Object list
+      :arg asynchronous: The Object list conversion can be asynchronous or not.
+      :type asynchronous: boolean
+      
    .. method:: convertBlenderCollection(blenderCollection, asynchronous)
 
       Converts all bpy.types.Object inside a Collection into its correspondent :class:`KX_GameObject` during runtime.
@@ -248,3 +281,28 @@ base class --- :class:`PyObjectPlus`
       :type blenderCollection: bpy.types.Collection
       :arg asynchronous: The collection conversion can be asynchronous or not.
       :type asynchronous: boolean
+
+   .. method:: addOverlayCollection(kxCamera, blenderCollection)
+
+      Adds an overlay collection (as with collection actuator) to render this collection objects
+      during a second render pass in overlay using the KX_Camera passed as argument.
+
+      :arg kxCamera: The camera used to render the overlay collection.
+      :type kxCamera: bge.types.KX_Camera
+
+      :arg blenderCollection: The overlay collection to add.
+      :type blenderCollection: bpy.types.Collection
+
+   .. method:: removeOverlayCollection(blenderCollection)
+
+      Removes an overlay collection (as with collection actuator).
+
+      :arg blenderCollection: The overlay collection to remove.
+      :type blenderCollection: bpy.types.Collection
+
+   .. method:: getGameObjectFromObject(blenderObject)
+
+      Get the KX_GameObject corresponding to the blenderObject.
+
+      :arg blenderObject: the Object from which we want to get the KX_GameObject.
+      :type blenderObject: bpy.types.Object

@@ -30,8 +30,8 @@
  *  \brief Senses mouse events
  */
 
-#ifndef __SCA_MOUSESENSOR_H__
-#define __SCA_MOUSESENSOR_H__
+#pragma once
+
 
 #include "EXP_BoolValue.h"
 #include "SCA_IInputDevice.h"
@@ -75,6 +75,10 @@ class SCA_MouseSensor : public SCA_ISensor {
     KX_MOUSESENSORMODE_LEFTBUTTON,
     KX_MOUSESENSORMODE_MIDDLEBUTTON,
     KX_MOUSESENSORMODE_RIGHTBUTTON,
+    KX_MOUSESENSORMODE_BUTTON4,
+    KX_MOUSESENSORMODE_BUTTON5,
+    KX_MOUSESENSORMODE_BUTTON6,
+    KX_MOUSESENSORMODE_BUTTON7,
     KX_MOUSESENSORMODE_WHEELUP,
     KX_MOUSESENSORMODE_WHEELDOWN,
     KX_MOUSESENSORMODE_MOVEMENT,
@@ -105,4 +109,3 @@ class SCA_MouseSensor : public SCA_ISensor {
 #endif
 };
 
-#endif /* __SCA_MOUSESENSOR_H__ */

@@ -29,8 +29,8 @@
  *  \ingroup bgeconv
  */
 
-#ifndef __BL_BLENDERSCENECONVERTER_H__
-#define __BL_BLENDERSCENECONVERTER_H__
+#pragma once
+
 
 #include <map>
 #include <vector>
@@ -68,8 +68,8 @@ class BL_BlenderSceneConverter {
   std::map<bController *, SCA_IController *> m_map_blender_to_gamecontroller;
 
  public:
-  BL_BlenderSceneConverter() = default;
-  ~BL_BlenderSceneConverter() = default;
+  BL_BlenderSceneConverter();
+  ~BL_BlenderSceneConverter();
 
   // Disable dangerous copy.
   BL_BlenderSceneConverter(const BL_BlenderSceneConverter &other) = delete;
@@ -91,4 +91,3 @@ class BL_BlenderSceneConverter {
   SCA_IController *FindGameController(bController *for_controller);
 };
 
-#endif  // __BL_BLENDERSCENECONVERTER_H__

@@ -44,6 +44,7 @@
 
 #include "BKE_colorband.h"
 #include "BKE_colortools.h"
+#include "BKE_customdata.h"
 #include "BKE_deform.h"
 #include "BKE_lattice.h"
 #include "BKE_object.h"
@@ -56,8 +57,7 @@
 #include "render_types.h"
 #include "texture_common.h"
 
-#include "RE_render_ext.h"
-#include "RE_shader_ext.h"
+#include "RE_texture.h"
 
 static ThreadMutex sample_mutex = PTHREAD_MUTEX_INITIALIZER;
 

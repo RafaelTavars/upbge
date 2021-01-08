@@ -742,6 +742,7 @@ def km_property_editor(_params):
         ("buttons.start_filter", {"type": 'F', "value": 'PRESS', "ctrl": True}, None),
         ("buttons.clear_filter", {"type": 'F', "value": 'PRESS', "alt": True}, None),
         # Modifier panels
+        ("object.modifier_set_active", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
         ("object.modifier_remove", {"type": 'X', "value": 'PRESS'}, {"properties": [("report", True)]}),
         ("object.modifier_remove", {"type": 'DEL', "value": 'PRESS'}, {"properties": [("report", True)]}),
         ("object.modifier_copy", {"type": 'D', "value": 'PRESS', "shift": True}, None),
@@ -754,6 +755,7 @@ def km_property_editor(_params):
         # ShaderFX panels
         ("object.shaderfx_remove", {"type": 'X', "value": 'PRESS'}, {"properties": [("report", True)]}),
         ("object.shaderfx_remove", {"type": 'DEL', "value": 'PRESS'}, {"properties": [("report", True)]}),
+        ("object.shaderfx_copy", {"type": 'D', "value": 'PRESS', "shift": True}, None),
         # Constraint panels
         ("constraint.delete", {"type": 'X', "value": 'PRESS'}, {"properties": [("report", True)]}),
         ("constraint.delete", {"type": 'DEL', "value": 'PRESS'}, {"properties": [("report", True)]}),
@@ -1215,7 +1217,7 @@ def km_view3d(params):
         ("transform.mirror", {"type": 'M', "value": 'PRESS', "ctrl": True}, None),
         ("wm.context_toggle", {"type": 'TAB', "value": 'PRESS', "shift": True},
          {"properties": [("data_path", 'tool_settings.use_snap')]}),
-        op_panel("VIEW3D_PT_snapping", {"type": 'TAB', "value": 'PRESS', "shift": True, "ctrl": True}, [("keep_open", False)]),
+        op_panel("VIEW3D_PT_snapping", {"type": 'TAB', "value": 'PRESS', "shift": True, "ctrl": True}, [("keep_open", True)]),
         ("object.transform_axis_target", {"type": 'T', "value": 'PRESS', "shift": True}, None),
         ("transform.skin_resize", {"type": 'A', "value": 'PRESS', "ctrl": True}, None),
         # Game start
@@ -1563,7 +1565,7 @@ def km_graph_editor(params):
         ("graph.sample", {"type": 'O', "value": 'PRESS', "shift": True, "alt": True}, None),
         ("graph.bake", {"type": 'C', "value": 'PRESS', "alt": True}, None),
         op_menu("GRAPH_MT_delete", {"type": 'X', "value": 'PRESS'}),
-        op_menu("GRAPH_MT_delete", {"type": 'DEL', "value": 'PRESS'}),
+        ("graph.delete", {"type": 'DEL', "value": 'PRESS'}, {"properties": [("confirm", False)]}),
         ("graph.duplicate_move", {"type": 'D', "value": 'PRESS', "shift": True}, None),
         ("graph.keyframe_insert", {"type": 'I', "value": 'PRESS'}, None),
         ("graph.click_insert", {"type": params.action_mouse, "value": 'CLICK', "ctrl": True},
@@ -1860,7 +1862,7 @@ def km_node_editor(params):
 def km_logic(params):
     items = []
     keymap = (
-        "Logic Editor",
+        "Logic Bricks Editor",
         {"space_type": 'LOGIC_EDITOR', "region_type": 'WINDOW'},
         {"items": items},
     )
@@ -2132,7 +2134,7 @@ def km_dopesheet(params):
         ("action.keyframe_type", {"type": 'R', "value": 'PRESS'}, None),
         ("action.sample", {"type": 'O', "value": 'PRESS', "shift": True, "alt": True}, None),
         op_menu("DOPESHEET_MT_delete", {"type": 'X', "value": 'PRESS'}),
-        op_menu("DOPESHEET_MT_delete", {"type": 'DEL', "value": 'PRESS'}),
+        ("action.delete", {"type": 'DEL', "value": 'PRESS'}, {"properties": [("confirm", False)]}),
         ("action.duplicate_move", {"type": 'D', "value": 'PRESS', "shift": True}, None),
         ("action.keyframe_insert", {"type": 'I', "value": 'PRESS'}, None),
         ("action.copy", {"type": 'C', "value": 'PRESS', "ctrl": True}, None),
@@ -2520,6 +2522,8 @@ def km_sequencer(params):
         ("sequencer.delete", {"type": 'DEL', "value": 'PRESS'}, None),
         ("sequencer.copy", {"type": 'C', "value": 'PRESS', "ctrl": True}, None),
         ("sequencer.paste", {"type": 'V', "value": 'PRESS', "ctrl": True}, None),
+        ("sequencer.paste", {"type": 'V', "value": 'PRESS', "ctrl": True, "shift": True},
+        {"properties": [("keep_offset", True)]}),
         ("sequencer.images_separate", {"type": 'Y', "value": 'PRESS'}, None),
         ("sequencer.meta_toggle", {"type": 'TAB', "value": 'PRESS'}, None),
         ("sequencer.meta_make", {"type": 'G', "value": 'PRESS', "ctrl": True}, None),
@@ -3247,6 +3251,9 @@ def km_grease_pencil_stroke_edit_mode(params):
          {"properties": [("mode", 'GPENCIL_OPACITY')]}),
         # Proportional editing.
         *_template_items_proportional_editing(connected=True),
+        # Curve edit mode toggle.
+        ("wm.context_toggle", {"type": 'U', "value": 'PRESS'},
+         {"properties": [("data_path", 'gpencil_data.use_curve_edit')]}),
         # Add menu
         ("object.gpencil_add", {"type": 'A', "value": 'PRESS', "shift": True}, None),
         # Vertex group menu
@@ -3274,6 +3281,20 @@ def km_grease_pencil_stroke_edit_mode(params):
 
     return keymap
 
+def km_grease_pencil_stroke_curve_edit_mode(params):
+    items = []
+    keymap = (
+        "Grease Pencil Stroke Curve Edit Mode",
+        {"space_type": 'EMPTY', "region_type": 'WINDOW'},
+        {"items": items},
+    )
+
+    items.extend([
+        # Set handle type
+        ("gpencil.stroke_editcurve_set_handle_type", {"type": 'V', "value": 'PRESS'}, None),
+    ])
+
+    return keymap
 
 def km_grease_pencil_stroke_paint_mode(params):
     items = []
@@ -5041,8 +5062,8 @@ def km_transform_modal_map(_params):
         ("AUTOIK_CHAIN_LEN_UP", {"type": 'WHEELDOWNMOUSE', "value": 'PRESS', "shift": True}, None),
         ("AUTOIK_CHAIN_LEN_DOWN", {"type": 'WHEELUPMOUSE', "value": 'PRESS', "shift": True}, None),
         ("INSERTOFS_TOGGLE_DIR", {"type": 'T', "value": 'PRESS'}, None),
-        ("AUTOCONSTRAIN", {"type": 'MIDDLEMOUSE', "value": 'PRESS'}, None),
-        ("AUTOCONSTRAINPLANE", {"type": 'MIDDLEMOUSE', "value": 'PRESS', "shift": True}, None),
+        ("AUTOCONSTRAIN", {"type": 'MIDDLEMOUSE', "value": 'ANY'}, None),
+        ("AUTOCONSTRAINPLANE", {"type": 'MIDDLEMOUSE', "value": 'ANY', "shift": True}, None),
     ])
 
     return keymap
@@ -6912,6 +6933,7 @@ def generate_keymaps(params=None):
 
         # Modes.
         km_grease_pencil(params),
+        km_grease_pencil_stroke_curve_edit_mode(params),
         km_grease_pencil_stroke_edit_mode(params),
         km_grease_pencil_stroke_paint_mode(params),
         km_grease_pencil_stroke_paint_draw_brush(params),

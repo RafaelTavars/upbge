@@ -659,7 +659,7 @@ static void image_main_region_draw(const bContext *C, ARegion *region)
 
   /* Draw Meta data of the image isn't added to the DrawManager as it is
    * used in other areas as well. */
-  if (sima->flag & SI_DRAW_METADATA) {
+  if (sima->overlay.flag & SI_OVERLAY_SHOW_OVERLAYS && sima->flag & SI_DRAW_METADATA) {
     void *lock;
     /* `ED_space_image_get_zoom` temporarily locks the image, so this needs to be done before
      * the image is locked when calling `ED_space_image_acquire_buffer`. */
@@ -705,7 +705,8 @@ static void image_main_region_draw(const bContext *C, ARegion *region)
     ED_mask_draw_region(depsgraph,
                         mask,
                         region,
-                        sima->mask_info.draw_flag,
+                        /* Mask overlay is drawn by image/overlay engine. */
+                        sima->mask_info.draw_flag & ~MASK_DRAWFLAG_OVERLAY,
                         sima->mask_info.draw_type,
                         sima->mask_info.overlay_mode,
                         width,

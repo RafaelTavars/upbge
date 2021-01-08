@@ -4271,6 +4271,7 @@ static RNAProcessItem PROCESS_ITEMS[] = {
     {"rna_animviz.c", NULL, RNA_def_animviz},
     {"rna_armature.c", "rna_armature_api.c", RNA_def_armature},
     {"rna_attribute.c", NULL, RNA_def_attribute},
+    {"rna_asset.c", NULL, RNA_def_asset},
     {"rna_boid.c", NULL, RNA_def_boid},
     {"rna_brush.c", NULL, RNA_def_brush},
     {"rna_cachefile.c", NULL, RNA_def_cachefile},
@@ -4440,7 +4441,7 @@ static void rna_generate(BlenderRNA *brna, FILE *f, const char *filename, const 
     }
   }
 
-  if (STREQ(filename, "rna_ID.c")) {
+  if (filename && STREQ(filename, "rna_ID.c")) {
     /* this is ugly, but we cannot have c files compiled for both
      * makesrna and blender with some build systems at the moment */
     fprintf(f, "#include \"rna_define.c\"\n\n");

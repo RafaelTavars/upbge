@@ -29,8 +29,8 @@
  *  \ingroup phys
  */
 
-#ifndef __PHY_IPHYSICSENVIRONMENT_H__
-#define __PHY_IPHYSICSENVIRONMENT_H__
+#pragma once
+
 
 #include "MT_Matrix4x4.h"
 #include "MT_Vector2.h"
@@ -52,8 +52,6 @@ class KX_GameObject;
 class KX_Scene;
 class BL_BlenderSceneConverter;
 
-struct PHY_ShapeProps;
-struct PHY_MaterialProps;
 class PHY_IMotionState;
 struct bRigidBodyJointConstraint;
 
@@ -265,7 +263,6 @@ class PHY_IPhysicsEnvironment {
                              RAS_MeshObject *meshobj,
                              DerivedMesh *dm,
                              KX_Scene *kxscene,
-                             PHY_ShapeProps *shapeprops,
                              PHY_IMotionState *motionstate,
                              int activeLayerBitInfo,
                              bool isCompoundChild,
@@ -280,4 +277,3 @@ class PHY_IPhysicsEnvironment {
   }
 };
 
-#endif /* __PHY_IPHYSICSENVIRONMENT_H__ */

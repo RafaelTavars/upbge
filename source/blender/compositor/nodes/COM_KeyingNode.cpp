@@ -32,7 +32,7 @@
 
 #include "COM_DilateErodeOperation.h"
 
-#include "COM_KeyingSetAlphaOperation.h"
+#include "COM_SetAlphaMultiplyOperation.h"
 
 #include "COM_GaussianAlphaXBlurOperation.h"
 #include "COM_GaussianAlphaYBlurOperation.h"
@@ -228,7 +228,8 @@ void KeyingNode::convertToOperations(NodeConverter &converter,
   NodeOutput *outputImage = this->getOutputSocket(0);
   NodeOutput *outputMatte = this->getOutputSocket(1);
   NodeOutput *outputEdges = this->getOutputSocket(2);
-  NodeOperationOutput *postprocessedMatte = nullptr, *postprocessedImage = nullptr, *edgesMatte = nullptr;
+  NodeOperationOutput *postprocessedMatte = nullptr, *postprocessedImage = nullptr,
+                      *edgesMatte = nullptr;
 
   /* keying operation */
   KeyingOperation *keyingOperation = new KeyingOperation();
@@ -322,7 +323,7 @@ void KeyingNode::convertToOperations(NodeConverter &converter,
   }
 
   /* set alpha channel to output image */
-  KeyingSetAlphaOperation *alphaOperation = new KeyingSetAlphaOperation();
+  SetAlphaMultiplyOperation *alphaOperation = new SetAlphaMultiplyOperation();
   converter.addOperation(alphaOperation);
 
   converter.mapInputSocket(inputImage, alphaOperation->getInputSocket(0));

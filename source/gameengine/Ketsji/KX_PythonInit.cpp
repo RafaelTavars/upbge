@@ -1067,99 +1067,19 @@ static PyObject *gPyMakeScreenshot(PyObject *, PyObject *args)
   Py_RETURN_NONE;
 }
 
-static int getGLSLSettingFlag(const std::string &setting)
-{
-  if (setting == "lights") {
-    return GAME_GLSL_NO_LIGHTS;
-  }
-  else if (setting == "shaders") {
-    return GAME_GLSL_NO_SHADERS;
-  }
-  else if (setting == "shadows") {
-    return GAME_GLSL_NO_SHADOWS;
-  }
-  else if (setting == "ramps") {
-    return GAME_GLSL_NO_RAMPS;
-  }
-  else if (setting == "nodes") {
-    return GAME_GLSL_NO_NODES;
-  }
-  else if (setting == "extra_textures") {
-    return GAME_GLSL_NO_EXTRA_TEX;
-  }
-  else {
-    return -1;
-  }
-}
-
 static PyObject *gPySetGLSLMaterialSetting(PyObject *, PyObject *args, PyObject *)
 {
-  GlobalSettings *gs = KX_GetActiveEngine()->GetGlobalSettings();
-  char *setting;
-  int enable, flag, sceneflag;
-  Main *bmain = KX_GetActiveEngine()->GetConverter()->GetMain();
-
-  if (!PyArg_ParseTuple(args, "si:setGLSLMaterialSetting", &setting, &enable))
-    return nullptr;
-
-  flag = getGLSLSettingFlag(setting);
-
-  if (flag == -1) {
-    PyErr_SetString(PyExc_ValueError,
-                    "Rasterizer.setGLSLMaterialSetting(string): glsl setting is not known");
-    return nullptr;
-  }
-
-  sceneflag = gs->glslflag;
-
-  if (enable)
-    gs->glslflag &= ~flag;
-  else
-    gs->glslflag |= flag;
-
-  /* display lists and GLSL materials need to be remade */
-  if (sceneflag != gs->glslflag) {
-    GPU_materials_free(bmain);
-    if (KX_GetActiveEngine()) {
-      CListValue<KX_Scene> *scenes = KX_GetActiveEngine()->CurrentScenes();
-
-      for (KX_Scene *scene : scenes) {
-        // temporarily store the glsl settings in the scene for the GLSL materials
-        scene->GetBlenderScene()->gm.flag = gs->glslflag;
-        if (scene->GetBucketManager()) {
-          scene->GetBucketManager()->UpdateShaders();
-          scene->GetBucketManager()->ReleaseMaterials();
-        }
-      }
-    }
-  }
+  ShowDeprecationWarning("setGLSLMaterialSetting(settings, enable)", "nothing");
 
   Py_RETURN_NONE;
 }
 
 static PyObject *gPyGetGLSLMaterialSetting(PyObject *, PyObject *args, PyObject *)
 {
-  GlobalSettings *gs = KX_GetActiveEngine()->GetGlobalSettings();
-  char *setting;
-  int enabled = 0, flag;
+  ShowDeprecationWarning("getGLSLMaterialSetting()", "nothing");
 
-  if (!PyArg_ParseTuple(args, "s:getGLSLMaterialSetting", &setting))
-    return nullptr;
-
-  flag = getGLSLSettingFlag(setting);
-
-  if (flag == -1) {
-    PyErr_SetString(PyExc_ValueError,
-                    "Rasterizer.getGLSLMaterialSetting(string): glsl setting is not known");
-    return nullptr;
-  }
-
-  enabled = ((gs->glslflag & flag) != 0);
-  return PyLong_FromLong(enabled);
+  return PyLong_FromLong(0);
 }
-
-#  define KX_BLENDER_MULTITEX_MATERIAL 1
-#  define KX_BLENDER_GLSL_MATERIAL 2
 
 static PyObject *gPySetMaterialType(PyObject *, PyObject *args, PyObject *)
 {
@@ -1766,6 +1686,10 @@ PyMODINIT_FUNC initGameLogicPythonBinding()
   KX_MACRO_addTypesToDict(d, KX_MOUSE_BUT_LEFT, SCA_IInputDevice::LEFTMOUSE);
   KX_MACRO_addTypesToDict(d, KX_MOUSE_BUT_MIDDLE, SCA_IInputDevice::MIDDLEMOUSE);
   KX_MACRO_addTypesToDict(d, KX_MOUSE_BUT_RIGHT, SCA_IInputDevice::RIGHTMOUSE);
+  KX_MACRO_addTypesToDict(d, KX_MOUSE_BUT_BUTTON4, SCA_IInputDevice::BUTTON4MOUSE);
+  KX_MACRO_addTypesToDict(d, KX_MOUSE_BUT_BUTTON5, SCA_IInputDevice::BUTTON5MOUSE);
+  KX_MACRO_addTypesToDict(d, KX_MOUSE_BUT_BUTTON6, SCA_IInputDevice::BUTTON6MOUSE);
+  KX_MACRO_addTypesToDict(d, KX_MOUSE_BUT_BUTTON7, SCA_IInputDevice::BUTTON7MOUSE);
 
   /* 2D Filter Actuator */
   KX_MACRO_addTypesToDict(d, RAS_2DFILTER_ENABLED, RAS_2DFilterManager::FILTER_ENABLED);
@@ -2127,41 +2051,40 @@ static struct _inittab bpy_internal_modules[] = {
  * Python is not initialized.
  * see bpy_interface.c's BPY_python_start() which shares the same functionality in blender.
  */
-void initGamePlayerPythonScripting(Main *maggie, int argc, char **argv, bContext *C, bool audioDeviveIsInitialized)
+void initGamePlayerPythonScripting(int argc, char **argv, bContext *C)
 {
-  /* Yet another gotcha in the py api
-   * Cant run PySys_SetArgv more than once because this adds the
-   * binary dir to the sys.path each time.
-   * Id have thought python being totally restarted would make this ok but
-   * somehow it remembers the sys.path - Campbell
-   */
-
-  static bool first_time = true;
-  const char *const py_path_bundle = BKE_appdir_folder_id(BLENDER_SYSTEM_PYTHON, nullptr);
-
-  /* not essential but nice to set our name */
-  static wchar_t program_path_wchar[FILE_MAX]; /* python holds a reference */
-  BLI_strncpy_wchar_from_utf8(
-      program_path_wchar, BKE_appdir_program_path(), ARRAY_SIZE(program_path_wchar));
-  Py_SetProgramName(program_path_wchar);
-
-  /* Update, Py3.3 resolves attempting to parse non-existing header */
-#  if 0
-	/* Python 3.2 now looks for '2.xx/python/include/python3.2d/pyconfig.h' to
-	 * parse from the 'sysconfig' module which is used by 'site',
-	 * so for now disable site. alternatively we could copy the file. */
-	if (py_path_bundle != nullptr) {
-		Py_NoSiteFlag = 1; /* inhibits the automatic importing of 'site' */
-	}
-#  endif
+  /* Needed for Python's initialization for portable Python installations.
+   * We could use #Py_SetPath, but this overrides Python's internal logic
+   * for calculating it's own module search paths.
+   *
+   * `sys.executable` is overwritten after initialization to the Python binary. */
+  {
+    const char *program_path = BKE_appdir_program_path();
+    wchar_t program_path_wchar[FILE_MAX];
+    BLI_strncpy_wchar_from_utf8(program_path_wchar, program_path, ARRAY_SIZE(program_path_wchar));
+    Py_SetProgramName(program_path_wchar);
+  }
 
   /* must run before python initializes */
   PyImport_ExtendInittab(bge_internal_modules);
   /* must run before python initializes */
   PyImport_ExtendInittab(bpy_internal_modules);
 
-  /* find local python installation */
-  PyC_SetHomePath(py_path_bundle);
+  /* Allow to use our own included Python. `py_path_bundle` may be NULL. */
+  {
+    const char *py_path_bundle = BKE_appdir_folder_id(BLENDER_SYSTEM_PYTHON, NULL);
+    if (py_path_bundle != NULL) {
+      PyC_SetHomePath(py_path_bundle);
+    }
+    else {
+      /* Common enough to use the system Python on Linux/Unix, warn on other systems. */
+#  if defined(__APPLE__) || defined(_WIN32)
+      fprintf(stderr,
+              "Bundled Python not found and is expected on this platform "
+              "(the 'install' target may have not been built)\n");
+#  endif
+    }
+  }
 
   /* without this the sys.stdout may be set to 'ascii'
    * (it is on my system at least), where printing unicode values will raise
@@ -2181,6 +2104,17 @@ void initGamePlayerPythonScripting(Main *maggie, int argc, char **argv, bContext
 
   /* Initialize Python (also acquires lock). */
   Py_Initialize();
+}
+
+void postInitGamePlayerPythonScripting(Main *maggie, int argc, char **argv, bContext *C, bool *audioDeviceIsInitialized)
+{
+  /* Yet another gotcha in the py api
+   * Cant run PySys_SetArgv more than once because this adds the
+   * binary dir to the sys.path each time.
+   * Id have thought python being totally restarted would make this ok but
+   * somehow it remembers the sys.path - Campbell
+   */
+  static bool first_time = true;
 
   if (argv && first_time) { /* browser plugins don't currently set this */
     // Until python support ascii again, we use our own.
@@ -2229,10 +2163,10 @@ void initGamePlayerPythonScripting(Main *maggie, int argc, char **argv, bContext
     PyObject *mod = PyImport_ImportModuleLevel("aud", nullptr, nullptr, nullptr, 0);
     if (mod) {  // avoiding crash if audio device can not be initialized
       Py_DECREF(mod);
-      audioDeviveIsInitialized = true;
+      *audioDeviceIsInitialized = true;
     }
     else {
-      audioDeviveIsInitialized = false;
+      *audioDeviceIsInitialized = false;
     }
   }
 #  endif
@@ -2274,7 +2208,7 @@ void exitGamePlayerPythonScripting()
 /**
  * Python is already initialized.
  */
-void initGamePythonScripting(Main *maggie, bool audioDeviceIsInitialized)
+void initGamePythonScripting(Main *maggie, bool *audioDeviceIsInitialized)
 {
   /* Yet another gotcha in the py api
    * Cant run PySys_SetArgv more than once because this adds the
@@ -2284,29 +2218,36 @@ void initGamePythonScripting(Main *maggie, bool audioDeviceIsInitialized)
    */
 
   static bool first_time = true;
-  const char *const py_path_bundle = BKE_appdir_folder_id(BLENDER_SYSTEM_PYTHON, nullptr);
-
-  /* not essential but nice to set our name */
-  static wchar_t program_path_wchar[FILE_MAX]; /* python holds a reference */
-  BLI_strncpy_wchar_from_utf8(
-      program_path_wchar, BKE_appdir_program_path(), ARRAY_SIZE(program_path_wchar));
-  Py_SetProgramName(program_path_wchar);
-
-  /* Update, Py3.3 resolves attempting to parse non-existing header */
-#  if 0
-	/* Python 3.2 now looks for '2.xx/python/include/python3.2d/pyconfig.h' to
-	 * parse from the 'sysconfig' module which is used by 'site',
-	 * so for now disable site. alternatively we could copy the file. */
-	if (py_path_bundle != nullptr) {
-		Py_NoSiteFlag = 1; /* inhibits the automatic importing of 'site' */
-	}
-#  endif
+  /* Needed for Python's initialization for portable Python installations.
+   * We could use #Py_SetPath, but this overrides Python's internal logic
+   * for calculating it's own module search paths.
+   *
+   * `sys.executable` is overwritten after initialization to the Python binary. */
+  {
+    const char *program_path = BKE_appdir_program_path();
+    wchar_t program_path_wchar[FILE_MAX];
+    BLI_strncpy_wchar_from_utf8(program_path_wchar, program_path, ARRAY_SIZE(program_path_wchar));
+    Py_SetProgramName(program_path_wchar);
+  }
 
   /* must run before python initializes */
   PyImport_ExtendInittab(bge_internal_modules);
 
-  /* find local python installation */
-  PyC_SetHomePath(py_path_bundle);
+  /* Allow to use our own included Python. `py_path_bundle` may be NULL. */
+  {
+    const char *py_path_bundle = BKE_appdir_folder_id(BLENDER_SYSTEM_PYTHON, NULL);
+    if (py_path_bundle != NULL) {
+      PyC_SetHomePath(py_path_bundle);
+    }
+    else {
+      /* Common enough to use the system Python on Linux/Unix, warn on other systems. */
+#  if defined(__APPLE__) || defined(_WIN32)
+      fprintf(stderr,
+              "Bundled Python not found and is expected on this platform "
+              "(the 'install' target may have not been built)\n");
+#  endif
+    }
+  }
 
   /* without this the sys.stdout may be set to 'ascii'
    * (it is on my system at least), where printing unicode values will raise
@@ -2345,10 +2286,10 @@ void initGamePythonScripting(Main *maggie, bool audioDeviceIsInitialized)
     PyObject *mod = PyImport_ImportModuleLevel("aud", nullptr, nullptr, nullptr, 0);
     if (mod) {  // avoiding crash if audio device can not be initialized
       Py_DECREF(mod);
-      audioDeviceIsInitialized = true;
+      *audioDeviceIsInitialized = true;
     }
     else {
-      audioDeviceIsInitialized = false;
+      *audioDeviceIsInitialized = false;
     }
   }
 #  endif
@@ -2390,12 +2331,12 @@ void setupGamePython(KX_KetsjiEngine *ketsjiengine,
                      int argc,
                      char **argv,
                      bContext *C,
-                     bool audioDeviceIsInitialized)
+                     bool *audioDeviceIsInitialized)
 {
   PyObject *modules;
 
   if (argv) /* player only */
-    initGamePlayerPythonScripting(blenderdata, argc, argv, C, audioDeviceIsInitialized);
+    postInitGamePlayerPythonScripting(blenderdata, argc, argv, C, audioDeviceIsInitialized);
   else
     initGamePythonScripting(blenderdata, audioDeviceIsInitialized);
 
@@ -2480,10 +2421,6 @@ PyMODINIT_FUNC initRasterizerPythonBinding()
   ErrorObject = PyUnicode_FromString("Rasterizer.error");
   PyDict_SetItemString(d, "error", ErrorObject);
   Py_DECREF(ErrorObject);
-
-  /* needed for get/setMaterialType */
-  KX_MACRO_addTypesToDict(d, KX_BLENDER_MULTITEX_MATERIAL, KX_BLENDER_MULTITEX_MATERIAL);
-  KX_MACRO_addTypesToDict(d, KX_BLENDER_GLSL_MATERIAL, KX_BLENDER_GLSL_MATERIAL);
 
   KX_MACRO_addTypesToDict(d, RAS_MIPMAP_NONE, RAS_Rasterizer::RAS_MIPMAP_NONE);
   KX_MACRO_addTypesToDict(d, RAS_MIPMAP_NEAREST, RAS_Rasterizer::RAS_MIPMAP_NEAREST);
@@ -2723,6 +2660,10 @@ PyMODINIT_FUNC initGameKeysPythonBinding()
   KX_MACRO_addTypesToDict(d, LEFTMOUSE, SCA_IInputDevice::LEFTMOUSE);
   KX_MACRO_addTypesToDict(d, MIDDLEMOUSE, SCA_IInputDevice::MIDDLEMOUSE);
   KX_MACRO_addTypesToDict(d, RIGHTMOUSE, SCA_IInputDevice::RIGHTMOUSE);
+  KX_MACRO_addTypesToDict(d, BUTTON4MOUSE, SCA_IInputDevice::BUTTON4MOUSE);
+  KX_MACRO_addTypesToDict(d, BUTTON5MOUSE, SCA_IInputDevice::BUTTON5MOUSE);
+  KX_MACRO_addTypesToDict(d, BUTTON6MOUSE, SCA_IInputDevice::BUTTON6MOUSE);
+  KX_MACRO_addTypesToDict(d, BUTTON7MOUSE, SCA_IInputDevice::BUTTON7MOUSE);
   KX_MACRO_addTypesToDict(d, WHEELUPMOUSE, SCA_IInputDevice::WHEELUPMOUSE);
   KX_MACRO_addTypesToDict(d, WHEELDOWNMOUSE, SCA_IInputDevice::WHEELDOWNMOUSE);
   KX_MACRO_addTypesToDict(d, MOUSEX, SCA_IInputDevice::MOUSEX);

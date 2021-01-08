@@ -21,6 +21,7 @@
 set(INC
   .
   intern
+  ../blenfont
   ../blenkernel
   ../blenlib
   ../blenloader
@@ -30,7 +31,6 @@ set(INC
   ../makesdna
   ../makesrna
   ../render
-  ../blenfont
   ../windowmanager
   ../../../intern/atomic
   ../../../intern/guardedalloc
@@ -44,18 +44,50 @@ set(INC_SYS
 )
 
 set(SRC
+  SEQ_add.h
+  SEQ_clipboard.h
+  SEQ_edit.h
+  SEQ_effects.h
+  SEQ_iterator.h
+  SEQ_modifier.h
+  SEQ_prefetch.h
+  SEQ_proxy.h
+  SEQ_relations.h
+  SEQ_render.h
+  SEQ_select.h
   SEQ_sequencer.h
+  SEQ_sound.h
+  SEQ_time.h
+  SEQ_transform.h
+  SEQ_utils.h
 
+  intern/clipboard.c
   intern/effects.c
+  intern/effects.h
   intern/image_cache.c
+  intern/image_cache.h
+  intern/iterator.c
   intern/modifier.c
+  intern/multiview.c
+  intern/multiview.h
   intern/prefetch.c
+  intern/prefetch.h
   intern/proxy.c
   intern/proxy.h
   intern/render.c
   intern/render.h
   intern/sequencer.c
   intern/sequencer.h
+  intern/sound.c
+  intern/strip_add.c
+  intern/strip_edit.c
+  intern/strip_relations.c
+  intern/strip_select.c
+  intern/strip_time.c
+  intern/strip_time.h
+  intern/strip_transform.c
+  intern/utils.c
+  intern/utils.h
 )
 
 set(LIB

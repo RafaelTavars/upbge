@@ -42,6 +42,7 @@
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
 #include "DNA_modifier_types.h"
+#include "DNA_object_force_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_texture_types.h"
@@ -76,9 +77,7 @@
 #include "IMB_imbuf.h"
 #include "IMB_imbuf_types.h"
 
-/* to read material/texture color */
-#include "RE_render_ext.h"
-#include "RE_shader_ext.h"
+#include "RE_texture.h"
 
 #include "atomic_ops.h"
 

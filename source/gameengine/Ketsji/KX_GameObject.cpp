@@ -52,6 +52,7 @@
 
 #include "BL_Action.h"
 #include "BL_ActionManager.h"
+#include "BL_BlenderSceneConverter.h"
 #include "CM_Message.h"
 #include "KX_Camera.h"        // only for their ::Type
 #include "KX_ClientObjectInfo.h"
@@ -84,10 +85,9 @@ static MT_Matrix3x3 dummy_orientation = MT_Matrix3x3(
 
 KX_GameObject::KX_GameObject(void *sgReplicationInfo, SG_Callbacks callbacks)
     : SCA_IObject(),
-      m_isReplica(false),           // eevee
-      m_staticObject(true),         // eevee
-      m_visibleAtGameStart(false),  // eevee
-      m_forceIgnoreParentTx(false), // eevee
+      m_isReplica(false),                // eevee
+      m_visibleAtGameStart(false),       // eevee
+      m_forceIgnoreParentTx(false),      // eevee
       m_layer(0),
       m_lodManager(nullptr),
       m_currentLodLevel(0),
@@ -175,6 +175,8 @@ KX_GameObject::~KX_GameObject()
       DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
     }
   }
+
+  GetScene()->GetBlenderSceneConverter()->UnregisterGameObject(this);
 
   /* END OF EEVEE INTEGRATION */
 
@@ -308,14 +310,14 @@ void KX_GameObject::TagForUpdate(bool is_overlay_pass)
 {
   float obmat[4][4];
   NodeGetWorldTransform().getValue(&obmat[0][0]);
-  m_staticObject = compare_m4m4(m_prevObmat, obmat, FLT_MIN);
+  bool staticObject = compare_m4m4(m_prevObmat, obmat, FLT_MIN);
 
   bContext *C = KX_GetActiveEngine()->GetContext();
   Main *bmain = CTX_data_main(C);
   Depsgraph *depsgraph = CTX_data_depsgraph_on_load(C);
 
-  if (m_staticObject) {
-    GetScene()->AppendToStaticObjects(this);
+  if (!staticObject) {
+    GetScene()->ResetTaaSamples();
   }
   Object *ob_orig = GetBlenderObject();
 
@@ -338,7 +340,7 @@ void KX_GameObject::TagForUpdate(bool is_overlay_pass)
     copy_m4_m4(ob_eval->obmat, obmat);
     BKE_object_apply_mat4(ob_eval, ob_eval->obmat, false, true);
 
-    if (!m_staticObject || m_forceIgnoreParentTx) {
+    if (!staticObject || m_forceIgnoreParentTx) {
       NodeList &children = m_pSGNode->GetSGChildren();
       if (children.size()) {
         IgnoreParentTxBGE(bmain, depsgraph, GetScene(), ob_orig);
@@ -347,12 +349,12 @@ void KX_GameObject::TagForUpdate(bool is_overlay_pass)
 
     if (applyTransformToOrig) {
       /* NORMAL CASE */
-      if (!m_staticObject && ob_orig->type != OB_MBALL) {
+      if (!staticObject && ob_orig->type != OB_MBALL) {
         DEG_id_tag_update(&ob_orig->id, ID_RECALC_TRANSFORM);
       }
       /* SPECIAL CASE: EXPERIMENTAL -> TEST METABALLS (incomplete) (TODO restore elems position at
        * ge exit) */
-      else if (!m_staticObject && ob_orig->type == OB_MBALL) {
+      else if (!staticObject && ob_orig->type == OB_MBALL) {
         if (!BKE_mball_is_basis(ob_orig)) {
           DEG_id_tag_update(&ob_orig->id, ID_RECALC_GEOMETRY);
         }
@@ -388,6 +390,7 @@ void KX_GameObject::ReplicateBlenderObject()
     Main *bmain = CTX_data_main(C);
     Object *newob;
     BKE_id_copy_ex(bmain, &ob->id, (ID **)&newob, 0);
+    id_us_min(&newob->id);
     Scene *scene = GetScene()->GetBlenderScene();
     ViewLayer *view_layer = BKE_view_layer_default_view(scene);
     BKE_collection_object_add_from(bmain,
@@ -420,6 +423,7 @@ void KX_GameObject::ReplicateBlenderObject()
     }
 
     DEG_relations_tag_update(bmain);
+    GetScene()->ResetTaaSamples();
 
     m_pBlenderObject = newob;
     m_isReplica = true;
@@ -431,17 +435,11 @@ void KX_GameObject::RemoveReplicaObject()
   if (ob && m_isReplica) {
     bContext *C = KX_GetActiveEngine()->GetContext();
     Main *bmain = CTX_data_main(C);
-    Scene *scene = GetScene()->GetBlenderScene();
-    BKE_scene_collections_object_remove(bmain, scene, ob, true);
-    BKE_id_free(bmain, &ob->id);
+    BKE_id_delete(bmain, ob);
     SetBlenderObject(nullptr);
+    GetScene()->ResetTaaSamples();
     DEG_relations_tag_update(bmain);
   }
-}
-
-bool KX_GameObject::IsStatic()
-{
-  return m_staticObject;
 }
 
 void KX_GameObject::HideOriginalObject()
@@ -452,11 +450,13 @@ void KX_GameObject::HideOriginalObject()
     Scene *scene = GetScene()->GetBlenderScene();
     ViewLayer *view_layer = BKE_view_layer_default_view(scene);
     Base *base = BKE_view_layer_base_find(view_layer, ob);
-    base->flag |= BASE_HIDDEN;
-    BKE_layer_collection_sync(scene, view_layer);
-    DEG_id_tag_update(&scene->id, ID_RECALC_BASE_FLAGS);
-    GetScene()->m_hiddenObjectsDuringRuntime.push_back(ob);
-    GetScene()->ResetTaaSamples();
+    if (base) { // As for SetVisible, there are cases (when we use bpy...) where Objects have no base.
+      base->flag |= BASE_HIDDEN;
+      BKE_layer_collection_sync(scene, view_layer);
+      DEG_id_tag_update(&scene->id, ID_RECALC_BASE_FLAGS);
+      GetScene()->m_hiddenObjectsDuringRuntime.push_back(ob);
+      GetScene()->ResetTaaSamples();
+    }
   }
 }
 
@@ -586,6 +586,11 @@ void KX_GameObject::AddDummyLodManager(RAS_MeshObject *meshObj, Object *ob)
 bool KX_GameObject::IsReplica()
 {
   return m_isReplica;
+}
+
+void KX_GameObject::SetIsReplicaObject()
+{
+  m_isReplica = true;
 }
 
 void KX_GameObject::BackupObmat(Object *ob)
@@ -895,6 +900,7 @@ void KX_GameObject::ProcessReplica()
   SCA_IObject::ProcessReplica();
 
   ReplicateBlenderObject();
+  GetScene()->GetBlenderSceneConverter()->RegisterGameObject(this, m_pBlenderObject);
 
   m_pPhysicsController = nullptr;
   m_pSGNode = nullptr;

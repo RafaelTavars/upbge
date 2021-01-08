@@ -24,6 +24,7 @@
 
 #include "BLI_utildefines.h"
 
+#include "DNA_collection_types.h"
 #include "DNA_object_types.h"
 
 #include "BKE_armature.h"
@@ -431,7 +432,7 @@ static void libblock_remap_data(
   }
 
   if (old_id && GS(old_id->name) == ID_OB) {
-    BKE_sca_logic_links_remap(bmain, (Object *)old_id, (Object *)new_id);
+    BKE_sca_remap_links_logicbricks(bmain, (Object *)old_id, (Object *)new_id);
   }
 
   id_us_clear_real(old_id);

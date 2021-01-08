@@ -87,20 +87,32 @@ bool SCA_MouseSensor::Evaluate()
   bool result = false;
   bool reset = m_reset && m_level;
   int previousval = m_val;
+  bool forceevent = false;
   SCA_IInputDevice *mousedev = ((SCA_MouseManager *)m_eventmgr)->GetInputDevice();
 
   m_reset = false;
   switch (m_mousemode) {
+    case KX_MOUSESENSORMODE_WHEELUP:
+    case KX_MOUSESENSORMODE_WHEELDOWN: {
+      forceevent = true;
+      /* pass-through */
+    }
     case KX_MOUSESENSORMODE_LEFTBUTTON:
     case KX_MOUSESENSORMODE_MIDDLEBUTTON:
     case KX_MOUSESENSORMODE_RIGHTBUTTON:
-    case KX_MOUSESENSORMODE_WHEELUP:
-    case KX_MOUSESENSORMODE_WHEELDOWN: {
+    case KX_MOUSESENSORMODE_BUTTON4:
+    case KX_MOUSESENSORMODE_BUTTON5:
+    case KX_MOUSESENSORMODE_BUTTON6:
+    case KX_MOUSESENSORMODE_BUTTON7: {
       static const SCA_IInputDevice::SCA_EnumInputs convertTable[KX_MOUSESENSORMODE_MAX] = {
           SCA_IInputDevice::NOKEY,          // KX_MOUSESENSORMODE_NODEF
           SCA_IInputDevice::LEFTMOUSE,      // KX_MOUSESENSORMODE_LEFTBUTTON
           SCA_IInputDevice::MIDDLEMOUSE,    // KX_MOUSESENSORMODE_MIDDLEBUTTON
           SCA_IInputDevice::RIGHTMOUSE,     // KX_MOUSESENSORMODE_RIGHTBUTTON
+          SCA_IInputDevice::BUTTON4MOUSE,   // KX_MOUSESENSORMODE_BUTTON4
+          SCA_IInputDevice::BUTTON5MOUSE,   // KX_MOUSESENSORMODE_BUTTON5
+          SCA_IInputDevice::BUTTON6MOUSE,   // KX_MOUSESENSORMODE_BUTTON6
+          SCA_IInputDevice::BUTTON7MOUSE,   // KX_MOUSESENSORMODE_BUTTON7
           SCA_IInputDevice::WHEELUPMOUSE,   // KX_MOUSESENSORMODE_WHEELUP
           SCA_IInputDevice::WHEELDOWNMOUSE  // KX_MOUSESENSORMODE_WHEELDOWN
       };
@@ -108,6 +120,9 @@ bool SCA_MouseSensor::Evaluate()
       const SCA_InputEvent &mevent = mousedev->GetInput(convertTable[m_mousemode]);
       if (mevent.Find(SCA_InputEvent::ACTIVE)) {
         m_val = 1;
+        if (forceevent) {
+          result = true;
+        }
       }
       else {
         m_val = 0;

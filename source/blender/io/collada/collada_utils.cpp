@@ -144,7 +144,8 @@ bool bc_set_parent(Object *ob, Object *par, bContext *C, bool is_parent_space)
     mul_m4_m4m4(ob->obmat, par->obmat, ob->obmat);
   }
 
-  bool ok = ED_object_parent_set(nullptr, C, scene, ob, par, partype, xmirror, keep_transform, nullptr);
+  bool ok = ED_object_parent_set(
+      nullptr, C, scene, ob, par, partype, xmirror, keep_transform, nullptr);
   return ok;
 }
 
@@ -378,11 +379,9 @@ void bc_match_scale(std::vector<Object *> *objects_done,
                     UnitConverter &bc_unit,
                     bool scale_to_scene)
 {
-  for (std::vector<Object *>::iterator it = objects_done->begin(); it != objects_done->end();
-       ++it) {
-    Object *ob = *it;
+  for (Object *ob : *objects_done) {
     if (ob->parent == nullptr) {
-      bc_match_scale(*it, bc_unit, scale_to_scene);
+      bc_match_scale(ob, bc_unit, scale_to_scene);
     }
   }
 }
@@ -523,10 +522,8 @@ BoneExtensionManager::~BoneExtensionManager()
   std::map<std::string, BoneExtensionMap *>::iterator map_it;
   for (map_it = extended_bone_maps.begin(); map_it != extended_bone_maps.end(); ++map_it) {
     BoneExtensionMap *extended_bones = map_it->second;
-    for (BoneExtensionMap::iterator ext_it = extended_bones->begin();
-         ext_it != extended_bones->end();
-         ++ext_it) {
-      delete ext_it->second;
+    for (auto &extended_bone : *extended_bones) {
+      delete extended_bone.second;
     }
     extended_bones->clear();
     delete extended_bones;
@@ -835,7 +832,9 @@ void bc_enable_fcurves(bAction *act, char *bone_name)
   char prefix[200];
 
   if (bone_name) {
-    BLI_snprintf(prefix, sizeof(prefix), "pose.bones[\"%s\"]", bone_name);
+    char bone_name_esc[sizeof(((Bone *)nullptr)->name) * 2];
+    BLI_str_escape(bone_name_esc, bone_name, sizeof(bone_name_esc));
+    BLI_snprintf(prefix, sizeof(prefix), "pose.bones[\"%s\"]", bone_name_esc);
   }
 
   for (fcu = (FCurve *)act->curves.first; fcu; fcu = fcu->next) {
@@ -1177,17 +1176,6 @@ static std::string bc_get_uvlayer_name(Mesh *me, int layer)
     }
   }
   return "";
-}
-
-std::string bc_find_bonename_in_path(std::string path, std::string probe)
-{
-  std::string result;
-  char *boneName = BLI_str_quoted_substrN(path.c_str(), probe.c_str());
-  if (boneName) {
-    result = std::string(boneName);
-    MEM_freeN(boneName);
-  }
-  return result;
 }
 
 static bNodeTree *prepare_material_nodetree(Material *ma)

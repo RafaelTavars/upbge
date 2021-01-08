@@ -97,7 +97,9 @@
 #include "BKE_unit.h"
 #include "BKE_workspace.h"
 
-#include "SEQ_sequencer.h"
+#include "SEQ_iterator.h"
+#include "SEQ_modifier.h"
+#include "SEQ_utils.h"
 
 /* Only for IMB_BlendMode */
 #include "IMB_imbuf.h"
@@ -965,7 +967,7 @@ static void do_version_curvemapping_walker(Main *bmain, void (*callback)(CurveMa
     if (scene->ed != NULL) {
       LISTBASE_FOREACH (Sequence *, seq, &scene->ed->seqbase) {
         LISTBASE_FOREACH (SequenceModifierData *, smd, &seq->modifiers) {
-          const SequenceModifierTypeInfo *smti = BKE_sequence_modifier_type_info_get(smd->type);
+          const SequenceModifierTypeInfo *smti = SEQ_modifier_type_info_get(smd->type);
 
           if (smti) {
             if (smd->type == seqModifierType_Curves) {
@@ -1785,7 +1787,7 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
 static void do_versions_seq_unique_name_all_strips(Scene *sce, ListBase *seqbasep)
 {
   for (Sequence *seq = seqbasep->first; seq != NULL; seq = seq->next) {
-    BKE_sequence_base_unique_name_recursive(&sce->ed->seqbase, seq);
+    SEQ_sequence_base_unique_name_recursive(&sce->ed->seqbase, seq);
     if (seq->seqbase.first != NULL) {
       do_versions_seq_unique_name_all_strips(sce, &seq->seqbase);
     }
@@ -3535,7 +3537,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
             }
             case SPACE_OUTLINER: {
               SpaceOutliner *space_outliner = (SpaceOutliner *)sl;
-              space_outliner->filter &= ~(SO_FILTER_UNUSED_1 | SO_FILTER_UNUSED_5 |
+              space_outliner->filter &= ~(SO_FILTER_CLEARED_1 | SO_FILTER_UNUSED_5 |
                                           SO_FILTER_OB_STATE_SELECTABLE);
               space_outliner->storeflag &= ~(SO_TREESTORE_UNUSED_1);
               break;
@@ -4987,7 +4989,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
               gps->fill_opacity_fac = 1.0f;
 
               /* Calc geometry data because in old versions this data was not saved. */
-              BKE_gpencil_stroke_geometry_update(gps);
+              BKE_gpencil_stroke_geometry_update(gpd, gps);
 
               srgb_to_linearrgb_v4(gps->vert_color_fill, gps->vert_color_fill);
               int i;

@@ -42,8 +42,8 @@ set(INC
 
 
 set(SRC
-  intern/bake_api.c
-  intern/external_engine.c
+  intern/bake.c
+  intern/engine.c
   intern/initrender.c
   intern/multires_bake.c
   intern/pipeline.c
@@ -57,13 +57,12 @@ set(SRC
   RE_engine.h
   RE_multires_bake.h
   RE_pipeline.h
-  RE_render_ext.h
-  RE_shader_ext.h
+  RE_texture.h
 
   intern/initrender.h
+  intern/pipeline.h
   intern/render_result.h
   intern/render_types.h
-  intern/pipeline.h
   intern/texture_common.h
   intern/zbuf.h
 )
@@ -101,14 +100,6 @@ endif()
 
 if(WITH_INTERNATIONAL)
   add_definitions(-DWITH_INTERNATIONAL)
-endif()
-
-if(APPLE)
-  # SSE math is enabled by default on x86_64
-  if(CMAKE_OSX_ARCHITECTURES MATCHES "i386")
-    string(APPEND CMAKE_C_FLAGS_RELEASE " -mfpmath=sse")
-    string(APPEND CMAKE_CXX_FLAGS_RELEASE " -mfpmath=sse")
-  endif()
 endif()
 
 

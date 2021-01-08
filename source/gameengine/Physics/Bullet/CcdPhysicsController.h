@@ -20,8 +20,8 @@
  *  \ingroup physbullet
  */
 
-#ifndef __CCDPHYSICSCONTROLLER_H__
-#define __CCDPHYSICSCONTROLLER_H__
+#pragma once
+
 
 #include <map>
 #include <vector>
@@ -521,6 +521,9 @@ class BlenderBulletCharacterController : public btKinematicCharacterController,
   virtual float GetFallSpeed() const;
   virtual void SetFallSpeed(float fallSpeed);
 
+  virtual float GetMaxSlope() const;
+  virtual void SetMaxSlope(float maxSlope);
+
   virtual float GetJumpSpeed() const;
   virtual void SetJumpSpeed(float jumpSpeed);
 
@@ -904,4 +907,3 @@ class DefaultMotionState : public PHY_IMotionState {
   btVector3 m_localScaling;
 };
 
-#endif /* __CCDPHYSICSCONTROLLER_H__ */

@@ -33,15 +33,10 @@
 #define USE_SETSCENE_CHECK
 
 #include "DNA_ID.h"
-#include "DNA_collection_types.h"
-#include "DNA_color_types.h" /* color management */
-#include "DNA_curveprofile_types.h"
+#include "DNA_color_types.h"      /* color management */
 #include "DNA_customdata_types.h" /* Scene's runtime cddata masks. */
-#include "DNA_freestyle_types.h"
 #include "DNA_layer_types.h"
 #include "DNA_listBase.h"
-#include "DNA_material_types.h"
-#include "DNA_userdef_types.h"
 #include "DNA_vec_types.h"
 #include "DNA_view3d_types.h"
 
@@ -323,8 +318,7 @@ typedef enum eScenePassType {
 
 #define RE_PASSNAME_FREESTYLE "Freestyle"
 #define RE_PASSNAME_BLOOM "BloomCol"
-#define RE_PASSNAME_VOLUME_TRANSMITTANCE "VolumeTransmCol"
-#define RE_PASSNAME_VOLUME_SCATTER "VolumeScatterCol"
+#define RE_PASSNAME_VOLUME_LIGHT "VolumeDir"
 
 /* View - MultiView */
 typedef struct SceneRenderView {
@@ -564,8 +558,9 @@ typedef struct BakeData {
   char normal_swizzle[3];
   char normal_space;
 
+  char target;
   char save_mode;
-  char _pad[7];
+  char _pad[6];
 
   struct Object *cage_object;
 } BakeData;
@@ -579,6 +574,12 @@ typedef enum eBakeNormalSwizzle {
   R_BAKE_NEGY = 4,
   R_BAKE_NEGZ = 5,
 } eBakeNormalSwizzle;
+
+/* BakeData.target (char) */
+typedef enum eBakeTarget {
+  R_BAKE_TARGET_IMAGE_TEXTURES = 0,
+  R_BAKE_TARGET_VERTEX_COLORS = 1,
+} eBakeTarget;
 
 /* BakeData.save_mode (char) */
 typedef enum eBakeSaveMode {
@@ -873,7 +874,8 @@ typedef struct GameData {
    * bit 5: (gameengine) : enable Bullet DBVT tree for view frustum culling
    */
   int flag;
-  short mode, matmode;
+  short mode;
+  short matmode DNA_DEPRECATED;
   short occlusionRes; /* resolution of occlusion Z buffer in pixel */
   short physicsEngine;
   short solverType, _pad[3];
@@ -881,7 +883,7 @@ typedef struct GameData {
   short pythonkeys[4];
   short vsync; /* Controls vsync: off, on, or adaptive (if supported) */
   short obstacleSimulation;
-  short raster_storage;
+  short raster_storage DNA_DEPRECATED;
   short ticrate, maxlogicstep, physubstep, maxphystep;
   float timeScale;
   float levelHeight;
@@ -922,12 +924,6 @@ enum {
 #define OBSTSIMULATION_TOI_rays 1
 #define OBSTSIMULATION_TOI_cells 2
 
-/* GameData.raster_storage */
-#define RAS_STORE_AUTO 0
-/* #define RAS_STORE_IMMEDIATE	1 */ /* DEPRECATED */
-#define RAS_STORE_VA 2
-#define RAS_STORE_VBO 3
-
 /* GameData.vsync */
 #define VSYNC_ON 0
 #define VSYNC_OFF 1
@@ -939,20 +935,20 @@ enum {
 #define GAME_SHOW_DEBUG_PROPS (1 << 2)
 #define GAME_SHOW_FRAMERATE (1 << 3)
 #define GAME_SHOW_PHYSICS (1 << 4)
-// #define GAME_DISPLAY_LISTS					(1 << 5)   /* deprecated */
-#define GAME_GLSL_NO_LIGHTS (1 << 6)
-#define GAME_GLSL_NO_SHADERS (1 << 7)
-#define GAME_GLSL_NO_SHADOWS (1 << 8)
-#define GAME_GLSL_NO_RAMPS (1 << 9)
-#define GAME_GLSL_NO_NODES (1 << 10)
-#define GAME_GLSL_NO_EXTRA_TEX (1 << 11)
+// #define GAME_DISPLAY_LISTS (1 << 5) /* deprecated */
+// #define GAME_GLSL_NO_LIGHTS (1 << 6) /* deprecated */
+// #define GAME_GLSL_NO_SHADERS (1 << 7) /* deprecated */
+// #define GAME_GLSL_NO_SHADOWS (1 << 8) /* deprecated */
+// #define GAME_GLSL_NO_RAMPS (1 << 9) /* deprecated */
+// #define GAME_GLSL_NO_NODES (1 << 10) /* deprecated */
+// #define GAME_GLSL_NO_EXTRA_TEX (1 << 11) /* deprecated */
 #define GAME_IGNORE_DEPRECATION_WARNINGS (1 << 12)
 #define GAME_ENABLE_ANIMATION_RECORD (1 << 13)
 #define GAME_SHOW_MOUSE (1 << 14)
-#define GAME_GLSL_NO_COLOR_MANAGEMENT (1 << 15)
+// #define GAME_GLSL_NO_COLOR_MANAGEMENT (1 << 15) /* deprecated */
 #define GAME_SHOW_OBSTACLE_SIMULATION (1 << 16)
-#define GAME_NO_MATERIAL_CACHING (1 << 17)
-#define GAME_GLSL_NO_ENV_LIGHTING (1 << 18)
+// #define GAME_NO_MATERIAL_CACHING (1 << 17) /* deprecated */
+// #define GAME_GLSL_NO_ENV_LIGHTING (1 << 18) /* deprecated */
 #define GAME_USE_UNDO (1 << 19)
 // #define GAME_USE_UI_ANTI_FLICKER (1 << 20) /* deprecated */
 #define GAME_USE_VIEWPORT_RENDER (1 << 21)
@@ -962,15 +958,6 @@ enum {
 /* GameData.playerflag */
 #define GAME_PLAYER_FULLSCREEN (1 << 0)
 #define GAME_PLAYER_DESKTOP_RESOLUTION (1 << 1)
-
-/* GameData.matmode */
-enum {
-#ifdef DNA_DEPRECATED
-  GAME_MAT_TEXFACE = 0, /* deprecated */
-#endif
-  GAME_MAT_MULTITEX = 1,
-  GAME_MAT_GLSL = 2,
-};
 
 /* GameData.lodflag */
 #define SCE_LOD_USE_HYST (1 << 0)
@@ -1255,7 +1242,7 @@ typedef struct GP_Sculpt_Settings {
   int lock_axis;
   /** Threshold for intersections */
   float isect_threshold;
-  char _pad_[4];
+  char _pad[4];
   /** Multiframe edit falloff effect by frame. */
   struct CurveMapping *cur_falloff;
   /** Curve used for primitive tools. */
@@ -1510,6 +1497,18 @@ typedef struct MeshStatVis {
   float sharp_min, sharp_max;
 } MeshStatVis;
 
+typedef struct SequencerToolSettings {
+  /* eSeqImageFitMethod */
+  int fit_method;
+} SequencerToolSettings;
+
+typedef enum eSeqImageFitMethod {
+  SEQ_SCALE_TO_FIT,
+  SEQ_SCALE_TO_FILL,
+  SEQ_STRETCH_TO_FILL,
+  SEQ_USE_ORIGINAL_SIZE,
+} eSeqImageFitMethod;
+
 /* *************************************************************** */
 /* Tool Settings */
 
@@ -1684,6 +1683,9 @@ typedef struct ToolSettings {
    * Temporary until there is a proper preset system that stores the profiles or maybe stores
    * entire bevel configurations. */
   struct CurveProfile *custom_bevel_profile_preset;
+
+  struct SequencerToolSettings *sequencer_tool_settings;
+
 } ToolSettings;
 
 /* *************************************************************** */
@@ -1951,7 +1953,7 @@ typedef struct Scene {
 
   ListBase view_layers;
   /* Not an actual datablock, but memory owned by scene. */
-  Collection *master_collection;
+  struct Collection *master_collection;
   struct SceneCollection *collection DNA_DEPRECATED;
 
   /** Settings to be override by workspaces. */
@@ -2296,6 +2298,7 @@ typedef enum eVGroupSelect {
 #define SCE_READFILE_LIBLINK_NEED_SETSCENE_CHECK (1 << 5)
 #define SCE_INTERACTIVE (1 << 6)
 #define SCE_IS_BLENDERPLAYER (1 << 7)
+#define SCE_IS_GAME_XR_SESSION (1 << 8)
 
 /* return flag BKE_scene_base_iter_next functions */
 /* #define F_ERROR          -1 */ /* UNUSED */
@@ -2377,7 +2380,7 @@ typedef enum eSculptFlags {
   SCULPT_HIDE_MASK = (1 << 15),
 
   /* Don't display face sets in viewport. */
-  SCULPT_HIDE_FACE_SETS = (1 << 16),
+  SCULPT_HIDE_FACE_SETS = (1 << 17),
 } eSculptFlags;
 
 /* ImagePaintSettings.mode */
@@ -2445,6 +2448,8 @@ typedef enum eGPencil_Flags {
   GP_TOOL_FLAG_THUMBNAIL_LIST = (1 << 3),
   /* Generate wheight data for new strokes */
   GP_TOOL_FLAG_CREATE_WEIGHTS = (1 << 4),
+  /* Automerge with last stroke */
+  GP_TOOL_FLAG_AUTOMERGE_STROKE = (1 << 5),
 } eGPencil_Flags;
 
 /* scene->r.simplify_gpencil */

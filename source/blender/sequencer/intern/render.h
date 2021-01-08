@@ -27,12 +27,17 @@
 extern "C" {
 #endif
 
-struct Editing;
 struct ImBuf;
 struct ListBase;
 struct Scene;
+struct SeqEffectHandle;
 struct SeqRenderData;
 struct Sequence;
+
+#define EARLY_NO_INPUT -1
+#define EARLY_DO_EFFECT 0
+#define EARLY_USE_INPUT_1 1
+#define EARLY_USE_INPUT_2 2
 
 /* mutable state for sequencer */
 typedef struct SeqRenderState {
@@ -46,7 +51,7 @@ struct ImBuf *seq_render_give_ibuf_seqbase(const struct SeqRenderData *context,
                                            int chan_shown,
                                            struct ListBase *seqbasep);
 struct ImBuf *seq_render_effect_execute_threaded(struct SeqEffectHandle *sh,
-                                                 const SeqRenderData *context,
+                                                 const struct SeqRenderData *context,
                                                  struct Sequence *seq,
                                                  float timeline_frame,
                                                  float facf0,
@@ -55,7 +60,6 @@ struct ImBuf *seq_render_effect_execute_threaded(struct SeqEffectHandle *sh,
                                                  struct ImBuf *ibuf2,
                                                  struct ImBuf *ibuf3);
 void seq_imbuf_to_sequencer_space(struct Scene *scene, struct ImBuf *ibuf, bool make_float);
-float seq_give_frame_index(struct Sequence *seq, float timeline_frame);
 int seq_get_shown_sequences(struct ListBase *seqbasep,
                             int timeline_frame,
                             int chanshown,

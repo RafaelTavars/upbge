@@ -3,8 +3,8 @@
  *  \ingroup phys
  */
 
-#ifndef __PHY_ICHARACTER_H__
-#define __PHY_ICHARACTER_H__
+#pragma once
+
 
 // PHY_ICharacter provides a generic interface for "character" controllers
 
@@ -31,6 +31,9 @@ class PHY_ICharacter {
   virtual float GetFallSpeed() const = 0;
   virtual void SetFallSpeed(float fallSpeed) = 0;
 
+  virtual float GetMaxSlope() const = 0;
+  virtual void SetMaxSlope(float maxSlope) = 0;
+
   virtual float GetJumpSpeed() const = 0;
   virtual void SetJumpSpeed(float jumpSpeed) = 0;
 
@@ -39,4 +42,3 @@ class PHY_ICharacter {
   virtual void Reset() = 0;
 };
 
-#endif  //__PHY_ICHARACTER_H__

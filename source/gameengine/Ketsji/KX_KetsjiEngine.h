@@ -30,8 +30,8 @@
  *  \ingroup ketsji
  */
 
-#ifndef __KX_KETSJIENGINE_H__
-#define __KX_KETSJIENGINE_H__
+#pragma once
+
 
 #include <string>
 #include <vector>
@@ -128,7 +128,11 @@ class KX_KetsjiEngine {
     std::vector<SceneRenderData> m_sceneDataList;
   };
 
+  /***************EEVEE INTEGRATION*****************/
   struct bContext *m_context;
+  bool m_useViewportRender;
+  int m_shadingTypeRuntime;
+  /*************************************************/
 
   /// 2D Canvas (2D Rendering Device Context)
   RAS_ICanvas *m_canvas;
@@ -271,16 +275,18 @@ class KX_KetsjiEngine {
   void BeginFrame();
 
  public:
-  KX_KetsjiEngine(KX_ISystem *system, struct bContext *C);
+  KX_KetsjiEngine(KX_ISystem *system, struct bContext *C, bool useViewportRender, int shadingTypeRuntime);
   virtual ~KX_KetsjiEngine();
 
-  /* EEVEE integration */
+  /******** EEVEE integration *********/
   struct bContext *GetContext();
+  bool UseViewportRender();
+  int ShadingTypeRuntime();
   // include depsgraph time in tc_depsgraph category
   void CountDepsgraphTime();
   void EndCountDepsgraphTime();
   void EndFrameViewportRender();
-  /* End of EEVEE integration */
+  /***** End of EEVEE integration *****/
 
   void EndFrame();
 
@@ -481,4 +487,3 @@ class KX_KetsjiEngine {
   void Resize();
 };
 
-#endif /* __KX_KETSJIENGINE_H__ */

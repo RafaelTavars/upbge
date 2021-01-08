@@ -38,11 +38,6 @@
 #  endif /* __alpha__ */
 #endif   /* __linux__ */
 
-#include "../../../intern/clog/CLG_log.h"
-#include "../../../intern/ghost/GHOST_Path-api.h"
-#include "../../blender/python/BPY_extern_python.h"
-#include "../../blender/python/BPY_extern_run.h"
-#include "../render/RE_render_ext.h"
 #include "BKE_addon.h"
 #include "BKE_appdir.h"
 #include "BKE_blender.h"
@@ -82,41 +77,47 @@
 #include "BLO_readfile.h"
 #include "BLO_runtime.h"
 #include "BLT_lang.h"
+#include "BPY_extern_python.h"
+#include "BPY_extern_run.h"
+#include "CLG_log.h"
 #include "DEG_depsgraph.h"
 #include "DNA_genfile.h"
 #include "DNA_space_types.h"
+#include "DRW_engine.h"
+#include "ED_datafiles.h"
+#include "ED_gpencil.h"
+#include "ED_keyframes_edit.h"
+#include "ED_keyframing.h"
+#include "ED_render.h"
+#include "ED_screen.h"
+#include "ED_space_api.h"
+#include "ED_undo.h"
+#include "ED_util.h"
 #include "GHOST_ISystem.h"
+#include "GHOST_Path-api.h"
 #include "GPU_context.h"
 #include "GPU_init_exit.h"
 #include "GPU_material.h"
 #include "IMB_imbuf.h"
 #include "MEM_CacheLimiterC-Api.h"
 #include "MEM_guardedalloc.h"
+#include "RE_engine.h"
+#include "RE_pipeline.h"
+#include "RE_texture.h"
 #include "RNA_define.h"
-#include "SEQ_sequencer.h"
-#include "draw/DRW_engine.h"
-#include "editors/include/ED_datafiles.h"
-#include "editors/include/ED_gpencil.h"
-#include "editors/include/ED_keyframes_edit.h"
-#include "editors/include/ED_keyframing.h"
-#include "editors/include/ED_render.h"
-#include "editors/include/ED_screen.h"
-#include "editors/include/ED_space_api.h"
-#include "editors/include/ED_undo.h"
-#include "editors/include/ED_util.h"
-#include "editors/include/UI_interface.h"
-#include "editors/include/UI_resources.h"
-#include "render/RE_engine.h"
-#include "render/RE_pipeline.h"
-#include "windowmanager/WM_api.h"
-#include "windowmanager/message_bus/wm_message_bus.h"
-#include "windowmanager/wm.h"
-#include "windowmanager/wm_event_system.h"
-#include "windowmanager/wm_surface.h"
-#include "windowmanager/wm_window.h"
+#include "SEQ_clipboard.h"
+#include "UI_interface.h"
+#include "UI_resources.h"
+#include "wm.h"
+#include "WM_api.h"
+#include "wm_event_system.h"
+#include "wm_message_bus.h"
+#include "wm_surface.h"
+#include "wm_window.h"
 
 #include "CM_Message.h"
 #include "KX_Globals.h"
+#include "KX_PythonInit.h"
 #include "LA_PlayerLauncher.h"
 #include "LA_SystemCommandLine.h"
 
@@ -701,6 +702,17 @@ static void InitBlenderContextVariables(bContext *C, wmWindowManager *wm, Scene 
   }
 }
 
+static int GetShadingTypeRuntime(bContext *C)
+{
+  View3D *v3d = CTX_wm_view3d(C);
+  bool not_eevee = (v3d->shading.type != OB_RENDER) && (v3d->shading.type != OB_MATERIAL);
+
+  if (not_eevee) {
+    return OB_RENDER;
+  }
+  return v3d->shading.type;
+}
+
 int main(int argc,
 #ifdef WIN32
          char **UNUSED(argv_c)
@@ -924,7 +936,9 @@ int main(int argc,
   }
 #endif
   UI_theme_init_default();
-  U = *BKE_blendfile_userdef_from_defaults();
+
+  UserDef *user_def = BKE_blendfile_userdef_from_defaults();
+  BKE_blender_userdef_data_set_and_free(user_def);
 
   BKE_sound_init_once();
 
@@ -1261,7 +1275,13 @@ int main(int argc,
 
         DRW_engines_register();
 
+#ifdef WITH_PYTHON
+        initGamePlayerPythonScripting(argc, argv, C);
+#endif
+        /* Set Viewport render mode and shading type for the whole runtime */
         bool first_time_window = true;
+        int shadingTypeRuntime = 0;
+        bool useViewportRender = false;
 
         do {
           // Read the Blender file
@@ -1530,11 +1550,19 @@ int main(int argc,
             CTX_wm_window_set(C, win);
             InitBlenderContextVariables(C, wm, bfd->curscene);
             wm_window_ghostwindow_blenderplayer_ensure(wm, win, window, first_time_window);
+
+            /* The following is needed to run some bpy operators in blenderplayer */
+            ED_screen_refresh_blenderplayer(wm, win);
+
             if (first_time_window) {
               /* We need to have first an ogl context bound and it's done
                * in wm_window_ghostwindow_blenderplayer_ensure.
                */
               WM_init_opengl_blenderplayer(G_MAIN, system, win);
+
+              /* Set Viewport render mode and shading type for the whole runtime */
+              useViewportRender = scene->gm.flag & GAME_USE_VIEWPORT_RENDER;
+              shadingTypeRuntime = GetShadingTypeRuntime(C);
             }
             first_time_window = false;
 
@@ -1549,7 +1577,9 @@ int main(int argc,
                                        argc,
                                        argv,
                                        pythonControllerFile,
-                                       C);
+                                       C,
+                                       useViewportRender,
+                                       shadingTypeRuntime);
 #ifdef WITH_PYTHON
             if (!globalDict) {
               globalDict = PyDict_New();
@@ -1585,11 +1615,10 @@ int main(int argc,
            * these are not called in the player but we need to match some of there behavior here,
            * if the order of function calls or blenders state isn't matching that of blender
            * proper, we may get troubles later on */
-          WM_jobs_kill_all(CTX_wm_manager(C));
+          wmWindowManager *wm = CTX_wm_manager(C);
+          WM_jobs_kill_all(wm);
 
-          for (wmWindow *win = (wmWindow *)CTX_wm_manager(C)->windows.first; win;
-               win = win->next) {
-
+          LISTBASE_FOREACH (wmWindow *, win, &wm->windows) {
             CTX_wm_window_set(C, win); /* needed by operator close callbacks */
             WM_event_remove_handlers(C, &win->handlers);
             WM_event_remove_handlers(C, &win->modalhandlers);
@@ -1650,7 +1679,7 @@ int main(int argc,
     wm_free_reports(C);
   }
 
-  BKE_sequencer_free_clipboard(); /* sequencer.c */
+  SEQ_clipboard_free(); /* sequencer.c */
   BKE_tracking_clipboard_free();
   BKE_mask_clipboard_free();
   BKE_vfont_clipboard_free();
@@ -1741,6 +1770,7 @@ int main(int argc,
    * pieces of Blender using sound may exit cleanly, see also T50676. */
   BKE_sound_exit();
 
+  BKE_appdir_exit();
   CLG_exit();
 
   BKE_blender_atexit();

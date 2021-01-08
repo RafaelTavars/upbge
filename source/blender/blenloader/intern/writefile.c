@@ -93,6 +93,7 @@
 /* allow writefile to use deprecated functionality (for forward compatibility code) */
 #define DNA_DEPRECATED_ALLOW
 
+#include "DNA_collection_types.h"
 #include "DNA_fileglobal_types.h"
 #include "DNA_genfile.h"
 #include "DNA_sdna_types.h"
@@ -755,6 +756,10 @@ static void write_userdef(BlendWriter *writer, const UserDef *userdef)
     BLO_write_struct(writer, bPathCompare, path_cmp);
   }
 
+  LISTBASE_FOREACH (const bUserAssetLibrary *, asset_library, &userdef->asset_libraries) {
+    BLO_write_struct(writer, bUserAssetLibrary, asset_library);
+  }
+
   LISTBASE_FOREACH (const uiStyle *, style, &userdef->uistyles) {
     BLO_write_struct(writer, uiStyle, style);
   }
@@ -938,7 +943,7 @@ static bool write_file_handle(Main *mainvar,
   write_thumb(wd, thumb);
   write_global(wd, write_flags, mainvar);
 
-  /* The windowmanager and screen often change,
+  /* The window-manager and screen often change,
    * avoid thumbnail detecting changes because of this. */
   mywrite_flush(wd);
 
@@ -1370,6 +1375,11 @@ void BLO_write_uint32_array(BlendWriter *writer, uint num, const uint32_t *data_
 void BLO_write_float_array(BlendWriter *writer, uint num, const float *data_ptr)
 {
   BLO_write_raw(writer, sizeof(float) * (size_t)num, data_ptr);
+}
+
+void BLO_write_double_array(BlendWriter *writer, uint num, const double *data_ptr)
+{
+  BLO_write_raw(writer, sizeof(double) * (size_t)num, data_ptr);
 }
 
 void BLO_write_pointer_array(BlendWriter *writer, uint num, const void *data_ptr)

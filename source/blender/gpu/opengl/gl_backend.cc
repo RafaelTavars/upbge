@@ -130,6 +130,13 @@ void GLBackend::platform_init()
         GPG.support_level = GPU_SUPPORT_LEVEL_LIMITED;
       }
     }
+    if (GPU_type_matches(GPU_DEVICE_ATI, GPU_OS_UNIX, GPU_DRIVER_ANY)) {
+      /* Platform seems to work when SB backend is disabled. This can be done
+       * by adding the environment variable `R600_DEBUG=nosb`. */
+      if (strstr(renderer, "AMD CEDAR")) {
+        GPG.support_level = GPU_SUPPORT_LEVEL_LIMITED;
+      }
+    }
   }
   GPG.create_key(GPG.support_level, vendor, renderer, version);
   GPG.create_gpu_name(vendor, renderer, version);
@@ -227,10 +234,6 @@ static void detect_workarounds()
     return;
   }
 
-  /* Some Intel drivers have issues with using mips as framebuffer targets if
-   * GL_TEXTURE_MAX_LEVEL is higher than the target mip.
-   * Only check at the end after all other workarounds because this uses the drawing code. */
-  GCaps.mip_render_workaround = detect_mip_render_workaround();
   /* Limit support for GLEW_ARB_base_instance to OpenGL 4.0 and higher. NVIDIA Quadro FX 4800
    * (TeraScale) report that they support GLEW_ARB_base_instance, but the driver does not support
    * GLEW_ARB_draw_indirect as it has an OpenGL3 context what also matches the minimum needed
@@ -251,6 +254,7 @@ static void detect_workarounds()
       (strstr(version, "4.5.13399") || strstr(version, "4.5.13417") ||
        strstr(version, "4.5.13422"))) {
     GLContext::unused_fb_slot_workaround = true;
+    GCaps.mip_render_workaround = true;
     GCaps.shader_image_load_store_support = false;
     GCaps.broken_amd_driver = true;
   }
@@ -266,6 +270,23 @@ static void detect_workarounds()
       strstr(version, "Mesa 19.3.4")) {
     GCaps.shader_image_load_store_support = false;
     GCaps.broken_amd_driver = true;
+  }
+  /* See T82856: AMD drivers since 20.11 running on a polaris architecture doesn't support the
+   * `GL_INT_2_10_10_10_REV` data type. This data type is used to pack normals. The work around
+   * uses `GPU_RGBA16I`.*/
+  if (GPU_type_matches(GPU_DEVICE_ATI, GPU_OS_ANY, GPU_DRIVER_OFFICIAL)) {
+    if (strstr(version, " 20.11.2") || strstr(version, " 20.11.3 ") ||
+        strstr(version, " 20.12.")) {
+      if (strstr(renderer, " RX 460 ") || strstr(renderer, " RX 470 ") ||
+          strstr(renderer, " RX 480 ") || strstr(renderer, " RX 490 ") ||
+          strstr(renderer, " RX 560 ") || strstr(renderer, " RX 560X ") ||
+          strstr(renderer, " RX 570 ") || strstr(renderer, " RX 580 ") ||
+          strstr(renderer, " RX 590 ") || strstr(renderer, " RX550/550 ") ||
+          strstr(renderer, " (TM) 520  ") || strstr(renderer, " (TM) 530  ") ||
+          strstr(renderer, " R5 ") || strstr(renderer, " R7 ") || strstr(renderer, " R9 ")) {
+        GCaps.use_hq_normals_workaround = true;
+      }
+    }
   }
   /* There is an issue with the #glBlitFramebuffer on MacOS with radeon pro graphics.
    * Blitting depth with#GL_DEPTH24_STENCIL8 is buggy so the workaround is to use
@@ -342,6 +363,13 @@ static void detect_workarounds()
     }
   }
 
+  /* Some Intel drivers have issues with using mips as framebuffer targets if
+   * GL_TEXTURE_MAX_LEVEL is higher than the target mip.
+   * Only check at the end after all other workarounds because this uses the drawing code.
+   * Also after device/driver flags to avoid the check that causes pre GCN Radeon to crash. */
+  if (GCaps.mip_render_workaround == false) {
+    GCaps.mip_render_workaround = detect_mip_render_workaround();
+  }
   /* Disable multidraw if the base instance cannot be read. */
   if (GLContext::shader_draw_parameters_support == false) {
     GLContext::multi_draw_indirect_support = false;

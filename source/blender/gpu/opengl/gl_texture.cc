@@ -489,7 +489,7 @@ void GLTexture::samplers_init()
      * - GL_TEXTURE_MIN_LOD is -1000.
      * - GL_TEXTURE_MAX_LOD is 1000.
      * - GL_TEXTURE_LOD_BIAS is 0.0f.
-     **/
+     */
 
     char sampler_name[128] = "\0\0";
     SNPRINTF(sampler_name,
@@ -634,10 +634,12 @@ bool GLTexture::proxy_check(int mip)
         glTexImage1D(gl_proxy, mip, internal_format, size[0], 0, gl_format, gl_type, nullptr);
         break;
       case 2:
-        glTexImage2D(gl_proxy, mip, internal_format, UNPACK2(size), 0, gl_format, gl_type, nullptr);
+        glTexImage2D(
+            gl_proxy, mip, internal_format, UNPACK2(size), 0, gl_format, gl_type, nullptr);
         break;
       case 3:
-        glTexImage3D(gl_proxy, mip, internal_format, UNPACK3(size), 0, gl_format, gl_type, nullptr);
+        glTexImage3D(
+            gl_proxy, mip, internal_format, UNPACK3(size), 0, gl_format, gl_type, nullptr);
         break;
     }
   }

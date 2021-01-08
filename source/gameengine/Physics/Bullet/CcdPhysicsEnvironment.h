@@ -21,8 +21,8 @@
  *  See also \ref bulletdoc
  */
 
-#ifndef __CCDPHYSICSENVIRONMENT_H__
-#define __CCDPHYSICSENVIRONMENT_H__
+#pragma once
+
 
 #include <map>
 #include <set>
@@ -289,7 +289,6 @@ class CcdPhysicsEnvironment : public PHY_IPhysicsEnvironment {
                              RAS_MeshObject *meshobj,
                              DerivedMesh *dm,
                              KX_Scene *kxscene,
-                             PHY_ShapeProps *shapeprops,
                              PHY_IMotionState *motionstate,
                              int activeLayerBitInfo,
                              bool isCompoundChild,
@@ -349,4 +348,3 @@ class CcdCollData : public PHY_CollData {
   virtual float GetAppliedImpulse(unsigned int index, bool first) const;
 };
 
-#endif /* __CCDPHYSICSENVIRONMENT_H__ */

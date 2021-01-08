@@ -127,7 +127,7 @@ static void rna_def_light(BlenderRNA *brna)
 
   prop = RNA_def_property(srna, "type", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, rna_enum_light_type_items);
-  RNA_def_property_ui_text(prop, "Type", "Type of Light");
+  RNA_def_property_ui_text(prop, "Type", "Type of light");
   RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_ID_LIGHT);
   RNA_def_property_update(prop, 0, "rna_Light_draw_update");
 
@@ -372,6 +372,12 @@ static void rna_def_light_shadow(StructRNA *srna, bool sun)
   RNA_def_property_ui_range(prop, 0, 100, 0.1, 3);
   RNA_def_property_ui_text(
       prop, "Contact Shadow Thickness", "Pixel thickness used to detect occlusion");
+  RNA_def_property_update(prop, 0, "rna_Light_update");
+
+  /* Soft shadow per light -- UPBGE */
+  prop = RNA_def_property(srna, "use_soft_shadows", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "mode", LA_SOFT_SHADOWS);
+  RNA_def_property_ui_text(prop, "Use soft shadows", "Use soft shadows for this light");
   RNA_def_property_update(prop, 0, "rna_Light_update");
 
   if (sun) {

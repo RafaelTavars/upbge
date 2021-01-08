@@ -678,9 +678,6 @@ static int arg_handle_print_help(int UNUSED(argc), const char **UNUSED(argv), vo
 #  else
   printf("  $TMP or $TMPDIR           Store temporary files here.\n");
 #  endif
-#  ifdef WITH_SDL
-  printf("  $SDL_AUDIODRIVER          LibSDL audio driver - alsa, esd, dma.\n");
-#  endif
 
   exit(0);
 
@@ -1093,7 +1090,7 @@ static int arg_handle_debug_value_set(int argc, const char **argv, void *UNUSED(
 
 static const char arg_handle_debug_fpe_set_doc[] =
     "\n\t"
-    "Enable floating point exceptions.";
+    "Enable floating-point exceptions.";
 static int arg_handle_debug_fpe_set(int UNUSED(argc),
                                     const char **UNUSED(argv),
                                     void *UNUSED(data))

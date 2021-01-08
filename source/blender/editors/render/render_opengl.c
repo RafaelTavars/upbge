@@ -77,7 +77,7 @@
 #include "RNA_access.h"
 #include "RNA_define.h"
 
-#include "SEQ_sequencer.h"
+#include "SEQ_render.h"
 
 #include "GPU_framebuffer.h"
 #include "GPU_matrix.h"
@@ -494,7 +494,7 @@ static void screen_opengl_render_apply(const bContext *C, OGLRender *oglrender)
                                scene,
                                oglrender->sizex,
                                oglrender->sizey,
-                               100,
+                               SEQ_RENDER_SIZE_SCENE,
                                false,
                                &context);
 

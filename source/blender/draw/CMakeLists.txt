@@ -80,6 +80,7 @@ set(SRC
   engines/image/image_engine.c
   engines/image/image_shader.c
   engines/eevee/eevee_bloom.c
+  engines/eevee/eevee_cryptomatte.c
   engines/eevee/eevee_data.c
   engines/eevee/eevee_depth_of_field.c
   engines/eevee/eevee_effects.c
@@ -254,6 +255,7 @@ data_to_c_simple(engines/eevee/shaders/bsdf_sampling_lib.glsl SRC)
 data_to_c_simple(engines/eevee/shaders/raytrace_lib.glsl SRC)
 data_to_c_simple(engines/eevee/shaders/renderpass_lib.glsl SRC)
 data_to_c_simple(engines/eevee/shaders/renderpass_postprocess_frag.glsl SRC)
+data_to_c_simple(engines/eevee/shaders/cryptomatte_frag.glsl SRC)
 data_to_c_simple(engines/eevee/shaders/ltc_lib.glsl SRC)
 data_to_c_simple(engines/eevee/shaders/ssr_lib.glsl SRC)
 data_to_c_simple(engines/eevee/shaders/surface_frag.glsl SRC)
@@ -381,6 +383,8 @@ data_to_c_simple(engines/overlay/shaders/edit_uv_verts_vert.glsl SRC)
 data_to_c_simple(engines/overlay/shaders/edit_uv_verts_frag.glsl SRC)
 data_to_c_simple(engines/overlay/shaders/edit_uv_faces_vert.glsl SRC)
 data_to_c_simple(engines/overlay/shaders/edit_uv_face_dots_vert.glsl SRC)
+data_to_c_simple(engines/overlay/shaders/edit_uv_image_vert.glsl SRC)
+data_to_c_simple(engines/overlay/shaders/edit_uv_image_mask_frag.glsl SRC)
 data_to_c_simple(engines/overlay/shaders/edit_uv_stretching_vert.glsl SRC)
 data_to_c_simple(engines/overlay/shaders/edit_uv_tiled_image_borders_vert.glsl SRC)
 data_to_c_simple(engines/overlay/shaders/extra_frag.glsl SRC)

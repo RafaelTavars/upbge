@@ -41,6 +41,7 @@
 #include "BKE_screen.h"
 #include "BLI_task.h"
 #include "BLI_threads.h"
+#include "DNA_collection_types.h"
 #include "DNA_property_types.h"
 #include "DRW_render.h"
 #include "ED_screen.h"
@@ -130,8 +131,6 @@ KX_Scene::KX_Scene(SCA_IInputDevice *inputDevice,
       m_resetTaaSamples(false),               // eevee
       m_lastReplicatedParentObject(nullptr),  // eevee
       m_gameDefaultCamera(nullptr),           // eevee
-      m_shadingTypeBackup(0),                 // eevee
-      m_shadingFlagBackup(0),                 // eevee
       m_currentGPUViewport(nullptr),          // eevee
       m_initMaterialsGPUViewport(nullptr),    // eevee (See comment in .h)
       m_overlayCamera(nullptr),               // eevee (For overlay collections)
@@ -204,15 +203,14 @@ KX_Scene::KX_Scene(SCA_IInputDevice *inputDevice,
 
 #ifdef WITH_PYTHON
   m_attr_dict = nullptr;
+  m_removeCallbacks = nullptr;
 
   for (unsigned short i = 0; i < MAX_DRAW_CALLBACK; ++i) {
     m_drawCallbacks[i] = nullptr;
   }
 #endif
 
-  /*************************************************EEVEE
-   * INTEGRATION***********************************************************/
-  m_staticObjects = {};
+  /**************EEVEE INTEGRATION******************/
   m_kxobWithLod = {};
   m_obRestrictFlags = {};
 
@@ -220,13 +218,14 @@ KX_Scene::KX_Scene(SCA_IInputDevice *inputDevice,
   Main *bmain = CTX_data_main(C);
   ViewLayer *view_layer = BKE_view_layer_default_view(scene);
 
-  m_gameDefaultCamera = BKE_object_add_only_object(bmain, OB_CAMERA, "game_default_cam");
-  m_gameDefaultCamera->data = BKE_object_obdata_add_from_type(bmain, OB_CAMERA, NULL);
-  LayerCollection *layer_collection = BKE_layer_collection_get_active(view_layer);
-  BKE_collection_object_add(bmain, layer_collection->collection, m_gameDefaultCamera);
-  Base *defaultCamBase = BKE_view_layer_base_find(view_layer, m_gameDefaultCamera);
-  defaultCamBase->flag |= BASE_HIDDEN;
-  DEG_relations_tag_update(bmain);
+  if (CTX_wm_region_view3d(C)->persp != RV3D_CAMOB) {
+    m_gameDefaultCamera = BKE_object_add_only_object(bmain, OB_CAMERA, "game_default_cam");
+    m_gameDefaultCamera->data = BKE_object_obdata_add_from_type(bmain, OB_CAMERA, NULL);
+    BKE_collection_object_add(bmain, scene->master_collection, m_gameDefaultCamera);
+    Base *defaultCamBase = BKE_view_layer_base_find(view_layer, m_gameDefaultCamera);
+    defaultCamBase->flag |= BASE_HIDDEN;
+    DEG_relations_tag_update(bmain);
+  }
 
   m_overlay_collections = {};
   m_imageRenderCameraList = {};
@@ -240,9 +239,13 @@ KX_Scene::KX_Scene(SCA_IInputDevice *inputDevice,
    */
   ReinitBlenderContextVariables();
 
-  BackupShadingType();
+  /* Configure Shading types and overlays according to
+   * (viewport render or not) and (blenderplayer or not)
+   */
+  CTX_wm_view3d(C)->shading.type = KX_GetActiveEngine()->ShadingTypeRuntime();
+  ConfigureOverlays();
 
-  if ((scene->gm.flag & GAME_USE_VIEWPORT_RENDER) == 0) {
+  if (!KX_GetActiveEngine()->UseViewportRender()) {
     /* We want to indicate that we are in bge runtime. The flag can be used in draw code but in
      * depsgraph code too later */
     scene->flag |= SCE_INTERACTIVE;
@@ -262,11 +265,20 @@ KX_Scene::KX_Scene(SCA_IInputDevice *inputDevice,
      */
     CTX_data_depsgraph_pointer(C);
   }
-  /******************************************************************************************************************************/
+
+  /* Fix black shading issue with addObject https://github.com/UPBGE/upbge/issues/1354 */
+  GPU_shader_force_unbind();
+  /****************************************************/
 }
 
 KX_Scene::~KX_Scene()
 {
+
+#ifdef WITH_PYTHON
+  RunOnRemoveCallbacks();
+#endif // WITH_PYTHON
+
+
   /* EEVEE INTEGRATION */
 
   m_isRuntime = false;  // eevee
@@ -278,19 +290,24 @@ KX_Scene::~KX_Scene()
   bContext *C = KX_GetActiveEngine()->GetContext();
   Main *bmain = CTX_data_main(C);
   Depsgraph *depsgraph = CTX_data_depsgraph_on_load(C);
-  View3D *v3d = CTX_wm_view3d(C);
 
-  if ((scene->gm.flag & GAME_USE_VIEWPORT_RENDER) == 0) {
+  if (!KX_GetActiveEngine()->UseViewportRender()) {
     if (!m_isPythonMainLoop) {
       /* This will free m_gpuViewport and m_gpuOffScreen */
       DRW_game_render_loop_end();
     }
     else {
-      /* It has not been freed before because the main Render loop
-       * is not executed then we free it now.
-       */
-      GPU_viewport_free(m_initMaterialsGPUViewport);
-      DRW_game_python_loop_end(DEG_get_evaluated_view_layer(depsgraph));
+      /* If we are in python loop and we called render code */
+      if (!m_initMaterialsGPUViewport) {
+        DRW_game_render_loop_end();
+      }
+      else {
+        /* It has not been freed before because the main Render loop
+         * is not executed then we free it now.
+         */
+        GPU_viewport_free(m_initMaterialsGPUViewport);
+        DRW_game_python_loop_end(DEG_get_evaluated_view_layer(depsgraph));
+      }
     }
   }
   else {
@@ -298,10 +315,8 @@ KX_Scene::~KX_Scene()
     DRW_game_viewport_render_loop_end();
   }
 
-  if (m_shadingTypeBackup != 0) {
-    v3d->shading.type = m_shadingTypeBackup;
-    v3d->shading.flag = m_shadingFlagBackup;
-  }
+  /* Fixes issue when switching .blend erm...*/
+  GPU_shader_force_unbind();
 
   for (Object *hiddenOb : m_hiddenObjectsDuringRuntime) {
     Base *base = BKE_view_layer_base_find(view_layer, hiddenOb);
@@ -335,11 +350,12 @@ KX_Scene::~KX_Scene()
   if (m_objectlist)
     m_objectlist->Release();
 
-  LayerCollection *layer_collection = BKE_layer_collection_get_active(view_layer);
-  BKE_collection_object_remove(bmain, layer_collection->collection, m_gameDefaultCamera, false);
-  BKE_id_free(bmain, m_gameDefaultCamera);
-  m_gameDefaultCamera = nullptr;
-  DEG_relations_tag_update(bmain);
+  if (m_gameDefaultCamera) {
+    BKE_collection_object_remove(bmain, scene->master_collection, m_gameDefaultCamera, false);
+    BKE_id_free(bmain, m_gameDefaultCamera);
+    m_gameDefaultCamera = nullptr;
+    DEG_relations_tag_update(bmain);
+  }
 
   if (m_parentlist)
     m_parentlist->Release();
@@ -391,6 +407,8 @@ KX_Scene::~KX_Scene()
     Py_CLEAR(m_attr_dict);
   }
 
+  // These may be nullptr but the macro checks.
+  Py_CLEAR(m_removeCallbacks);
   /* these may be nullptr but the macro checks */
   for (unsigned short i = 0; i < MAX_DRAW_CALLBACK; ++i) {
     Py_CLEAR(m_drawCallbacks[i]);
@@ -455,41 +473,21 @@ void KX_Scene::ReinitBlenderContextVariables()
   }
 }
 
-void KX_Scene::BackupShadingType()
+void KX_Scene::ConfigureOverlays()
 {
   bContext *C = KX_GetActiveEngine()->GetContext();
-
-  Scene *scene = GetBlenderScene();
-
-  /* Only if we are not in viewport render, modify + backup shading types */
+  View3D *v3d = CTX_wm_view3d(C);
   RAS_ICanvas *canvas = KX_GetActiveEngine()->GetCanvas();
-  bool useViewportInBlenderplayer = (scene->gm.flag & GAME_USE_VIEWPORT_RENDER) != 0 && canvas->IsBlenderPlayer();
-  if ((scene->gm.flag & GAME_USE_VIEWPORT_RENDER) == 0 || useViewportInBlenderplayer) {
-
-    View3D *v3d = CTX_wm_view3d(C);
-
-    bool not_eevee = (v3d->shading.type != OB_RENDER) && (v3d->shading.type != OB_MATERIAL);
-
-    if (not_eevee) {
-      m_shadingTypeBackup = v3d->shading.type;
-      m_shadingFlagBackup = v3d->shading.flag;
-      v3d->shading.type = OB_RENDER;
-      v3d->shading.flag = (V3D_SHADING_SCENE_WORLD_RENDER | V3D_SHADING_SCENE_LIGHTS_RENDER);
-      if (useViewportInBlenderplayer) {
-        v3d->flag2 |= V3D_HIDE_OVERLAYS;
-      }
-    }
+  bool useViewportRenderInBlenderplayer = KX_GetActiveEngine()->UseViewportRender() &&
+                                          canvas->IsBlenderPlayer();
+  if (useViewportRenderInBlenderplayer) {
+    v3d->flag2 |= V3D_HIDE_OVERLAYS;
   }
 }
 
 Object *KX_Scene::GetGameDefaultCamera()
 {
   return m_gameDefaultCamera;
-}
-
-bool KX_Scene::ObjectsAreStatic()
-{
-  return GetObjectList()->GetCount() == m_staticObjects.size();
 }
 
 void KX_Scene::ResetTaaSamples()
@@ -499,6 +497,12 @@ void KX_Scene::ResetTaaSamples()
 
 void KX_Scene::AddOverlayCollection(KX_Camera *overlay_cam, Collection *collection)
 {
+  /* Check if camera is not already in use */
+  if (!CameraIsInactive(overlay_cam)) {
+    std::cout << "Camera is already used (active_cam or ImageRender cam, or custom Viewport cam)"
+              << std::endl;
+    return;
+  }
   /* Check for already added collections */
   if (std::find(m_overlay_collections.begin(), m_overlay_collections.end(), collection) !=
       m_overlay_collections.end()) {
@@ -652,9 +656,8 @@ void KX_Scene::RenderAfterCameraSetup(KX_Camera *cam, const RAS_Rect &viewport, 
 
   engine->EndCountDepsgraphTime();
 
-  bool reset_taa_samples = !ObjectsAreStatic() || m_resetTaaSamples;
+  bool reset_taa_samples = m_resetTaaSamples;
   m_resetTaaSamples = false;
-  m_staticObjects.clear();
 
   rcti window;
   int v[4];
@@ -679,7 +682,7 @@ void KX_Scene::RenderAfterCameraSetup(KX_Camera *cam, const RAS_Rect &viewport, 
               0, canvas->GetHeight()};
   }
 
-  bool useViewportRender = (scene->gm.flag & GAME_USE_VIEWPORT_RENDER) != 0;
+  bool useViewportRender = KX_GetActiveEngine()->UseViewportRender();
 
   if (useViewportRender) {
     /* When we call wm_draw_update, bContext variables are unset,
@@ -713,6 +716,12 @@ void KX_Scene::RenderAfterCameraSetup(KX_Camera *cam, const RAS_Rect &viewport, 
 
       ED_region_tag_redraw(CTX_wm_region(C));
       wm_draw_update(C);
+
+      /* We need to do that before and after wm_draw_update
+       * because wm_draw_update unset context variables.
+       * We might need these variables at next logic step
+       */
+      ReinitBlenderContextVariables();
 
       if (canvas->IsBlenderPlayer()) {
         scene->flag &= ~SCE_IS_BLENDERPLAYER;
@@ -838,6 +847,11 @@ void KX_Scene::SetBlenderSceneConverter(BL_BlenderSceneConverter *sc_converter)
   m_sceneConverter = sc_converter;
 }
 
+BL_BlenderSceneConverter *KX_Scene::GetBlenderSceneConverter()
+{
+  return m_sceneConverter;
+}
+
 void KX_Scene::ConvertBlenderObject(Object *ob)
 {
   KX_KetsjiEngine *engine = KX_GetActiveEngine();
@@ -859,6 +873,105 @@ void KX_Scene::ConvertBlenderObject(Object *ob)
                            false,
                            false);
 
+}
+
+void KX_Scene::convert_blender_objects_list_synchronous(std::vector<Object *> objectslist)
+{
+  KX_KetsjiEngine *engine = KX_GetActiveEngine();
+  e_PhysicsEngine physics_engine = UseBullet;
+  RAS_Rasterizer *rasty = engine->GetRasterizer();
+  RAS_ICanvas *canvas = engine->GetCanvas();
+  bContext *C = engine->GetContext();
+  Depsgraph *depsgraph = CTX_data_expect_evaluated_depsgraph(C);
+  Main *bmain = CTX_data_main(C);
+
+  for (Object *obj : objectslist) {
+    BL_ConvertBlenderObjects(bmain,
+                             depsgraph,
+                             this,
+                             engine,
+                             physics_engine,
+                             rasty,
+                             canvas,
+                             m_sceneConverter,
+                             obj,
+                             false,
+                             false);
+  }
+}
+
+// Task data for convertBlenderCollection in a different thread.
+struct ConvertBlenderObjectsListTaskData {
+  std::vector<Object *> objectslist;
+  KX_KetsjiEngine *engine;
+  e_PhysicsEngine physics_engine;
+  KX_Scene *kxscene;
+  BL_BlenderSceneConverter *converter;
+  RAS_Rasterizer *rasty;
+  RAS_ICanvas *canvas;
+  Depsgraph *depsgraph;
+  Main *bmain;
+};
+
+static void convert_blender_objects_list_thread_func(TaskPool *__restrict UNUSED(pool), void *taskdata)
+{
+  ConvertBlenderObjectsListTaskData *task = static_cast<ConvertBlenderObjectsListTaskData *>(taskdata);
+
+  for (Object *obj : task->objectslist) {
+    BL_ConvertBlenderObjects(task->bmain,
+                             task->depsgraph,
+                             task->kxscene,
+                             task->engine,
+                             task->physics_engine,
+                             task->rasty,
+                             task->canvas,
+                             task->converter,
+                             obj,
+                             false,
+                             false);
+  }
+}
+
+void KX_Scene::ConvertBlenderObjectsList(std::vector<Object *> objectslist, bool asynchronous)
+{
+  if (asynchronous) {
+    /* Convert the Blender Objects list in a different thread, so that the
+     * game engine can keep running at full speed. */
+    ConvertBlenderObjectsListTaskData task;
+    task.engine = KX_GetActiveEngine();
+    task.physics_engine = UseBullet;
+    task.kxscene = this;
+    task.converter = m_sceneConverter;
+    task.rasty = task.engine->GetRasterizer();
+    task.canvas = task.engine->GetCanvas();
+    bContext *C = task.engine->GetContext();
+    task.depsgraph = CTX_data_expect_evaluated_depsgraph(C);
+    task.bmain = CTX_data_main(C);
+    task.objectslist = objectslist;
+
+    TaskPool *taskpool = BLI_task_pool_create(&task, TASK_PRIORITY_LOW);
+
+    BLI_task_pool_push(taskpool,
+                       convert_blender_objects_list_thread_func,
+                       &task,
+                       false,  // We will clean the objectslist std::vector of pointers ourself later
+                       NULL);
+    BLI_task_pool_work_and_wait(taskpool);
+
+    /* delete the objectslist ourself as it gives error if the work
+     * has to do it the BLI_task_pool_work_and_wait function */
+    while (!task.objectslist.size() != 0) {
+      Object *temp = task.objectslist.back();
+      task.objectslist.pop_back();
+      delete temp;
+    }
+
+    BLI_task_pool_free(taskpool);
+    taskpool = nullptr;
+  }
+  else {
+    convert_blender_objects_list_synchronous(objectslist);
+  }
 }
 
 void KX_Scene::convert_blender_collection_synchronous(Collection *co)
@@ -892,30 +1005,26 @@ struct ConvertBlenderCollectionTaskData {
   Collection *co;
   KX_KetsjiEngine *engine;
   e_PhysicsEngine physics_engine;
-  KX_Scene *scene;
+  KX_Scene *kxscene;
   BL_BlenderSceneConverter *converter;
+  RAS_Rasterizer *rasty;
+  RAS_ICanvas *canvas;
+  Depsgraph *depsgraph;
+  Main *bmain;
 };
 
-void convert_blender_collection_thread_func(TaskPool *__restrict UNUSED(pool),
-                                            void *taskdata,
-                                            int UNUSED(threadid))
+static void convert_blender_collection_thread_func(TaskPool *__restrict UNUSED(pool), void *taskdata)
 {
   ConvertBlenderCollectionTaskData *task = static_cast<ConvertBlenderCollectionTaskData *>(taskdata);
 
-  RAS_Rasterizer *rasty = task->engine->GetRasterizer();
-  RAS_ICanvas *canvas = task->engine->GetCanvas();
-  bContext *C = task->engine->GetContext();
-  Depsgraph *depsgraph = CTX_data_expect_evaluated_depsgraph(C);
-  Main *bmain = CTX_data_main(C);
-
   FOREACH_COLLECTION_OBJECT_RECURSIVE_BEGIN (task->co, obj) {
-    BL_ConvertBlenderObjects(bmain,
-                             depsgraph,
-                             task->scene,
+    BL_ConvertBlenderObjects(task->bmain,
+                             task->depsgraph,
+                             task->kxscene,
                              task->engine,
                              task->physics_engine,
-                             rasty,
-                             canvas,
+                             task->rasty,
+                             task->canvas,
                              task->converter,
                              obj,
                              false,
@@ -927,23 +1036,28 @@ void convert_blender_collection_thread_func(TaskPool *__restrict UNUSED(pool),
 void KX_Scene::ConvertBlenderCollection(Collection *co, bool asynchronous)
 {
   if (asynchronous) {
-    TaskPool *taskpool = BLI_task_pool_create(nullptr, TASK_PRIORITY_LOW);
 
     /* Convert the Blender collection in a different thread, so that the
      * game engine can keep running at full speed. */
-    ConvertBlenderCollectionTaskData *task = (ConvertBlenderCollectionTaskData *)MEM_mallocN(sizeof(ConvertBlenderCollectionTaskData),
-                                                                                             "convertblendercollection-data");
+    ConvertBlenderCollectionTaskData task;
 
-    task->engine = KX_GetActiveEngine();
-    task->physics_engine = UseBullet;
-    task->co = co;
-    task->scene = this;
-    task->converter = m_sceneConverter;
+    task.engine = KX_GetActiveEngine();
+    task.physics_engine = UseBullet;
+    task.co = co;
+    task.kxscene = this;
+    task.converter = m_sceneConverter;
+    task.rasty = task.engine->GetRasterizer();
+    task.canvas = task.engine->GetCanvas();
+    bContext *C = task.engine->GetContext();
+    task.depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
+    task.bmain = CTX_data_main(C);
+
+    TaskPool *taskpool = BLI_task_pool_create(&task, TASK_PRIORITY_LOW);
 
     BLI_task_pool_push(taskpool,
-                       (TaskRunFunction)convert_blender_collection_thread_func,
-                       task,
-                       true,  // free task data
+                       convert_blender_collection_thread_func,
+                       &task,
+                       false,
                        NULL);
     BLI_task_pool_work_and_wait(taskpool);
     BLI_task_pool_free(taskpool);
@@ -993,6 +1107,11 @@ void KX_Scene::RestoreRestrictFlags()
 void KX_Scene::TagForCollectionRemap()
 {
   m_collectionRemap = true;
+}
+
+KX_GameObject *KX_Scene::GetGameObjectFromObject(Object *ob)
+{
+  return m_sceneConverter->FindGameObject(ob);
 }
 
 /******************End of EEVEE INTEGRATION****************************/
@@ -2052,16 +2171,6 @@ RAS_MaterialBucket *KX_Scene::FindBucket(class RAS_IPolyMaterial *polymat, bool 
   return m_bucketmanager->FindBucket(polymat, bucketCreated);
 }
 
-/*****************************TAA UTILS**********************************/
-/* Utils for TAA to check if nothing is moving inside view frustum (or anywhere when using probes)
- */
-void KX_Scene::AppendToStaticObjects(KX_GameObject *gameobj)
-{
-  m_staticObjects.push_back(gameobj);
-}
-/************************End of TAA UTILS**************************/
-/*************************************End of EEVEE INTEGRATION*********************************/
-
 void KX_Scene::UpdateObjectLods(KX_Camera *cam /*, const KX_CullingNodeList& nodes*/)
 {
   const MT_Vector3 &cam_pos = cam->NodeGetWorldPosition();
@@ -2374,6 +2483,17 @@ void KX_Scene::RunDrawingCallbacks(DrawingCallbackType callbackType, KX_Camera *
   }
 }
 
+void KX_Scene::RunOnRemoveCallbacks()
+{
+  PyObject *list = m_removeCallbacks;
+  if (!list || PyList_GET_SIZE(list) == 0) {
+    return;
+  }
+
+  PyObject *args[1] = { GetProxy() };
+  RunPythonCallBackList(list, args, 0, 1);
+}
+
 //----------------------------------------------------------------------------
 // Python
 
@@ -2422,7 +2542,11 @@ PyMethodDef KX_Scene::Methods[] = {
     KX_PYMETHODTABLE(KX_Scene, replace),
     KX_PYMETHODTABLE(KX_Scene, drawObstacleSimulation),
     KX_PYMETHODTABLE(KX_Scene, convertBlenderObject),
+    KX_PYMETHODTABLE(KX_Scene, convertBlenderObjectsList),
     KX_PYMETHODTABLE(KX_Scene, convertBlenderCollection),
+    KX_PYMETHODTABLE(KX_Scene, addOverlayCollection),
+    KX_PYMETHODTABLE(KX_Scene, removeOverlayCollection),
+    KX_PYMETHODTABLE(KX_Scene, getGameObjectFromObject),
 
     /* dict style access */
     KX_PYMETHODTABLE(KX_Scene, get),
@@ -2684,6 +2808,36 @@ int KX_Scene::pyattr_set_drawing_callback(PyObjectPlus *self_v,
   return PY_SET_ATTR_SUCCESS;
 }
 
+PyObject *KX_Scene::pyattr_get_remove_callback(PyObjectPlus *self_v, const KX_PYATTRIBUTE_DEF *attrdef)
+{
+  KX_Scene *self = static_cast<KX_Scene *>(self_v);
+
+  if (!self->m_removeCallbacks) {
+    self->m_removeCallbacks = PyList_New(0);
+  }
+
+  Py_INCREF(self->m_removeCallbacks);
+
+  return self->m_removeCallbacks;
+}
+
+int KX_Scene::pyattr_set_remove_callback(PyObjectPlus *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value)
+{
+  KX_Scene *self = static_cast<KX_Scene *>(self_v);
+
+  if (!PyList_CheckExact(value)) {
+    PyErr_SetString(PyExc_ValueError, "Expected a list");
+    return PY_SET_ATTR_FAIL;
+  }
+
+  Py_XDECREF(self->m_removeCallbacks);
+
+  Py_INCREF(value);
+  self->m_removeCallbacks = value;
+
+  return PY_SET_ATTR_SUCCESS;
+}
+
 PyObject *KX_Scene::pyattr_get_gravity(PyObjectPlus *self_v, const KX_PYATTRIBUTE_DEF *attrdef)
 {
   KX_Scene *self = static_cast<KX_Scene *>(self_v);
@@ -2721,6 +2875,7 @@ PyAttributeDef KX_Scene::Attributes[] = {
                                pyattr_set_overrideCullingCamera),
     KX_PYATTRIBUTE_RW_FUNCTION(
         "pre_draw", KX_Scene, pyattr_get_drawing_callback, pyattr_set_drawing_callback),
+    KX_PYATTRIBUTE_RW_FUNCTION("onRemove", KX_Scene, pyattr_get_remove_callback, pyattr_set_remove_callback),
     KX_PYATTRIBUTE_RW_FUNCTION(
         "post_draw", KX_Scene, pyattr_get_drawing_callback, pyattr_set_drawing_callback),
     KX_PYATTRIBUTE_RW_FUNCTION(
@@ -2867,6 +3022,39 @@ KX_PYMETHODDEF_DOC(KX_Scene,
 }
 
 KX_PYMETHODDEF_DOC(KX_Scene,
+                   convertBlenderObjectsList,
+                   "convertBlenderObjectsList()\n"
+                   "\n")
+{
+  PyObject *list;
+  int asynchronous = 0;
+
+  if (!PyArg_ParseTuple(args, "O!i:", &PyList_Type, &list, &asynchronous)) {
+    std::cout << "Expected a bpy.types.Object list." << std::endl;
+    return nullptr;
+  }
+
+  std::vector<Object *> objectslist;
+  Py_ssize_t list_size = PyList_Size(list);
+
+  for (Py_ssize_t i = 0; i < list_size; i++) {
+    PyObject* bl_object = PyList_GetItem(list, i);
+
+    ID *id;
+    if (!pyrna_id_FromPyObject(bl_object, &id)) {
+      std::cout << "Failed to convert object." << std::endl;
+      return nullptr;
+    }
+
+    Object *ob = (Object *)id;
+    objectslist.push_back(ob);
+  }
+
+  ConvertBlenderObjectsList(objectslist, asynchronous);
+  Py_RETURN_NONE;
+}
+
+KX_PYMETHODDEF_DOC(KX_Scene,
                    convertBlenderCollection,
                    "convertBlenderCollection()\n"
                    "\n")
@@ -2887,6 +3075,90 @@ KX_PYMETHODDEF_DOC(KX_Scene,
 
   Collection *co = (Collection *)id;
   ConvertBlenderCollection(co, asynchronous);
+  Py_RETURN_NONE;
+}
+
+KX_PYMETHODDEF_DOC(KX_Scene,
+                   addOverlayCollection,
+                   "addOverlayCollection(KX_Camera *cam, Collection *col)\n"
+                   "\n")
+{
+  PyObject *pyCamera = Py_None;
+  PyObject *pyCollection = Py_None;
+
+  if (!PyArg_ParseTuple(args, "OO:", &pyCamera, &pyCollection)) {
+    std::cout << "Expected a KX_Camera and a bpy.types.Collection." << std::endl;
+    return nullptr;
+  }
+
+  KX_Camera *kxCam = nullptr;
+  if (!(ConvertPythonToCamera(this, pyCamera, &kxCam, false, nullptr))) {
+      std::cout << "Failed to convert KX_Camera" << std::endl;
+    return nullptr;
+  }
+
+  ID *id = nullptr;
+  if (!pyrna_id_FromPyObject(pyCollection, &id)) {
+    std::cout << "Failed to convert collection." << std::endl;
+    return nullptr;
+  }
+
+  Collection *co = (Collection *)id;
+  AddOverlayCollection(kxCam, co);
+  Py_RETURN_NONE;
+}
+
+KX_PYMETHODDEF_DOC(KX_Scene,
+                   removeOverlayCollection,
+                   "removeOverlayCollection(Collection *col)\n"
+                   "\n")
+{
+  PyObject *pyCollection = Py_None;
+
+  if (!PyArg_ParseTuple(args, "O:", &pyCollection)) {
+    std::cout << "Expected a bpy.types.Collection." << std::endl;
+    return nullptr;
+  }
+
+  ID *id = nullptr;
+  if (!pyrna_id_FromPyObject(pyCollection, &id)) {
+    std::cout << "Failed to convert collection." << std::endl;
+    return nullptr;
+  }
+
+  Collection *co = (Collection *)id;
+  RemoveOverlayCollection(co);
+  Py_RETURN_NONE;
+}
+
+KX_PYMETHODDEF_DOC(KX_Scene,
+                   getGameObjectFromObject,
+                   "getGameObjectFromObject(Object *ob)\n"
+                   "\n")
+{
+  PyObject *pyBlenderObject = Py_None;
+
+  if (!PyArg_ParseTuple(args, "O:", &pyBlenderObject)) {
+    std::cout << "Expected a bpy.types.Object." << std::endl;
+    return nullptr;
+  }
+
+  ID *id = nullptr;
+  if (!pyrna_id_FromPyObject(pyBlenderObject, &id)) {
+    std::cout << "Failed to convert Object." << std::endl;
+    return nullptr;
+  }
+
+  Object *ob = (Object *)id;
+  if (ob) {
+    KX_GameObject *gameobj = GetGameObjectFromObject(ob);
+    if (gameobj) {
+      return gameobj->GetProxy();
+    }
+    std::cout << "No KX_GameObject found for this Object" << std::endl;
+    Py_RETURN_NONE;
+  }
+
   Py_RETURN_NONE;
 }
 

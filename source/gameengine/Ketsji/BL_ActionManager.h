@@ -24,8 +24,8 @@
  *  \ingroup ketsji
  */
 
-#ifndef __BL_ACTIONMANAGER_H__
-#define __BL_ACTIONMANAGER_H__
+#pragma once
+
 
 #include <iostream>
 #include <map>
@@ -114,11 +114,5 @@ class BL_ActionManager {
    * manages actions' frames.
    */
   void Update(float curtime, bool applyToObject);
-
-  /**
-   * Update object IPOs (note: not thread-safe!)
-   */
-  void UpdateIPOs();
 };
 
-#endif /* BL_ACTIONMANAGER */

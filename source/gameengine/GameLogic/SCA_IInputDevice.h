@@ -29,17 +29,12 @@
  *  \ingroup gamelogic
  */
 
-#ifndef __SCA_IINPUTDEVICE_H__
-#define __SCA_IINPUTDEVICE_H__
+#pragma once
+
 
 #include <map>
 
 #include "SCA_InputEvent.h"
-
-// #include <pair>
-
-#define MOUSEX MOUSEMOVE
-#define MOUSEY ACTIONMOUSE
 
 class SCA_IInputDevice {
  public:
@@ -192,6 +187,10 @@ class SCA_IInputDevice {
     LEFTMOUSE,
     MIDDLEMOUSE,
     RIGHTMOUSE,
+    BUTTON4MOUSE,
+    BUTTON5MOUSE,
+    BUTTON6MOUSE,
+    BUTTON7MOUSE,
 
     ENDMOUSEBUTTONS,
 
@@ -244,4 +243,3 @@ class SCA_IInputDevice {
   static const char ConvertKeyToChar(SCA_EnumInputs input, bool shifted);
 };
 
-#endif /* __SCA_IINPUTDEVICE_H__ */

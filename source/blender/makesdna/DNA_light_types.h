@@ -26,6 +26,10 @@
 #include "DNA_ID.h"
 #include "DNA_defs.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifndef MAX_MTEX
 #  define MAX_MTEX 18
 #endif
@@ -138,6 +142,7 @@ typedef struct Light {
 /* #define LA_SHOW_SHADOW_BOX (1 << 18) */
 #define LA_SHAD_CONTACT (1 << 19)
 #define LA_CUSTOM_ATTENUATION (1 << 20)
+#define LA_SOFT_SHADOWS (1 << 21) /* Sof shadow per light -- UPBGE */
 
 /* falloff_type */
 #define LA_FALLOFF_CONSTANT 0
@@ -154,3 +159,7 @@ typedef struct Light {
 /* #define LA_AREA_BOX  3 */ /* UNUSED */
 #define LA_AREA_DISK 4
 #define LA_AREA_ELLIPSE 5
+
+#ifdef __cplusplus
+}
+#endif

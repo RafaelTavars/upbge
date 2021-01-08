@@ -29,8 +29,8 @@
  *  \ingroup ketsji
  */
 
-#ifndef __KX_SCENE_H__
-#define __KX_SCENE_H__
+#pragma once
+
 
 #include <list>
 #include <set>
@@ -112,21 +112,16 @@ class KX_Scene : public CValue, public SCA_IScene {
   Py_Header
 
 #ifdef WITH_PYTHON
-      PyObject *m_attr_dict;
+  PyObject *m_attr_dict;
   PyObject *m_drawCallbacks[MAX_DRAW_CALLBACK];
+  PyObject *m_removeCallbacks;
 #endif
 
  protected:
   /***************EEVEE INTEGRATION*****************/
-
-  std::vector<KX_GameObject *> m_staticObjects;
-
-  int m_taaSamplesBackup;
   bool m_resetTaaSamples;
   Object *m_lastReplicatedParentObject;
   Object *m_gameDefaultCamera;
-  int m_shadingTypeBackup;
-  int m_shadingFlagBackup;
   std::vector<struct Collection *> m_overlay_collections;
   struct GPUViewport *m_currentGPUViewport;
   /* In the current state of the code, we need this
@@ -305,7 +300,8 @@ class KX_Scene : public CValue, public SCA_IScene {
   bool m_isActivedHysteresis;
   int m_lodHysteresisValue;
 
-  // Convert collection helper
+  // Convert objects list & collection helpers
+  void convert_blender_objects_list_synchronous(std::vector<Object *> objectslist);
   void convert_blender_collection_synchronous(Collection *co);
 
  public:
@@ -318,10 +314,9 @@ class KX_Scene : public CValue, public SCA_IScene {
   virtual ~KX_Scene();
 
   /******************EEVEE INTEGRATION************************/
-  void AppendToStaticObjects(KX_GameObject *gameobj);
-  bool ObjectsAreStatic();
   void ResetTaaSamples();
   void ConvertBlenderObject(struct Object *ob);
+  void ConvertBlenderObjectsList(std::vector<Object *> objectslist, bool asynchronous);
   void ConvertBlenderCollection(struct Collection *co, bool asynchronous);
 
   bool m_isRuntime;  // Too lazy to put that in protected
@@ -337,7 +332,7 @@ class KX_Scene : public CValue, public SCA_IScene {
   void ResetLastReplicatedParentObject();
   Object *GetGameDefaultCamera();
   void ReinitBlenderContextVariables();
-  void BackupShadingType();
+  void ConfigureOverlays();
   void AddOverlayCollection(KX_Camera *overlay_cam, struct Collection *collection);
   void RemoveOverlayCollection(struct Collection *collection);
   void SetCurrentGPUViewport(struct GPUViewport *viewport);
@@ -355,6 +350,7 @@ class KX_Scene : public CValue, public SCA_IScene {
   void BackupRestrictFlag(Object *ob, char restrictFlag);
   void RestoreRestrictFlags();
   void TagForCollectionRemap();
+  KX_GameObject *GetGameObjectFromObject(Object *ob);
   /***************End of EEVEE INTEGRATION**********************/
 
   RAS_BucketManager *GetBucketManager() const;
@@ -526,6 +522,7 @@ class KX_Scene : public CValue, public SCA_IScene {
   }
 
   void SetBlenderSceneConverter(class BL_BlenderSceneConverter *sceneConverter);
+  class BL_BlenderSceneConverter *GetBlenderSceneConverter();
 
   class PHY_IPhysicsEnvironment *GetPhysicsEnvironment()
   {
@@ -571,7 +568,11 @@ class KX_Scene : public CValue, public SCA_IScene {
   KX_PYMETHOD_DOC(KX_Scene, get);
   KX_PYMETHOD_DOC(KX_Scene, drawObstacleSimulation);
   KX_PYMETHOD_DOC(KX_Scene, convertBlenderObject);
+  KX_PYMETHOD_DOC(KX_Scene, convertBlenderObjectsList);
   KX_PYMETHOD_DOC(KX_Scene, convertBlenderCollection);
+  KX_PYMETHOD_DOC(KX_Scene, addOverlayCollection);
+  KX_PYMETHOD_DOC(KX_Scene, removeOverlayCollection);
+  KX_PYMETHOD_DOC(KX_Scene, getGameObjectFromObject);
 
   /* attributes */
   static PyObject *pyattr_get_name(PyObjectPlus *self_v, const KX_PYATTRIBUTE_DEF *attrdef);
@@ -598,6 +599,8 @@ class KX_Scene : public CValue, public SCA_IScene {
   static int pyattr_set_drawing_callback(PyObjectPlus *self_v,
                                          const KX_PYATTRIBUTE_DEF *attrdef,
                                          PyObject *value);
+  static PyObject *pyattr_get_remove_callback(PyObjectPlus *self_v, const KX_PYATTRIBUTE_DEF *attrdef);
+  static int pyattr_set_remove_callback(PyObjectPlus *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value);
   static PyObject *pyattr_get_gravity(PyObjectPlus *self_v, const KX_PYATTRIBUTE_DEF *attrdef);
   static int pyattr_set_gravity(PyObjectPlus *self_v,
                                 const KX_PYATTRIBUTE_DEF *attrdef,
@@ -611,6 +614,7 @@ class KX_Scene : public CValue, public SCA_IScene {
    * Run the registered python drawing functions.
    */
   void RunDrawingCallbacks(DrawingCallbackType callbackType, KX_Camera *camera);
+  void RunOnRemoveCallbacks();
 #endif
 
   /**
@@ -637,4 +641,3 @@ bool ConvertPythonToScene(PyObject *value,
 
 typedef std::vector<KX_Scene *> KX_SceneList;
 
-#endif /* __KX_SCENE_H__ */

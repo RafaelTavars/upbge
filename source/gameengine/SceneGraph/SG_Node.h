@@ -29,8 +29,8 @@
  *  \ingroup bgesg
  */
 
-#ifndef __SG_NODE_H__
-#define __SG_NODE_H__
+#pragma once
+
 
 #include <memory>
 #include <vector>
@@ -162,6 +162,11 @@ class SG_Node : public SG_QList {
    * Return the top node in this node's Scene graph hierarchy
    */
   const SG_Node *GetRootSGParent() const;
+
+  /**
+   * Return the depth of the current node in the Scene graph hierarchy.
+   */
+  short GetDepth();
 
   /**
    * Disconnect this node from it's parent
@@ -399,4 +404,3 @@ class SG_Node : public SG_QList {
   unsigned short m_dirty;
 };
 
-#endif  // __SG_NODE_H__

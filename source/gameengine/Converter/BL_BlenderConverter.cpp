@@ -49,7 +49,9 @@
 #include "BLI_linklist.h"
 #include "BLI_task.h"
 #include "BLO_readfile.h"
+#include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
+#include "DNA_scene_types.h"
 
 #include "BL_ActionActuator.h"
 #include "BL_BlenderDataConversion.h"
@@ -207,6 +209,8 @@ void BL_BlenderConverter::ConvertScene(KX_Scene *destinationscene,
   bContext *C = KX_GetActiveEngine()->GetContext();
   Depsgraph *depsgraph = CTX_data_depsgraph_on_load(C);
 
+  destinationscene->SetBlenderSceneConverter(sceneConverter);
+
   BL_ConvertBlenderObjects(m_maggie,
                            depsgraph,
                            destinationscene,
@@ -220,7 +224,6 @@ void BL_BlenderConverter::ConvertScene(KX_Scene *destinationscene,
                            libloading);
 
   m_sceneSlots.emplace(destinationscene, sceneConverter);
-  destinationscene->SetBlenderSceneConverter(sceneConverter);
 }
 
 /** This function removes all entities stored in the converter for that scene

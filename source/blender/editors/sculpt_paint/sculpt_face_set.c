@@ -41,6 +41,7 @@
 #include "BKE_context.h"
 #include "BKE_customdata.h"
 #include "BKE_mesh.h"
+#include "BKE_mesh_fair.h"
 #include "BKE_mesh_mapping.h"
 #include "BKE_multires.h"
 #include "BKE_node.h"
@@ -110,7 +111,10 @@ int ED_sculpt_face_sets_active_update_and_get(bContext *C, Object *ob, const flo
   }
 
   SculptCursorGeometryInfo gi;
-  SCULPT_cursor_geometry_info_update(C, &gi, mval, false);
+  if (!SCULPT_cursor_geometry_info_update(C, &gi, mval, false)) {
+    return SCULPT_FACE_SET_NONE;
+  }
+
   return SCULPT_active_face_set_get(ss);
 }
 
@@ -328,7 +332,7 @@ static int sculpt_face_set_create_exec(bContext *C, wmOperator *op)
     return OPERATOR_CANCELLED;
   }
 
-  SCULPT_undo_push_begin("face set change");
+  SCULPT_undo_push_begin(ob, "face set change");
   SCULPT_undo_push_node(ob, nodes[0], SCULPT_UNDO_FACE_SETS);
 
   const int next_face_set = SCULPT_face_set_next_available_get(ss);
@@ -684,7 +688,7 @@ static int sculpt_face_set_init_exec(bContext *C, wmOperator *op)
     return OPERATOR_CANCELLED;
   }
 
-  SCULPT_undo_push_begin("face set change");
+  SCULPT_undo_push_begin(ob, "face set change");
   SCULPT_undo_push_node(ob, nodes[0], SCULPT_UNDO_FACE_SETS);
 
   const float threshold = RNA_float_get(op->ptr, "threshold");
@@ -829,7 +833,7 @@ static int sculpt_face_sets_change_visibility_exec(bContext *C, wmOperator *op)
   const int mode = RNA_enum_get(op->ptr, "mode");
   const int active_face_set = SCULPT_active_face_set_get(ss);
 
-  SCULPT_undo_push_begin("Hide area");
+  SCULPT_undo_push_begin(ob, "Hide area");
 
   PBVH *pbvh = ob->sculpt->pbvh;
   PBVHNode **nodes;
@@ -1021,6 +1025,8 @@ typedef enum eSculptFaceSetEditMode {
   SCULPT_FACE_SET_EDIT_GROW = 0,
   SCULPT_FACE_SET_EDIT_SHRINK = 1,
   SCULPT_FACE_SET_EDIT_DELETE_GEOMETRY = 2,
+  SCULPT_FACE_SET_EDIT_FAIR_POSITIONS = 3,
+  SCULPT_FACE_SET_EDIT_FAIR_TANGENCY = 4,
 } eSculptFaceSetEditMode;
 
 static EnumPropertyItem prop_sculpt_face_sets_edit_types[] = {
@@ -1044,6 +1050,22 @@ static EnumPropertyItem prop_sculpt_face_sets_edit_types[] = {
         0,
         "Delete Geometry",
         "Deletes the faces that are assigned to the Face Set",
+    },
+    {
+        SCULPT_FACE_SET_EDIT_FAIR_POSITIONS,
+        "FAIR_POSITIONS",
+        0,
+        "Fair Positions",
+        "Creates a smooth as possible geometry patch from the Face Set minimizing changes in "
+        "vertex positions",
+    },
+    {
+        SCULPT_FACE_SET_EDIT_FAIR_TANGENCY,
+        "FAIR_TANGENCY",
+        0,
+        "Fair Tangency",
+        "Creates a smooth as possible geometry patch from the Face Set minimizing changes in "
+        "vertex tangents",
     },
     {0, NULL, 0, NULL, NULL},
 };
@@ -1178,6 +1200,29 @@ static void sculpt_face_set_delete_geometry(Object *ob,
   BM_mesh_free(bm);
 }
 
+static void sculpt_face_set_edit_fair_face_set(Object *ob,
+                                               const int active_face_set_id,
+                                               const int fair_order)
+{
+  SculptSession *ss = ob->sculpt;
+  const int totvert = SCULPT_vertex_count_get(ss);
+
+  Mesh *mesh = ob->data;
+  bool *fair_vertices = MEM_malloc_arrayN(sizeof(bool), totvert, "fair vertices");
+
+  SCULPT_boundary_info_ensure(ob);
+
+  for (int i = 0; i < totvert; i++) {
+    fair_vertices[i] = !SCULPT_vertex_is_boundary(ss, i) &&
+                       SCULPT_vertex_has_face_set(ss, i, active_face_set_id) &&
+                       SCULPT_vertex_has_unique_face_set(ss, i);
+  }
+
+  MVert *mvert = SCULPT_mesh_deformed_mverts_get(ss);
+  BKE_mesh_prefair_and_fair_vertices(mesh, mvert, fair_vertices, fair_order);
+  MEM_freeN(fair_vertices);
+}
+
 static void sculpt_face_set_apply_edit(Object *ob,
                                        const int active_face_set_id,
                                        const int mode,
@@ -1201,6 +1246,12 @@ static void sculpt_face_set_apply_edit(Object *ob,
     case SCULPT_FACE_SET_EDIT_DELETE_GEOMETRY:
       sculpt_face_set_delete_geometry(ob, ss, active_face_set_id, modify_hidden);
       break;
+    case SCULPT_FACE_SET_EDIT_FAIR_POSITIONS:
+      sculpt_face_set_edit_fair_face_set(ob, active_face_set_id, MESH_FAIRING_DEPTH_POSITION);
+      break;
+    case SCULPT_FACE_SET_EDIT_FAIR_TANGENCY:
+      sculpt_face_set_edit_fair_face_set(ob, active_face_set_id, MESH_FAIRING_DEPTH_TANGENCY);
+      break;
   }
 }
 
@@ -1210,7 +1261,7 @@ static bool sculpt_face_set_edit_is_operation_valid(SculptSession *ss,
 {
   if (BKE_pbvh_type(ss->pbvh) == PBVH_BMESH) {
     /* Dyntopo is not supported. */
-    return OPERATOR_CANCELLED;
+    return false;
   }
 
   if (mode == SCULPT_FACE_SET_EDIT_DELETE_GEOMETRY) {
@@ -1227,6 +1278,16 @@ static bool sculpt_face_set_edit_is_operation_valid(SculptSession *ss,
       return false;
     }
   }
+
+  if (ELEM(mode, SCULPT_FACE_SET_EDIT_FAIR_POSITIONS, SCULPT_FACE_SET_EDIT_FAIR_TANGENCY)) {
+    if (BKE_pbvh_type(ss->pbvh) == PBVH_GRIDS) {
+      /* TODO: Multires topology representation using grids and duplicates can't be used directly
+       * by the fair algorithm. Multires topology needs to be exposed in a different way or
+       * converted to a mesh for this operation. */
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -1276,7 +1337,7 @@ static void sculpt_face_set_edit_modify_face_sets(Object *ob,
   if (!nodes) {
     return;
   }
-  SCULPT_undo_push_begin("face set edit");
+  SCULPT_undo_push_begin(ob, "face set edit");
   SCULPT_undo_push_node(ob, nodes[0], SCULPT_UNDO_FACE_SETS);
   sculpt_face_set_apply_edit(ob, abs(active_face_set), mode, modify_hidden);
   SCULPT_undo_push_end();
@@ -1284,11 +1345,38 @@ static void sculpt_face_set_edit_modify_face_sets(Object *ob,
   MEM_freeN(nodes);
 }
 
+static void sculpt_face_set_edit_modify_coordinates(bContext *C,
+                                                    Object *ob,
+                                                    const int active_face_set,
+                                                    const eSculptFaceSetEditMode mode)
+{
+  Sculpt *sd = CTX_data_tool_settings(C)->sculpt;
+  SculptSession *ss = ob->sculpt;
+  PBVH *pbvh = ss->pbvh;
+  PBVHNode **nodes;
+  int totnode;
+  BKE_pbvh_search_gather(pbvh, NULL, NULL, &nodes, &totnode);
+  SCULPT_undo_push_begin(ob, "face set edit");
+  for (int i = 0; i < totnode; i++) {
+    BKE_pbvh_node_mark_update(nodes[i]);
+    SCULPT_undo_push_node(ob, nodes[i], SCULPT_UNDO_COORDS);
+  }
+  sculpt_face_set_apply_edit(ob, abs(active_face_set), mode, false);
+
+  if (ss->deform_modifiers_active || ss->shapekey_active) {
+    SCULPT_flush_stroke_deform(sd, ob, true);
+  }
+  SCULPT_flush_update_step(C, SCULPT_UPDATE_COORDS);
+  SCULPT_flush_update_done(C, ob, SCULPT_UPDATE_COORDS);
+  SCULPT_undo_push_end();
+  MEM_freeN(nodes);
+}
+
 static int sculpt_face_set_edit_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   Object *ob = CTX_data_active_object(C);
   SculptSession *ss = ob->sculpt;
-  Depsgraph *depsgraph = CTX_data_depsgraph_pointer(C);
+  Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
 
   const int mode = RNA_enum_get(op->ptr, "mode");
   const bool modify_hidden = RNA_boolean_get(op->ptr, "modify_hidden");
@@ -1303,7 +1391,10 @@ static int sculpt_face_set_edit_invoke(bContext *C, wmOperator *op, const wmEven
    * tool without brush cursor. */
   SculptCursorGeometryInfo sgi;
   const float mouse[2] = {event->mval[0], event->mval[1]};
-  SCULPT_cursor_geometry_info_update(C, &sgi, mouse, false);
+  if (!SCULPT_cursor_geometry_info_update(C, &sgi, mouse, false)) {
+    /* The cursor is not over the mesh. Cancel to avoid editing the last updated Face Set ID. */
+    return OPERATOR_CANCELLED;
+  }
   const int active_face_set = SCULPT_active_face_set_get(ss);
 
   switch (mode) {
@@ -1313,6 +1404,10 @@ static int sculpt_face_set_edit_invoke(bContext *C, wmOperator *op, const wmEven
     case SCULPT_FACE_SET_EDIT_GROW:
     case SCULPT_FACE_SET_EDIT_SHRINK:
       sculpt_face_set_edit_modify_face_sets(ob, active_face_set, mode, modify_hidden);
+      break;
+    case SCULPT_FACE_SET_EDIT_FAIR_POSITIONS:
+    case SCULPT_FACE_SET_EDIT_FAIR_TANGENCY:
+      sculpt_face_set_edit_modify_coordinates(C, ob, active_face_set, mode);
       break;
   }
 

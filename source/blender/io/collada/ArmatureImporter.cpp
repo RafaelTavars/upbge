@@ -506,7 +506,8 @@ void ArmatureImporter::create_armature_bones(Main *bmain, std::vector<Object *> 
     ED_armature_to_edit(armature);
     armature->layer = 0; /* layer is set according to imported bone set in create_bone() */
 
-    create_bone(nullptr, node, nullptr, node->getChildNodes().getCount(), nullptr, armature, layer_labels);
+    create_bone(
+        nullptr, node, nullptr, node->getChildNodes().getCount(), nullptr, armature, layer_labels);
     if (this->import_settings->find_chains) {
       connect_bone_chains(armature, (Bone *)armature->bonebase.first, UNLIMITED_CHAIN_MAX);
     }
@@ -1036,7 +1037,9 @@ void ArmatureImporter::get_rna_path_for_joint(COLLADAFW::Node *node,
                                               char *joint_path,
                                               size_t count)
 {
-  BLI_snprintf(joint_path, count, "pose.bones[\"%s\"]", bc_get_joint_name(node));
+  char bone_name_esc[sizeof(((Bone *)nullptr)->name) * 2];
+  BLI_str_escape(bone_name_esc, bc_get_joint_name(node), sizeof(bone_name_esc));
+  BLI_snprintf(joint_path, count, "pose.bones[\"%s\"]", bone_name_esc);
 }
 
 /* gives a world-space mat */

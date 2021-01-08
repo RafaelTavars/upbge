@@ -273,7 +273,7 @@ class DATA_PT_gpencil_onion_skinning_display(DataButtonsPanel, Panel):
 
 
 class GPENCIL_MT_gpencil_vertex_group(Menu):
-    bl_label = "GP Vertex Groups"
+    bl_label = "Grease Pencil Vertex Groups"
 
     def draw(self, context):
         layout = self.layout
@@ -368,6 +368,8 @@ class DATA_PT_gpencil_strokes(DataButtonsPanel, Panel):
         sub = col.column()
         sub.active = gpd.stroke_thickness_space == 'WORLDSPACE'
         sub.prop(gpd, "pixel_factor", text="Thickness Scale")
+
+        col.prop(gpd, "edit_curve_resolution")
 
 
 class DATA_PT_gpencil_display(DataButtonsPanel, Panel):

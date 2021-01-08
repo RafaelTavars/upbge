@@ -2261,6 +2261,17 @@ Scene *WM_windows_scene_get_from_screen(const wmWindowManager *wm, const bScreen
   return NULL;
 }
 
+ViewLayer *WM_windows_view_layer_get_from_screen(const wmWindowManager *wm, const bScreen *screen)
+{
+  LISTBASE_FOREACH (wmWindow *, win, &wm->windows) {
+    if (WM_window_get_active_screen(win) == screen) {
+      return WM_window_get_active_view_layer(win);
+    }
+  }
+
+  return NULL;
+}
+
 WorkSpace *WM_windows_workspace_get_from_screen(const wmWindowManager *wm, const bScreen *screen)
 {
   LISTBASE_FOREACH (wmWindow *, win, &wm->windows) {
@@ -2575,6 +2586,21 @@ void wm_window_ghostwindow_embedded_ensure(wmWindowManager *wm, wmWindow *win)
 {
   wm_window_clear_drawable(wm);
   wm_window_set_drawable(wm, win, true);
+
+  GHOST_RectangleHandle bounds;
+  /* store actual window size in blender window */
+  bounds = GHOST_GetClientBounds(win->ghostwin);
+  /* win32: gives undefined window size when minimized */
+  if (GHOST_GetWindowState(win->ghostwin) != GHOST_kWindowStateMinimized) {
+    win->sizex = GHOST_GetWidthRectangle(bounds);
+    win->sizey = GHOST_GetHeightRectangle(bounds);
+  }
+  GHOST_DisposeRectangle(bounds);
+  /* until screens get drawn, make it black */
+  GPU_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
+
+  /* needed here, because it's used before it reads userdef */
+  WM_window_set_dpi(win);
 }
 /* End of Game engine transition */
 /** \} */
