@@ -550,7 +550,7 @@ PyDoc_STRVAR(gPyGetInactiveSceneNames_doc,
              "Get all inactive scenes names");
 static PyObject *gPyGetInactiveSceneNames(PyObject *self)
 {
-  CListValue<CStringValue> *list = KX_GetActiveEngine()->GetConverter()->GetInactiveSceneNames();
+  EXP_ListValue<EXP_StringValue> *list = KX_GetActiveEngine()->GetConverter()->GetInactiveSceneNames();
 
   return list->NewProxy(true);
 }
@@ -1069,28 +1069,28 @@ static PyObject *gPyMakeScreenshot(PyObject *, PyObject *args)
 
 static PyObject *gPySetGLSLMaterialSetting(PyObject *, PyObject *args, PyObject *)
 {
-  ShowDeprecationWarning("setGLSLMaterialSetting(settings, enable)", "nothing");
+  EXP_ShowDeprecationWarning("setGLSLMaterialSetting(settings, enable)", "nothing");
 
   Py_RETURN_NONE;
 }
 
 static PyObject *gPyGetGLSLMaterialSetting(PyObject *, PyObject *args, PyObject *)
 {
-  ShowDeprecationWarning("getGLSLMaterialSetting()", "nothing");
+  EXP_ShowDeprecationWarning("getGLSLMaterialSetting()", "nothing");
 
   return PyLong_FromLong(0);
 }
 
 static PyObject *gPySetMaterialType(PyObject *, PyObject *args, PyObject *)
 {
-  ShowDeprecationWarning("setMaterialMode(mode)", "nothing");
+  EXP_ShowDeprecationWarning("setMaterialMode(mode)", "nothing");
 
   Py_RETURN_NONE;
 }
 
 static PyObject *gPyGetMaterialType(PyObject *)
 {
-  ShowDeprecationWarning("getMaterialMode()", "nothing");
+  EXP_ShowDeprecationWarning("getMaterialMode()", "nothing");
 
   return PyLong_FromLong(0);
 }
@@ -1408,7 +1408,7 @@ PyMODINIT_FUNC initGameLogicPythonBinding()
   PyObject *d;
   PyObject *item; /* temp PyObject *storage */
 
-  PyObjectPlus::ClearDeprecationWarning(); /* Not that nice to call here but makes sure warnings
+  EXP_PyObjectPlus::ClearDeprecationWarning(); /* Not that nice to call here but makes sure warnings
                                               are reset between loading scenes */
 
   m = PyModule_Create(&GameLogic_module_def);
@@ -2119,6 +2119,13 @@ void postInitGamePlayerPythonScripting(Main *maggie, int argc, char **argv, bCon
   if (argv && first_time) { /* browser plugins don't currently set this */
     // Until python support ascii again, we use our own.
     // PySys_SetArgv(argc, argv);
+
+    /* We could convert to #wchar_t then pass to #PySys_SetArgv (or use #PyConfig in Python 3.8+).
+     * However this risks introducing subtle changes in encoding that are hard to track down.
+     *
+     * So rely on #PyC_UnicodeFromByte since it's a tried & true way of getting paths
+     * that include non `utf-8` compatible characters, see: T20021. */
+
     int i;
     PyObject *py_argv = PyList_New(argc);
 
@@ -2127,6 +2134,25 @@ void postInitGamePlayerPythonScripting(Main *maggie, int argc, char **argv, bCon
 
     PySys_SetObject("argv", py_argv);
     Py_DECREF(py_argv);
+  }
+
+  /* Setting the program name is important so the 'multiprocessing' module
+   * can launch new Python instances. */
+  {
+    const char *sys_variable = "executable";
+    char program_path[FILE_MAX];
+    if (BKE_appdir_program_python_search(
+            program_path, sizeof(program_path), PY_MAJOR_VERSION, PY_MINOR_VERSION)) {
+      PyObject *py_program_path = PyC_UnicodeFromByte(program_path);
+      PySys_SetObject(sys_variable, py_program_path);
+      Py_DECREF(py_program_path);
+    }
+    else {
+      fprintf(stderr,
+              "Unable to find the python binary, "
+              "the multiprocessing module may not be functional!\n");
+      PySys_SetObject(sys_variable, Py_None);
+    }
   }
 
   bpy_import_init(PyEval_GetBuiltins());
@@ -2175,7 +2201,7 @@ void postInitGamePlayerPythonScripting(Main *maggie, int argc, char **argv, bCon
 
   first_time = false;
 
-  PyObjectPlus::ClearDeprecationWarning();
+  EXP_PyObjectPlus::ClearDeprecationWarning();
 
   BPY_python_reset(C);
 }
@@ -2202,7 +2228,7 @@ void exitGamePlayerPythonScripting()
 
   // Py_Finalize();
   bpy_import_main_set(nullptr);
-  PyObjectPlus::ClearDeprecationWarning();
+  EXP_PyObjectPlus::ClearDeprecationWarning();
 }
 
 /**
@@ -2268,6 +2294,25 @@ void initGamePythonScripting(Main *maggie, bool *audioDeviceIsInitialized)
   /* Initialize Python (also acquires lock). */
   Py_Initialize();
 
+  /* Setting the program name is important so the 'multiprocessing' module
+   * can launch new Python instances. */
+  {
+    const char *sys_variable = "executable";
+    char program_path[FILE_MAX];
+    if (BKE_appdir_program_python_search(
+            program_path, sizeof(program_path), PY_MAJOR_VERSION, PY_MINOR_VERSION)) {
+      PyObject *py_program_path = PyC_UnicodeFromByte(program_path);
+      PySys_SetObject(sys_variable, py_program_path);
+      Py_DECREF(py_program_path);
+    }
+    else {
+      fprintf(stderr,
+              "Unable to find the python binary, "
+              "the multiprocessing module may not be functional!\n");
+      PySys_SetObject(sys_variable, Py_None);
+    }
+  }
+
   bpy_import_init(PyEval_GetBuiltins());
 
   bpy_import_main_set(maggie);
@@ -2298,7 +2343,7 @@ void initGamePythonScripting(Main *maggie, bool *audioDeviceIsInitialized)
 
   first_time = false;
 
-  PyObjectPlus::ClearDeprecationWarning();
+  EXP_PyObjectPlus::ClearDeprecationWarning();
 }
 
 void exitGamePythonScripting()
@@ -2319,7 +2364,7 @@ void exitGamePythonScripting()
 
   restorePySysObjects(); /* get back the original sys.path and clear the backup */
   bpy_import_main_set(nullptr);
-  PyObjectPlus::ClearDeprecationWarning();
+  EXP_PyObjectPlus::ClearDeprecationWarning();
 }
 
 /* similar to the above functions except it sets up the namespace
