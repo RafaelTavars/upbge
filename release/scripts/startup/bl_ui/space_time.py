@@ -1,22 +1,4 @@
-# ##### BEGIN GPL LICENSE BLOCK #####
-#
-#  This program is free software; you can redistribute it and/or
-#  modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2
-#  of the License, or (at your option) any later version.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software Foundation,
-#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# ##### END GPL LICENSE BLOCK #####
-
-# <pep8 compliant>
+# SPDX-License-Identifier: GPL-2.0-or-later
 import bpy
 from bpy.types import Menu, Panel
 
@@ -106,6 +88,9 @@ class TIME_MT_editor_menus(Menu):
             panel="TIME_PT_keyframing_settings",
             text="Keying",
         )
+
+        # Add a separator to keep the popover button from aligning with the menu button.
+        sub.separator(factor=0.4)
 
         if horizontal:
             sub = row.row(align=True)
@@ -200,8 +185,14 @@ def marker_menu_generic(layout, context):
 
     layout.separator()
 
-    layout.operator("marker.rename", text="Rename Marker")
+    props = layout.operator("wm.call_panel", text="Rename Marker")
+    props.name = "TOPBAR_PT_name_marker"
+    props.keep_open = False
     layout.operator("marker.move", text="Move Marker")
+
+    layout.separator()
+
+    layout.menu('NLA_MT_marker_select')
 
     layout.separator()
 
@@ -297,6 +288,8 @@ class TIME_PT_keyframing_settings(TimelinePanelButtons, Panel):
         col.label(text="New Keyframe Type")
         col.prop(tool_settings, "keyframe_type", text="")
 
+        layout.prop(tool_settings, "use_keyframe_cycle_aware")
+
 
 class TIME_PT_auto_keyframing(TimelinePanelButtons, Panel):
     bl_label = "Auto Keyframing"
@@ -323,8 +316,6 @@ class TIME_PT_auto_keyframing(TimelinePanelButtons, Panel):
         col.prop(tool_settings, "use_keyframe_insert_keyingset", text="Only Active Keying Set", toggle=False)
         if not prefs.edit.use_keyframe_insert_available:
             col.prop(tool_settings, "use_record_with_nla", text="Layered Recording")
-
-        col.prop(tool_settings, "use_keyframe_cycle_aware")
 
 
 ###################################

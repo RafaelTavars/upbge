@@ -31,10 +31,9 @@
 
 #include "KX_LightIpoSGController.h"
 
+#include "DEG_depsgraph_query.h"
 #include "DNA_light_types.h"
 #include "WM_api.h"
-#include "WM_types.h"
-#include "depsgraph/DEG_depsgraph_query.h"
 
 #include "KX_Light.h"
 #include "KX_ScalarInterpolator.h"
@@ -61,7 +60,6 @@ bool KX_LightIpoSGController::Update(double currentTime)
       la->energy = m_energy;
       DEG_id_tag_update(&la->id, 0);
       WM_main_add_notifier(NC_LAMP | ND_LIGHTING_DRAW, la);
-      kxlight->GetScene()->ResetTaaSamples();
     }
 
     if (m_modify_color) {
@@ -70,14 +68,12 @@ bool KX_LightIpoSGController::Update(double currentTime)
       la->b = m_col_rgb[2];
       DEG_id_tag_update(&la->id, 0);
       WM_main_add_notifier(NC_LAMP | ND_LIGHTING_DRAW, la);
-      kxlight->GetScene()->ResetTaaSamples();
     }
 
     if (m_modify_dist) {
       la->dist = m_dist;
       DEG_id_tag_update(&la->id, 0);
       WM_main_add_notifier(NC_LAMP | ND_LIGHTING_DRAW, la);
-      kxlight->GetScene()->ResetTaaSamples();
     }
 
     m_modified = false;
@@ -113,7 +109,7 @@ SG_Controller *KX_LightIpoSGController::GetReplica(class SG_Node *destnode)
     uint_ptr offset = orgloc - orgbase;
     uint_ptr newaddrbase = (uint_ptr)iporeplica + offset;
     MT_Scalar *blaptr = (MT_Scalar *)newaddrbase;
-    copyipo->SetNewTarget((MT_Scalar *)blaptr);
+    copyipo->SetTarget((MT_Scalar *)blaptr);
   }
 
   return iporeplica;

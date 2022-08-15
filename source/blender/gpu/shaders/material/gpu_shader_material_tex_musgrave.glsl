@@ -1,3 +1,6 @@
+#pragma BLENDER_REQUIRE(gpu_shader_common_hash.glsl)
+#pragma BLENDER_REQUIRE(gpu_shader_material_noise.glsl)
+
 /* 1D Musgrave fBm
  *
  * H: fractal increment parameter
@@ -19,7 +22,7 @@ void node_tex_musgrave_fBm_1d(vec3 co,
 {
   float p = w * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float value = 0.0;
@@ -59,7 +62,7 @@ void node_tex_musgrave_multi_fractal_1d(vec3 co,
 {
   float p = w * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float value = 1.0;
@@ -100,7 +103,7 @@ void node_tex_musgrave_hetero_terrain_1d(vec3 co,
 {
   float p = w * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);
@@ -146,7 +149,7 @@ void node_tex_musgrave_hybrid_multi_fractal_1d(vec3 co,
 {
   float p = w * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);
@@ -196,7 +199,7 @@ void node_tex_musgrave_ridged_multi_fractal_1d(vec3 co,
 {
   float p = w * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);
@@ -241,7 +244,7 @@ void node_tex_musgrave_fBm_2d(vec3 co,
 {
   vec2 p = co.xy * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float value = 0.0;
@@ -281,7 +284,7 @@ void node_tex_musgrave_multi_fractal_2d(vec3 co,
 {
   vec2 p = co.xy * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float value = 1.0;
@@ -322,7 +325,7 @@ void node_tex_musgrave_hetero_terrain_2d(vec3 co,
 {
   vec2 p = co.xy * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);
@@ -368,7 +371,7 @@ void node_tex_musgrave_hybrid_multi_fractal_2d(vec3 co,
 {
   vec2 p = co.xy * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);
@@ -418,7 +421,7 @@ void node_tex_musgrave_ridged_multi_fractal_2d(vec3 co,
 {
   vec2 p = co.xy * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);
@@ -463,7 +466,7 @@ void node_tex_musgrave_fBm_3d(vec3 co,
 {
   vec3 p = co * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float value = 0.0;
@@ -503,7 +506,7 @@ void node_tex_musgrave_multi_fractal_3d(vec3 co,
 {
   vec3 p = co * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float value = 1.0;
@@ -544,7 +547,7 @@ void node_tex_musgrave_hetero_terrain_3d(vec3 co,
 {
   vec3 p = co * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);
@@ -590,7 +593,7 @@ void node_tex_musgrave_hybrid_multi_fractal_3d(vec3 co,
 {
   vec3 p = co * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);
@@ -640,7 +643,7 @@ void node_tex_musgrave_ridged_multi_fractal_3d(vec3 co,
 {
   vec3 p = co * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);
@@ -685,7 +688,7 @@ void node_tex_musgrave_fBm_4d(vec3 co,
 {
   vec4 p = vec4(co, w) * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float value = 0.0;
@@ -725,7 +728,7 @@ void node_tex_musgrave_multi_fractal_4d(vec3 co,
 {
   vec4 p = vec4(co, w) * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float value = 1.0;
@@ -766,7 +769,7 @@ void node_tex_musgrave_hetero_terrain_4d(vec3 co,
 {
   vec4 p = vec4(co, w) * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);
@@ -812,7 +815,7 @@ void node_tex_musgrave_hybrid_multi_fractal_4d(vec3 co,
 {
   vec4 p = vec4(co, w) * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);
@@ -862,7 +865,7 @@ void node_tex_musgrave_ridged_multi_fractal_4d(vec3 co,
 {
   vec4 p = vec4(co, w) * scale;
   float H = max(dimension, 1e-5);
-  float octaves = clamp(detail, 0.0, 16.0);
+  float octaves = clamp(detail, 0.0, 15.0);
   float lacunarity = max(lac, 1e-5);
 
   float pwHL = pow(lacunarity, -H);

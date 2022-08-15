@@ -1,11 +1,13 @@
 SCA_DelaySensor(SCA_ISensor)
 ============================
 
-base class --- :class:`SCA_ISensor`
+.. currentmodule:: bge.types
 
-.. class:: SCA_DelaySensor(SCA_ISensor)
+base class --- :class:`~bge.types.SCA_ISensor`
 
-   The Delay sensor generates positive and negative triggers at precise time, 
+.. class:: SCA_DelaySensor
+
+   The Delay sensor generates positive and negative triggers at precise time,
    expressed in number of frames. The delay parameter defines the length of the initial OFF period. A positive trigger is generated at the end of this period.
 
    The duration parameter defines the length of the ON period following the OFF period.
@@ -13,7 +15,7 @@ base class --- :class:`SCA_ISensor`
 
    The sensor runs the OFF-ON cycle once unless the repeat option is set: the OFF-ON cycle repeats indefinately (or the OFF cycle if duration is 0).
 
-   Use :class:`SCA_ISensor.reset` at any time to restart sensor.
+   Use :meth:`SCA_ISensor.reset <bge.types.SCA_ISensor.reset>` at any time to restart sensor.
 
    .. attribute:: delay
 

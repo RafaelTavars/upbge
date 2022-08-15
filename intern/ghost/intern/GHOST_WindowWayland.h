@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup GHOST
@@ -24,8 +10,11 @@
 
 #include "GHOST_Window.h"
 
+#include <vector>
+
 class GHOST_SystemWayland;
 
+struct output_t;
 struct window_t;
 
 class GHOST_WindowWayland : public GHOST_Window {
@@ -34,10 +23,10 @@ class GHOST_WindowWayland : public GHOST_Window {
 
   GHOST_WindowWayland(GHOST_SystemWayland *system,
                       const char *title,
-                      GHOST_TInt32 left,
-                      GHOST_TInt32 top,
-                      GHOST_TUns32 width,
-                      GHOST_TUns32 height,
+                      int32_t left,
+                      int32_t top,
+                      uint32_t width,
+                      uint32_t height,
                       GHOST_TWindowState state,
                       const GHOST_IWindow *parentWindow,
                       GHOST_TDrawingContextType type,
@@ -47,26 +36,24 @@ class GHOST_WindowWayland : public GHOST_Window {
 
   ~GHOST_WindowWayland() override;
 
-  GHOST_TSuccess close();
+  /* Ghost API */
 
-  GHOST_TSuccess activate();
+  uint16_t getDPIHint() override;
 
-  GHOST_TSuccess deactivate();
-
-  GHOST_TSuccess notify_size();
-
- protected:
   GHOST_TSuccess setWindowCursorGrab(GHOST_TGrabCursorMode mode) override;
 
   GHOST_TSuccess setWindowCursorShape(GHOST_TStandardCursor shape) override;
 
-  GHOST_TSuccess setWindowCustomCursorShape(GHOST_TUns8 *bitmap,
-                                            GHOST_TUns8 *mask,
+  GHOST_TSuccess setWindowCustomCursorShape(uint8_t *bitmap,
+                                            uint8_t *mask,
                                             int sizex,
                                             int sizey,
                                             int hotX,
                                             int hotY,
                                             bool canInvertColor) override;
+  bool getCursorGrabUseSoftwareDisplay() override;
+
+  GHOST_TSuccess getCursorBitmap(GHOST_CursorBitmapRef *bitmap) override;
 
   void setTitle(const char *title) override;
 
@@ -76,21 +63,15 @@ class GHOST_WindowWayland : public GHOST_Window {
 
   void getClientBounds(GHOST_Rect &bounds) const override;
 
-  GHOST_TSuccess setClientWidth(GHOST_TUns32 width) override;
+  GHOST_TSuccess setClientWidth(uint32_t width) override;
 
-  GHOST_TSuccess setClientHeight(GHOST_TUns32 height) override;
+  GHOST_TSuccess setClientHeight(uint32_t height) override;
 
-  GHOST_TSuccess setClientSize(GHOST_TUns32 width, GHOST_TUns32 height) override;
+  GHOST_TSuccess setClientSize(uint32_t width, uint32_t height) override;
 
-  void screenToClient(GHOST_TInt32 inX,
-                      GHOST_TInt32 inY,
-                      GHOST_TInt32 &outX,
-                      GHOST_TInt32 &outY) const override;
+  void screenToClient(int32_t inX, int32_t inY, int32_t &outX, int32_t &outY) const override;
 
-  void clientToScreen(GHOST_TInt32 inX,
-                      GHOST_TInt32 inY,
-                      GHOST_TInt32 &outX,
-                      GHOST_TInt32 &outY) const override;
+  void clientToScreen(int32_t inX, int32_t inY, int32_t &outX, int32_t &outY) const override;
 
   GHOST_TSuccess setWindowCursorVisibility(bool visible) override;
 
@@ -111,6 +92,27 @@ class GHOST_WindowWayland : public GHOST_Window {
 #ifdef GHOST_OPENGL_ALPHA
   void setOpaque() const;
 #endif
+
+  /* WAYLAND direct-data access. */
+
+  uint16_t dpi() const;
+  int scale() const;
+  struct wl_surface *surface() const;
+  const std::vector<output_t *> &outputs();
+
+  /* WAYLAND window-level functions. */
+
+  GHOST_TSuccess close();
+  GHOST_TSuccess activate();
+  GHOST_TSuccess deactivate();
+  GHOST_TSuccess notify_size();
+
+  /* WAYLAND utility functions. */
+
+  bool outputs_enter(output_t *reg_output);
+  bool outputs_leave(output_t *reg_output);
+
+  bool outputs_changed_update_scale();
 
  private:
   GHOST_SystemWayland *m_system;

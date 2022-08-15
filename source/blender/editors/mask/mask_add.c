@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2012 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2012 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup edmask
@@ -26,6 +10,7 @@
 #include "BLI_math.h"
 
 #include "BKE_context.h"
+#include "BKE_curve.h"
 #include "BKE_mask.h"
 
 #include "DEG_depsgraph.h"
@@ -46,7 +31,9 @@
 
 #include "mask_intern.h" /* own include */
 
-/******************** add vertex *********************/
+/* -------------------------------------------------------------------- */
+/** \name Add Vertex
+ * \{ */
 
 static void setup_vertex_point(Mask *mask,
                                MaskSpline *spline,
@@ -144,7 +131,7 @@ static void setup_vertex_point(Mask *mask,
       /* parent */
       reference_parent_point = close_point;
 
-      /* note, we may want to copy other attributes later, radius? pressure? color? */
+      /* NOTE: we may want to copy other attributes later, radius? pressure? color? */
     }
   }
 
@@ -175,7 +162,11 @@ static void setup_vertex_point(Mask *mask,
   ED_mask_select_flush_all(mask);
 }
 
-/* **** add extrude vertex **** */
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Add Extrude Vertex
+ * \{ */
 
 static void finSelectedSplinePoint(MaskLayer *mask_layer,
                                    MaskSpline **spline,
@@ -188,7 +179,7 @@ static void finSelectedSplinePoint(MaskLayer *mask_layer,
   *point = NULL;
 
   if (check_active) {
-    /* TODO, having an active point but no active spline is possible, why? */
+    /* TODO: having an active point but no active spline is possible, why? */
     if (mask_layer->act_spline && mask_layer->act_point &&
         MASKPOINT_ISSEL_ANY(mask_layer->act_point)) {
       *spline = mask_layer->act_spline;
@@ -221,7 +212,11 @@ static void finSelectedSplinePoint(MaskLayer *mask_layer,
   }
 }
 
-/* **** add subdivide vertex **** */
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Add Subdivide Vertex
+ * \{ */
 
 static void mask_spline_add_point_at_index(MaskSpline *spline, int point_index)
 {
@@ -245,7 +240,7 @@ static bool add_vertex_subdivide(const bContext *C, Mask *mask, const float co[2
   MaskLayer *mask_layer;
   MaskSpline *spline;
   MaskSplinePoint *point = NULL;
-  const float threshold = 9;
+  const float threshold = 12;
   float tangent[2];
   float u;
 
@@ -263,7 +258,7 @@ static bool add_vertex_subdivide(const bContext *C, Mask *mask, const float co[2
                                       &u,
                                       NULL)) {
     Scene *scene = CTX_data_scene(C);
-    const float ctime = CFRA;
+    const float ctime = scene->r.cfra;
 
     MaskSplinePoint *new_point;
     int point_index = point - spline->points;
@@ -276,7 +271,7 @@ static bool add_vertex_subdivide(const bContext *C, Mask *mask, const float co[2
 
     setup_vertex_point(mask, spline, new_point, co, u, ctime, NULL, true);
 
-    /* TODO - we could pass the spline! */
+    /* TODO: we could pass the spline! */
     BKE_mask_layer_shape_changed_add(mask_layer,
                                      BKE_mask_layer_shape_spline_to_index(mask_layer, spline) +
                                          point_index + 1,
@@ -300,7 +295,7 @@ static bool add_vertex_extrude(const bContext *C,
                                const float co[2])
 {
   Scene *scene = CTX_data_scene(C);
-  const float ctime = CFRA;
+  const float ctime = scene->r.cfra;
 
   MaskSpline *spline;
   MaskSplinePoint *point;
@@ -360,8 +355,10 @@ static bool add_vertex_extrude(const bContext *C,
     }
   }
 
-  //      print_v2("", tangent_point);
-  //      printf("%d\n", point_index);
+#if 0
+  print_v2("", tangent_point);
+  printf("%d\n", point_index);
+#endif
 
   mask_spline_add_point_at_index(spline, point_index);
 
@@ -397,13 +394,13 @@ static bool add_vertex_extrude(const bContext *C,
 static bool add_vertex_new(const bContext *C, Mask *mask, MaskLayer *mask_layer, const float co[2])
 {
   Scene *scene = CTX_data_scene(C);
-  const float ctime = CFRA;
+  const float ctime = scene->r.cfra;
 
   MaskSpline *spline;
   MaskSplinePoint *new_point = NULL, *ref_point = NULL;
 
   if (!mask_layer) {
-    /* if there's no mask layer currently operationg on, create new one */
+    /* If there's no mask layer currently operating on, create new one. */
     mask_layer = BKE_mask_layer_new(mask, "");
     mask->masklay_act = mask->masklay_tot - 1;
   }
@@ -478,7 +475,7 @@ static int add_vertex_handle_cyclic_at_point(bContext *C,
 
   spline->flag |= MASK_SPLINE_CYCLIC;
 
-  /* TODO, update keyframes in time. */
+  /* TODO: update keyframes in time. */
   BKE_mask_calc_handle_point_auto(spline, active_point, false);
   BKE_mask_calc_handle_point_auto(spline, other_point, false);
 
@@ -505,8 +502,17 @@ static int add_vertex_handle_cyclic(
   return OPERATOR_PASS_THROUGH;
 }
 
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Add Vertex Operator
+ * \{ */
+
 static int add_vertex_exec(bContext *C, wmOperator *op)
 {
+  MaskViewLockState lock_state;
+  ED_mask_view_lock_state_store(C, &lock_state);
+
   Mask *mask = CTX_data_edit_mask(C);
   if (mask == NULL) {
     /* if there's no active mask, create one */
@@ -515,14 +521,14 @@ static int add_vertex_exec(bContext *C, wmOperator *op)
 
   MaskLayer *mask_layer = BKE_mask_layer_active(mask);
 
-  if (mask_layer && mask_layer->restrictflag & (MASK_RESTRICT_VIEW | MASK_RESTRICT_SELECT)) {
+  if (mask_layer && mask_layer->visibility_flag & (MASK_HIDE_VIEW | MASK_HIDE_SELECT)) {
     mask_layer = NULL;
   }
 
   float co[2];
   RNA_float_get_array(op->ptr, "location", co);
 
-  /* TODO, having an active point but no active spline is possible, why? */
+  /* TODO: having an active point but no active spline is possible, why? */
   if (mask_layer && mask_layer->act_spline && mask_layer->act_point &&
       MASKPOINT_ISSEL_ANY(mask_layer->act_point)) {
     MaskSpline *spline = mask_layer->act_spline;
@@ -547,6 +553,8 @@ static int add_vertex_exec(bContext *C, wmOperator *op)
   }
 
   DEG_id_tag_update(&mask->id, ID_RECALC_GEOMETRY);
+
+  ED_mask_view_lock_state_restore_no_jump(C, &lock_state);
 
   return OPERATOR_FINISHED;
 }
@@ -575,7 +583,7 @@ void MASK_OT_add_vertex(wmOperatorType *ot)
   /* api callbacks */
   ot->exec = add_vertex_exec;
   ot->invoke = add_vertex_invoke;
-  ot->poll = ED_operator_mask;
+  ot->poll = ED_maskedit_visible_splines_poll;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
@@ -593,7 +601,11 @@ void MASK_OT_add_vertex(wmOperatorType *ot)
                        1.0f);
 }
 
-/******************** add feather vertex *********************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Add Feather Vertex Operator
+ * \{ */
 
 static int add_feather_vertex_exec(bContext *C, wmOperator *op)
 {
@@ -601,7 +613,7 @@ static int add_feather_vertex_exec(bContext *C, wmOperator *op)
   MaskLayer *mask_layer;
   MaskSpline *spline;
   MaskSplinePoint *point = NULL;
-  const float threshold = 9;
+  const float threshold = 12;
   float co[2], u;
 
   RNA_float_get_array(op->ptr, "location", co);
@@ -685,11 +697,45 @@ void MASK_OT_add_feather_vertex(wmOperatorType *ot)
                        1.0f);
 }
 
-/******************** common primitive functions *********************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Common Primitive Functions
+ * \{ */
+
+static BezTriple *points_to_bezier(const float (*points)[2],
+                                   const int num_points,
+                                   const char handle_type,
+                                   const float scale,
+                                   const float location[2])
+{
+  BezTriple *bezier_points = MEM_calloc_arrayN(num_points, sizeof(BezTriple), __func__);
+  for (int i = 0; i < num_points; i++) {
+    copy_v2_v2(bezier_points[i].vec[1], points[i]);
+    mul_v2_fl(bezier_points[i].vec[1], scale);
+    add_v2_v2(bezier_points[i].vec[1], location);
+
+    bezier_points[i].h1 = handle_type;
+    bezier_points[i].h2 = handle_type;
+  }
+
+  for (int i = 0; i < num_points; i++) {
+    BKE_nurb_handle_calc(&bezier_points[i],
+                         &bezier_points[(i - 1 + num_points) % num_points],
+                         &bezier_points[(i + 1) % num_points],
+                         false,
+                         false);
+  }
+
+  return bezier_points;
+}
 
 static int create_primitive_from_points(
     bContext *C, wmOperator *op, const float (*points)[2], int num_points, char handle_type)
 {
+  MaskViewLockState lock_state;
+  ED_mask_view_lock_state_store(C, &lock_state);
+
   ScrArea *area = CTX_wm_area(C);
   int size = RNA_float_get(op->ptr, "size");
 
@@ -726,24 +772,24 @@ static int create_primitive_from_points(
 
   const int spline_index = BKE_mask_layer_shape_spline_to_index(mask_layer, new_spline);
 
+  BezTriple *bezier_points = points_to_bezier(points, num_points, handle_type, scale, location);
+
   for (int i = 0; i < num_points; i++) {
     new_spline->tot_point = i + 1;
 
     MaskSplinePoint *new_point = &new_spline->points[i];
     BKE_mask_parent_init(&new_point->parent);
 
-    copy_v2_v2(new_point->bezt.vec[1], points[i]);
-    mul_v2_fl(new_point->bezt.vec[1], scale);
-    add_v2_v2(new_point->bezt.vec[1], location);
+    new_point->bezt = bezier_points[i];
 
-    new_point->bezt.h1 = handle_type;
-    new_point->bezt.h2 = handle_type;
     BKE_mask_point_select_set(new_point, true);
 
     if (mask_layer->splines_shapes.first) {
-      BKE_mask_layer_shape_changed_add(mask_layer, spline_index + i, true, true);
+      BKE_mask_layer_shape_changed_add(mask_layer, spline_index + i, true, false);
     }
   }
+
+  MEM_freeN(bezier_points);
 
   if (added_mask) {
     WM_event_add_notifier(C, NC_MASK | NA_ADDED, NULL);
@@ -751,6 +797,8 @@ static int create_primitive_from_points(
   WM_event_add_notifier(C, NC_MASK | NA_EDITED, mask);
 
   DEG_id_tag_update(&mask->id, ID_RECALC_GEOMETRY);
+
+  ED_mask_view_lock_state_restore_no_jump(C, &lock_state);
 
   return OPERATOR_FINISHED;
 }
@@ -788,7 +836,11 @@ static void define_primitive_add_properties(wmOperatorType *ot)
                        FLT_MAX);
 }
 
-/******************** primitive add circle *********************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Primitive Add Circle Operator
+ * \{ */
 
 static int primitive_circle_add_exec(bContext *C, wmOperator *op)
 {
@@ -810,7 +862,7 @@ void MASK_OT_primitive_circle_add(wmOperatorType *ot)
   /* api callbacks */
   ot->exec = primitive_circle_add_exec;
   ot->invoke = primitive_add_invoke;
-  ot->poll = ED_operator_mask;
+  ot->poll = ED_maskedit_visible_splines_poll;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
@@ -819,7 +871,11 @@ void MASK_OT_primitive_circle_add(wmOperatorType *ot)
   define_primitive_add_properties(ot);
 }
 
-/******************** primitive add suqare *********************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Primitive Add Square Operator
+ * \{ */
 
 static int primitive_square_add_exec(bContext *C, wmOperator *op)
 {
@@ -841,7 +897,7 @@ void MASK_OT_primitive_square_add(wmOperatorType *ot)
   /* api callbacks */
   ot->exec = primitive_square_add_exec;
   ot->invoke = primitive_add_invoke;
-  ot->poll = ED_operator_mask;
+  ot->poll = ED_maskedit_visible_splines_poll;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
@@ -849,3 +905,5 @@ void MASK_OT_primitive_square_add(wmOperatorType *ot)
   /* properties */
   define_primitive_add_properties(ot);
 }
+
+/** \} */

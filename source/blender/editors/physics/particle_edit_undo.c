@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2007 by Janne Karhu.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2007 by Janne Karhu. All rights reserved. */
 
 /** \file
  * \ingroup edphys
@@ -26,6 +10,8 @@
 #include <string.h>
 
 #include "MEM_guardedalloc.h"
+
+#include "CLG_log.h"
 
 #include "DNA_meshdata_types.h"
 #include "DNA_scene_types.h"
@@ -44,10 +30,14 @@
 #include "ED_object.h"
 #include "ED_particle.h"
 #include "ED_physics.h"
+#include "ED_undo.h"
 
 #include "particle_edit_utildefines.h"
 
 #include "physics_intern.h"
+
+/** Only needed this locally. */
+static CLG_LogRef LOG = {"ed.undo.particle_edit"};
 
 /* -------------------------------------------------------------------- */
 /** \name Undo Conversion
@@ -122,10 +112,7 @@ static void undoptcache_to_editcache(PTCacheUndo *undo, PTCacheEdit *edit)
   if (edit->points) {
     MEM_freeN(edit->points);
   }
-  if (edit->mirror_cache) {
-    MEM_freeN(edit->mirror_cache);
-    edit->mirror_cache = NULL;
-  }
+  MEM_SAFE_FREE(edit->mirror_cache);
 
   edit->points = MEM_dupallocN(undo->points);
   edit->totpoint = undo->totpoint;
@@ -247,30 +234,37 @@ static bool particle_undosys_step_encode(struct bContext *C,
 static void particle_undosys_step_decode(struct bContext *C,
                                          struct Main *UNUSED(bmain),
                                          UndoStep *us_p,
-                                         int UNUSED(dir),
+                                         const eUndoStepDir UNUSED(dir),
                                          bool UNUSED(is_final))
 {
   Depsgraph *depsgraph = CTX_data_depsgraph_pointer(C);
-  /* TODO(campbell): undo_system: use low-level API to set mode. */
-  ED_object_mode_set_ex(C, OB_MODE_PARTICLE_EDIT, false, NULL);
-  BLI_assert(particle_undosys_poll(C));
 
   ParticleUndoStep *us = (ParticleUndoStep *)us_p;
   Scene *scene = us->scene_ref.ptr;
   Object *ob = us->object_ref.ptr;
+
+  ED_object_particle_edit_mode_enter_ex(depsgraph, scene, ob);
+
   PTCacheEdit *edit = PE_get_current(depsgraph, scene, ob);
-  if (edit) {
-    undoptcache_to_editcache(&us->data, edit);
-    ParticleEditSettings *pset = &scene->toolsettings->particle;
-    if ((pset->flag & PE_DRAW_PART) != 0) {
-      psys_free_path_cache(NULL, edit);
-      BKE_particle_batch_cache_dirty_tag(edit->psys, BKE_PARTICLE_BATCH_DIRTY_ALL);
-    }
-    DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
-  }
-  else {
+
+  /* While this shouldn't happen, entering particle edit-mode uses a more complex
+   * setup compared to most other modes which we can't ensure succeeds. */
+  if (UNLIKELY(edit == NULL)) {
     BLI_assert(0);
+    return;
   }
+
+  undoptcache_to_editcache(&us->data, edit);
+  ParticleEditSettings *pset = &scene->toolsettings->particle;
+  if ((pset->flag & PE_DRAW_PART) != 0) {
+    psys_free_path_cache(NULL, edit);
+    BKE_particle_batch_cache_dirty_tag(edit->psys, BKE_PARTICLE_BATCH_DIRTY_ALL);
+  }
+  DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
+
+  ED_undo_object_set_active_or_warn(scene, CTX_data_view_layer(C), ob, us_p->name, &LOG);
+
+  BLI_assert(particle_undosys_poll(C));
 }
 
 static void particle_undosys_step_free(UndoStep *us_p)
@@ -288,7 +282,6 @@ static void particle_undosys_foreach_ID_ref(UndoStep *us_p,
   foreach_ID_ref_fn(user_data, ((UndoRefID *)&us->object_ref));
 }
 
-/* Export for ED_undo_sys. */
 void ED_particle_undosys_type(UndoType *ut)
 {
   ut->name = "Edit Particle";

@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2008 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2008 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup spscript
@@ -36,7 +20,6 @@
 #include "ED_space_api.h"
 
 #include "WM_api.h"
-#include "WM_types.h"
 
 #include "UI_resources.h"
 #include "UI_view2d.h"
@@ -44,7 +27,6 @@
 #ifdef WITH_PYTHON
 #endif
 
-#include "GPU_framebuffer.h"
 #include "script_intern.h" /* own include */
 
 // static script_run_python(char *funcname, )
@@ -83,7 +65,7 @@ static void script_free(SpaceLink *sl)
   SpaceScript *sscript = (SpaceScript *)sl;
 
 #ifdef WITH_PYTHON
-  /*free buttons references*/
+  /* Free buttons references. */
   if (sscript->but_refs) {
     sscript->but_refs = NULL;
   }
@@ -156,20 +138,14 @@ static void script_header_region_draw(const bContext *C, ARegion *region)
   ED_region_header(C, region);
 }
 
-static void script_main_region_listener(wmWindow *UNUSED(win),
-                                        ScrArea *UNUSED(area),
-                                        ARegion *UNUSED(region),
-                                        wmNotifier *UNUSED(wmn),
-                                        const Scene *UNUSED(scene))
+static void script_main_region_listener(const wmRegionListenerParams *UNUSED(params))
 {
-/* context changes */
-/* XXX - Todo, need the ScriptSpace accessible to get the python script to run. */
+/* XXX: Todo, need the ScriptSpace accessible to get the python script to run. */
 #if 0
   BPY_run_script_space_listener()
 #endif
 }
 
-/* only called once, from space/spacetypes.c */
 void ED_spacetype_script(void)
 {
   SpaceType *st = MEM_callocN(sizeof(SpaceType), "spacetype script");

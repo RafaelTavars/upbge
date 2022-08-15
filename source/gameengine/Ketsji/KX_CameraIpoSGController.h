@@ -31,12 +31,10 @@
 
 #pragma once
 
-
 #include "KX_IInterpolator.h"
 #include "SG_Controller.h"
 #include "SG_Node.h"
 
-struct RAS_CameraData;
 
 class KX_CameraIpoSGController : public SG_Controller {
  public:
@@ -88,4 +86,3 @@ class KX_CameraIpoSGController : public SG_Controller {
   }
   void AddInterpolator(KX_IInterpolator *interp);
 };
-

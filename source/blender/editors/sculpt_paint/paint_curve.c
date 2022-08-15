@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup edsculpt
@@ -241,7 +227,7 @@ static void paintcurve_point_add(bContext *C, wmOperator *op, const int loc[2])
     pcp[add_index].bez.h1 = HD_ALIGN;
   }
 
-  ED_paintcurve_undo_push_end();
+  ED_paintcurve_undo_push_end(C);
 
   WM_paint_cursor_tag_redraw(window, region);
 }
@@ -352,7 +338,7 @@ static int paintcurve_delete_point_exec(bContext *C, wmOperator *op)
 
 #undef DELETE_TAG
 
-  ED_paintcurve_undo_push_end();
+  ED_paintcurve_undo_push_end(C);
 
   WM_paint_cursor_tag_redraw(window, region);
 
@@ -463,12 +449,12 @@ static bool paintcurve_point_select(
     }
 
     if (!pcp) {
-      ED_paintcurve_undo_push_end();
+      ED_paintcurve_undo_push_end(C);
       return false;
     }
   }
 
-  ED_paintcurve_undo_push_end();
+  ED_paintcurve_undo_push_end(C);
 
   WM_paint_cursor_tag_redraw(window, region);
 
@@ -614,7 +600,7 @@ static int paintcurve_slide_modal(bContext *C, wmOperator *op, const wmEvent *ev
   if (event->type == psd->event && event->val == KM_RELEASE) {
     MEM_freeN(psd);
     ED_paintcurve_undo_push_begin(op->type->name);
-    ED_paintcurve_undo_push_end();
+    ED_paintcurve_undo_push_end(C);
     return OPERATOR_FINISHED;
   }
 
@@ -694,7 +680,7 @@ static int paintcurve_draw_exec(bContext *C, wmOperator *UNUSED(op))
       return OPERATOR_PASS_THROUGH;
   }
 
-  return WM_operator_name_call(C, name, WM_OP_INVOKE_DEFAULT, NULL);
+  return WM_operator_name_call(C, name, WM_OP_INVOKE_DEFAULT, NULL, NULL);
 }
 
 void PAINTCURVE_OT_draw(wmOperatorType *ot)

@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup edundo
@@ -35,6 +21,8 @@
 
 #include "BKE_blender_undo.h"
 #include "BKE_context.h"
+#include "BKE_global.h" //UPBGE
+#include "BKE_icons.h"
 #include "BKE_lib_id.h"
 #include "BKE_lib_query.h"
 #include "BKE_main.h"
@@ -48,6 +36,7 @@
 #include "WM_types.h"
 
 #include "ED_object.h"
+#include "ED_render.h"
 #include "ED_undo.h"
 #include "ED_util.h"
 
@@ -116,7 +105,7 @@ static int memfile_undosys_step_id_reused_cb(LibraryIDLinkCallbackData *cb_data)
   BLI_assert((id_self->tag & LIB_TAG_UNDO_OLD_ID_REUSED) != 0);
 
   ID *id = *id_pointer;
-  if (id != NULL && id->lib == NULL && (id->tag & LIB_TAG_UNDO_OLD_ID_REUSED) == 0) {
+  if (id != NULL && !ID_IS_LINKED(id) && (id->tag & LIB_TAG_UNDO_OLD_ID_REUSED) == 0) {
     bool do_stop_iter = true;
     if (GS(id_self->name) == ID_OB) {
       Object *ob_self = (Object *)id_self;
@@ -142,22 +131,47 @@ static int memfile_undosys_step_id_reused_cb(LibraryIDLinkCallbackData *cb_data)
   return IDWALK_RET_NOP;
 }
 
+/**
+ * ID previews may be generated in a parallel job. So whatever operation generates the preview
+ * likely does the undo push before the preview is actually done and stored in the ID. Hence they
+ * get some extra treatment here:
+ * When undoing back to the moment the preview generation was triggered, this function schedules
+ * the preview for regeneration.
+ */
+static void memfile_undosys_unfinished_id_previews_restart(ID *id)
+{
+  PreviewImage *preview = BKE_previewimg_id_get(id);
+  if (!preview) {
+    return;
+  }
+
+  for (int i = 0; i < NUM_ICON_SIZES; i++) {
+    if (preview->flag[i] & PRV_USER_EDITED) {
+      /* Don't modify custom previews. */
+      continue;
+    }
+
+    if (!BKE_previewimg_is_finished(preview, i)) {
+      ED_preview_restart_queue_add(id, i);
+    }
+  }
+}
+
 static void memfile_undosys_step_decode(struct bContext *C,
                                         struct Main *bmain,
                                         UndoStep *us_p,
-                                        int undo_direction,
+                                        const eUndoStepDir undo_direction,
                                         bool UNUSED(is_final))
 {
-  BLI_assert(undo_direction != 0);
+  BLI_assert(undo_direction != STEP_INVALID);
 
   bool use_old_bmain_data = true;
 
-  if (USER_EXPERIMENTAL_TEST(&U, use_undo_legacy)) {
+  if (USER_EXPERIMENTAL_TEST(&U, use_undo_legacy) || !(U.uiflag & USER_GLOBALUNDO)) {
     use_old_bmain_data = false;
   }
-  else if (undo_direction > 0) {
-    /* Redo case.
-     * The only time we should have to force a complete redo is when current step is tagged as a
+  else if (undo_direction == STEP_REDO) {
+    /* The only time we should have to force a complete redo is when current step is tagged as a
      * redo barrier.
      * If previous step was not a memfile one should not matter here, current data in old bmain
      * should still always be valid for unchanged data-blocks. */
@@ -165,14 +179,13 @@ static void memfile_undosys_step_decode(struct bContext *C,
       use_old_bmain_data = false;
     }
   }
-  /* Game Engine transition (we force undo legacy while we try to fix new fast undo for UPBGE */
-  else if (true) {
-	use_old_bmain_data = false;
+  /* UPBGE (we force undo legacy at bge exit only (while we try to fix new fast undo for) UPBGE */
+  else if (G.is_undo_at_exit == true) {
+    use_old_bmain_data = false;
   }
-  /* End game engine transition */
-  else {
-    /* Undo case.
-     * Here we do not care whether current step is an undo barrier, since we are coming from
+  /* End UPBGE */
+  else if (undo_direction == STEP_UNDO) {
+    /* Here we do not care whether current step is an undo barrier, since we are coming from
      * 'the future' we can still re-use old data. However, if *next* undo step
      * (i.e. the one immediately in the future, the one we are coming from)
      * is a barrier, then we have to force a complete undo.
@@ -195,6 +208,9 @@ static void memfile_undosys_step_decode(struct bContext *C,
   }
 
   ED_editors_exit(bmain, false);
+  /* Ensure there's no preview job running. Unfinished previews will be scheduled for regeneration
+   * via #memfile_undosys_unfinished_id_previews_restart(). */
+  ED_preview_kill_jobs(CTX_wm_manager(C), bmain);
 
   MemFileUndoStep *us = (MemFileUndoStep *)us_p;
   BKE_memfile_undo_decode(us->data, undo_direction, use_old_bmain_data, C);
@@ -231,9 +247,24 @@ static void memfile_undosys_step_decode(struct bContext *C,
 
       /* Tag depsgraph to update data-block for changes that happened between the
        * current and the target state, see direct_link_id_restore_recalc(). */
-      if (id->recalc) {
+      if (id->recalc != 0) {
         DEG_id_tag_update_ex(bmain, id, id->recalc);
       }
+
+      bNodeTree *nodetree = ntreeFromID(id);
+      if (nodetree != NULL && nodetree->id.recalc != 0) {
+        DEG_id_tag_update_ex(bmain, &nodetree->id, nodetree->id.recalc);
+      }
+      if (GS(id->name) == ID_SCE) {
+        Scene *scene = (Scene *)id;
+        if (scene->master_collection != NULL && scene->master_collection->id.recalc != 0) {
+          DEG_id_tag_update_ex(
+              bmain, &scene->master_collection->id, scene->master_collection->id.recalc);
+        }
+      }
+
+      /* Restart preview generation if the undo state was generating previews. */
+      memfile_undosys_unfinished_id_previews_restart(id);
     }
     FOREACH_MAIN_ID_END;
 
@@ -258,6 +289,14 @@ static void memfile_undosys_step_decode(struct bContext *C,
     }
     FOREACH_MAIN_ID_END;
   }
+  else {
+    ID *id = NULL;
+    FOREACH_MAIN_ID_BEGIN (bmain, id) {
+      /* Restart preview generation if the undo state was generating previews. */
+      memfile_undosys_unfinished_id_previews_restart(id);
+    }
+    FOREACH_MAIN_ID_END;
+  }
 
   WM_event_add_notifier(C, NC_SCENE | ND_LAYER_CONTENT, CTX_data_scene(C));
 }
@@ -278,7 +317,6 @@ static void memfile_undosys_step_free(UndoStep *us_p)
   BKE_memfile_undo_free(us->data);
 }
 
-/* Export for ED_undo_sys. */
 void ED_memfile_undosys_type(UndoType *ut)
 {
   ut->name = "Global Undo";
@@ -317,21 +355,6 @@ struct MemFile *ED_undosys_stack_memfile_get_active(UndoStack *ustack)
   return NULL;
 }
 
-/**
- * If the last undo step is a memfile one, find the first #MemFileChunk matching given ID
- * (using its session UUID), and tag it as "changed in the future".
- *
- * Since non-memfile undos cannot automatically set this flag in the previous step as done with
- * memfile ones, this has to be called manually by relevant undo code.
- *
- * \note Only current known case for this is undoing a switch from Object to Sculpt mode (see
- * T82388).
- *
- * \note Calling this ID by ID is not optimal, as it will loop over all #MemFile.chunks until it
- * finds the expected one. If this becomes an issue we'll have to add a mapping from session UUID
- * to first #MemFileChunk in #MemFile itself
- * (currently we only do that in #MemFileWriteData when writing a new step).
- */
 void ED_undosys_stack_memfile_id_changed_tag(UndoStack *ustack, ID *id)
 {
   UndoStep *us = ustack->step_active;

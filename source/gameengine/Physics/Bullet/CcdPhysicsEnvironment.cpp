@@ -21,19 +21,19 @@
 
 #include "CcdPhysicsEnvironment.h"
 
-
 #include "BKE_object.h"
 #include "DNA_object_force_types.h"
 #include "DNA_scene_types.h"
 
 #include "BulletCollision/CollisionDispatch/btGhostObject.h"
-#include "BulletDynamics/ConstraintSolver/btNNCGConstraintSolver.h"
 #include "BulletCollision/Gimpact/btGImpactCollisionAlgorithm.h"
 #include "BulletCollision/NarrowPhaseCollision/btRaycastCallback.h"
+#include "BulletDynamics/ConstraintSolver/btNNCGConstraintSolver.h"
 #include "BulletSoftBody/btSoftBodyRigidBodyCollisionConfiguration.h"
 #include "BulletSoftBody/btSoftRigidDynamicsWorld.h"
 
-#include "BL_BlenderSceneConverter.h"
+#include "BL_SceneConverter.h"
+#include "CM_List.h"
 #include "CcdConstraint.h"
 #include "CcdGraphicController.h"
 #include "KX_GameObject.h"
@@ -89,10 +89,8 @@ class VehicleClosestRayResultCallback : public btCollisionWorld::ClosestRayResul
 
     btCollisionObject *object = (btCollisionObject *)proxy0->m_clientObject;
     CcdPhysicsController *phyCtrl = static_cast<CcdPhysicsController *>(object->getUserPointer());
-    KX_GameObject *gameObj = KX_GameObject::GetClientObject(
-        (KX_ClientObjectInfo *)phyCtrl->GetNewClientInfo());
 
-    if (gameObj->GetUserCollisionGroup() & m_mask) {
+    if (phyCtrl->GetCollisionGroup() & m_mask) {
       return true;
     }
 
@@ -366,8 +364,7 @@ void CcdPhysicsEnvironment::SetDebugDrawer(btIDebugDraw *debugDrawer)
   m_debugDrawer = debugDrawer;
 }
 
-CcdPhysicsEnvironment::CcdPhysicsEnvironment(PHY_SolverType solverType,
-                                             bool useDbvtCulling)
+CcdPhysicsEnvironment::CcdPhysicsEnvironment(PHY_SolverType solverType, bool useDbvtCulling)
     : m_cullingCache(nullptr),
       m_cullingTree(nullptr),
       m_numIterations(10),
@@ -378,7 +375,6 @@ CcdPhysicsEnvironment::CcdPhysicsEnvironment(PHY_SolverType solverType,
       m_angularDeactivationThreshold(1.0f),
       m_contactBreakingThreshold(0.02f),
       m_solver(nullptr),
-      m_ownPairCache(nullptr),
       m_filterCallback(nullptr),
       m_ghostPairCallback(nullptr),
       m_ownDispatcher(nullptr)
@@ -510,25 +506,25 @@ void CcdPhysicsEnvironment::RemoveVehicle(WrapperVehicle *vehicle, bool free)
 {
   m_dynamicsWorld->removeVehicle(vehicle->GetVehicle());
   if (free) {
-    m_wrapperVehicles.erase(
-        std::find(m_wrapperVehicles.begin(), m_wrapperVehicles.end(), vehicle));
+    CM_ListRemoveIfFound(m_wrapperVehicles, vehicle);
     delete vehicle;
   }
 }
 
 void CcdPhysicsEnvironment::RemoveVehicle(CcdPhysicsController *ctrl, bool free)
 {
-  for (std::vector<WrapperVehicle *>::iterator it = m_wrapperVehicles.begin(); it != m_wrapperVehicles.end();) {
+  for (std::vector<WrapperVehicle *>::iterator it = m_wrapperVehicles.begin();
+       it != m_wrapperVehicles.end();) {
     WrapperVehicle *vehicle = *it;
-      if (vehicle->GetChassis() == ctrl) {
-        m_dynamicsWorld->removeVehicle(vehicle->GetVehicle());
-        if (free) {
-          it = m_wrapperVehicles.erase(it);
-          delete vehicle;
-          continue;
-        }
+    if (vehicle->GetChassis() == ctrl) {
+      m_dynamicsWorld->removeVehicle(vehicle->GetVehicle());
+      if (free) {
+        it = m_wrapperVehicles.erase(it);
+        delete vehicle;
+        continue;
       }
-      ++it;
+    }
+    ++it;
   }
 }
 
@@ -605,6 +601,7 @@ bool CcdPhysicsEnvironment::RemoveCcdPhysicsController(CcdPhysicsController *ctr
 
 void CcdPhysicsEnvironment::UpdateCcdPhysicsController(CcdPhysicsController *ctrl,
                                                        btScalar newMass,
+                                                       btScalar newFriction,
                                                        int newCollisionFlags,
                                                        short int newCollisionGroup,
                                                        short int newCollisionMask)
@@ -621,7 +618,8 @@ void CcdPhysicsEnvironment::UpdateCcdPhysicsController(CcdPhysicsController *ctr
     if (body) {
       if (newMass)
         body->getCollisionShape()->calculateLocalInertia(newMass, inertia);
-      body->setMassProps(newMass, inertia);
+      body->setMassProps(newMass, inertia * ctrl->GetInertiaFactor());
+      body->setFriction(newFriction);
       m_dynamicsWorld->addRigidBody(body, newCollisionGroup, newCollisionMask);
     }
     else if (softBody) {
@@ -633,6 +631,7 @@ void CcdPhysicsEnvironment::UpdateCcdPhysicsController(CcdPhysicsController *ctr
   }
   // to avoid nasty interaction, we must update the property of the controller as well
   ctrl->m_cci.m_mass = newMass;
+  ctrl->m_cci.m_friction = newFriction;
   ctrl->m_cci.m_collisionFilterGroup = newCollisionGroup;
   ctrl->m_cci.m_collisionFilterMask = newCollisionMask;
   ctrl->m_cci.m_collisionFlags = newCollisionFlags;
@@ -700,8 +699,7 @@ void CcdPhysicsEnvironment::UpdateCcdPhysicsControllerShape(CcdShapeConstruction
 
 void CcdPhysicsEnvironment::DebugDrawWorld()
 {
-  if (m_dynamicsWorld->getDebugDrawer() && m_dynamicsWorld->getDebugDrawer()->getDebugMode() > 0)
-    m_dynamicsWorld->debugDrawWorld();
+  m_dynamicsWorld->debugDrawWorld();
 }
 
 void CcdPhysicsEnvironment::StaticSimulationSubtickCallback(btDynamicsWorld *world,
@@ -745,11 +743,6 @@ bool CcdPhysicsEnvironment::ProceedDeltaTime(double curTime, float timeStep, flo
   for (it = m_controllers.begin(); it != m_controllers.end(); it++) {
     (*it)->SynchronizeMotionStates(timeStep);
   }
-
-  // for (it=m_controllers.begin(); it!=m_controllers.end(); it++)
-  //{
-  //	(*it)->SynchronizeMotionStates(timeStep);
-  //}
 
   for (i = 0; i < m_wrapperVehicles.size(); i++) {
     WrapperVehicle *veh = m_wrapperVehicles[i];
@@ -812,7 +805,7 @@ void CcdPhysicsEnvironment::ProcessFhSprings(double curTime, float interval)
       // re-implement SM_FhObject.cpp using btCollisionWorld::rayTest and info from
       // ctrl->getConstructionInfo() send a ray from {0.0, 0.0, 0.0} towards {0.0, 0.0, -10.0}, in
       // local coordinates
-      CcdPhysicsController *parentCtrl = ctrl->GetParentCtrl();
+      CcdPhysicsController *parentCtrl = ctrl->GetParentRoot();
       btRigidBody *parentBody = parentCtrl ? parentCtrl->GetRigidBody() : nullptr;
       btRigidBody *cl_object = parentBody ? parentBody : body;
 
@@ -1177,7 +1170,6 @@ PHY_IPhysicsController *CcdPhysicsEnvironment::RayTest(PHY_IRayCastFilterCallbac
   FilterClosestRayResultCallback rayCallback(filterCallback, rayFrom, rayTo);
 
   PHY_RayCastResult result;
-  memset(&result, 0, sizeof(result));
 
   // don't collision with sensor object
   rayCallback.m_collisionFilterMask = CcdConstructionInfo::AllFilter ^
@@ -1972,7 +1964,7 @@ btDispatcher *CcdPhysicsEnvironment::GetDispatcher()
 
 void CcdPhysicsEnvironment::MergeEnvironment(PHY_IPhysicsEnvironment *other_env)
 {
-  CcdPhysicsEnvironment *other = dynamic_cast<CcdPhysicsEnvironment *>(other_env);
+  CcdPhysicsEnvironment *other = static_cast<CcdPhysicsEnvironment *>(other_env);
   if (other == nullptr) {
     CM_Error("other scene is not using Bullet physics, not merging physics.");
     return;
@@ -1999,9 +1991,6 @@ CcdPhysicsEnvironment::~CcdPhysicsEnvironment()
   // first delete scene, then dispatcher, because pairs have to release manifolds on the dispatcher
   // delete m_dispatcher;
   delete m_dynamicsWorld;
-
-  if (nullptr != m_ownPairCache)
-    delete m_ownPairCache;
 
   if (nullptr != m_ownDispatcher)
     delete m_ownDispatcher;
@@ -2080,67 +2069,76 @@ bool CcdPhysicsEnvironment::RequestCollisionCallback(PHY_IPhysicsController *ctr
 
 void CcdPhysicsEnvironment::CallbackTriggers()
 {
-  bool draw_contact_points = m_debugDrawer &&
-                             (m_debugDrawer->getDebugMode() & btIDebugDraw::DBG_DrawContactPoints);
-
-  if (!m_triggerCallbacks[PHY_OBJECT_RESPONSE] && !draw_contact_points)
+  if (!m_triggerCallbacks[PHY_OBJECT_RESPONSE]) {
     return;
+  }
 
-  // walk over all overlapping pairs, and if one of the involved bodies is registered for trigger
+  // Walk over all overlapping pairs, and if one of the involved bodies is registered for trigger
   // callback, perform callback
   btDispatcher *dispatcher = m_dynamicsWorld->getDispatcher();
-  int numManifolds = dispatcher->getNumManifolds();
-  for (int i = 0; i < numManifolds; i++) {
+  for (unsigned int i = 0, numManifolds = dispatcher->getNumManifolds(); i < numManifolds; i++) {
     bool colliding_ctrl0 = true;
     btPersistentManifold *manifold = dispatcher->getManifoldByIndexInternal(i);
-    const int numContacts = manifold->getNumContacts();
-    if (!numContacts) {
+    if (manifold->getNumContacts() == 0) {
       continue;
     }
 
     const btCollisionObject *col0 = manifold->getBody0();
     const btCollisionObject *col1 = manifold->getBody1();
-    if (draw_contact_points) {
-      for (int j = 0; j < numContacts; j++) {
-        static const btVector3 color(1.0f, 1.0f, 0.0f);
-        const btManifoldPoint &cp = manifold->getContactPoint(j);
-        m_debugDrawer->drawContactPoint(
-            cp.m_positionWorldOnB, cp.m_normalWorldOnB, cp.getDistance(), cp.getLifeTime(), color);
-      }
-    }
 
-    // m_internalOwner is set in 'addPhysicsController'
     CcdPhysicsController *ctrl0 = static_cast<CcdPhysicsController *>(col0->getUserPointer());
     CcdPhysicsController *ctrl1 = static_cast<CcdPhysicsController *>(col1->getUserPointer());
-    bool usecallback = false;
 
+    bool first;
     // Test if one of the controller is registered and use collision callback.
     if (ctrl0->Registered()) {
-      usecallback = true;
+      first = true;
     }
     else if (ctrl1->Registered()) {
-      colliding_ctrl0 = false;
-      usecallback = true;
+      first = false;
+    }
+    else {
+      // No controllers registered for collision callbacks.
+      continue;
     }
 
-    if (usecallback) {
-      const CcdCollData *coll_data = new CcdCollData(manifold);
-
-      m_triggerCallbacks[PHY_OBJECT_RESPONSE](m_triggerCallbacksUserPtrs[PHY_OBJECT_RESPONSE],
-                                              colliding_ctrl0 ? ctrl0 : ctrl1,
-                                              colliding_ctrl0 ? ctrl1 : ctrl0,
-                                              coll_data);
-    }
-    // Bullet does not refresh the manifold contact point for object without contact response
-    // may need to remove this when a newer Bullet version is integrated
-    if (!dispatcher->needsResponse(col0, col1)) {
-      // Refresh algorithm fails sometimes when there is penetration
-      // (usuall the case with ghost and sensor objects)
-      // Let's just clear the manifold, in any case, it is recomputed on each frame.
-      manifold
-          ->clearManifold();  // refreshContactPoints(rb0->getCenterOfMassTransform(),rb1->getCenterOfMassTransform());
-    }
+    const CcdCollData *coll_data = new CcdCollData(manifold);
+    m_triggerCallbacks[PHY_OBJECT_RESPONSE](m_triggerCallbacksUserPtrs[PHY_OBJECT_RESPONSE], ctrl0, ctrl1, coll_data, first);
   }
+}
+
+PHY_CollisionTestResult CcdPhysicsEnvironment::CheckCollision(PHY_IPhysicsController *ctrl0, PHY_IPhysicsController *ctrl1)
+{
+  PHY_CollisionTestResult result{false, false, nullptr};
+
+  btCollisionObject *col0 = static_cast<CcdPhysicsController *>(ctrl0)->GetCollisionObject();
+  btCollisionObject *col1 = static_cast<CcdPhysicsController *>(ctrl1)->GetCollisionObject();
+
+  if (!col0 || !col1) {
+    return result;
+  }
+
+  btBroadphaseProxy *proxy0 = col0->getBroadphaseHandle();
+  btBroadphaseProxy *proxy1 = col1->getBroadphaseHandle();
+
+  btBroadphasePair *pair = m_dynamicsWorld->getPairCache()->findPair(proxy0, proxy1);
+
+  if (!pair) {
+    return result;
+  }
+
+  result.collide = true;
+
+  if (pair->m_algorithm) {
+    btManifoldArray manifoldArray;
+    pair->m_algorithm->getAllContactManifolds(manifoldArray);
+    btPersistentManifold *manifold = manifoldArray[0];
+
+    result.isFirst = (col0 == manifold->getBody0());
+    result.collData = new CcdCollData(manifold);
+  }
+
+  return result;
 }
 
 // This call back is called before a pair is added in the cache
@@ -2148,56 +2146,44 @@ void CcdPhysicsEnvironment::CallbackTriggers()
 bool CcdOverlapFilterCallBack::needBroadphaseCollision(btBroadphaseProxy *proxy0,
                                                        btBroadphaseProxy *proxy1) const
 {
-  btCollisionObject *colObj0, *colObj1;
-  CcdPhysicsController *sensorCtrl, *objCtrl;
+  btCollisionObject *colObj0 = (btCollisionObject *)proxy0->m_clientObject;
+  btCollisionObject *colObj1 = (btCollisionObject *)proxy1->m_clientObject;
 
-  KX_GameObject *kxObj0 = KX_GameObject::GetClientObject(
-      (KX_ClientObjectInfo *)((CcdPhysicsController *)(((btCollisionObject *)
-                                                            proxy0->m_clientObject)
-                                                           ->getUserPointer()))
-          ->GetNewClientInfo());
-  KX_GameObject *kxObj1 = KX_GameObject::GetClientObject(
-      (KX_ClientObjectInfo *)((CcdPhysicsController *)(((btCollisionObject *)
-                                                            proxy1->m_clientObject)
-                                                           ->getUserPointer()))
-          ->GetNewClientInfo());
-
-  // First check the filters. Note that this is called during scene
-  // conversion, so we can't assume the KX_GameObject instances exist. This
-  // may make some objects erroneously collide on the first frame, but the
-  // alternative is to have them erroneously miss.
-  bool collides;
-  collides = (proxy0->m_collisionFilterGroup & proxy1->m_collisionFilterMask) != 0;
-  collides = collides && (proxy1->m_collisionFilterGroup & proxy0->m_collisionFilterMask);
-  if (kxObj0 && kxObj1) {
-    collides = collides && kxObj0->CheckCollision(kxObj1);
-    collides = collides && kxObj1->CheckCollision(kxObj0);
-  }
-  if (!collides)
+  if (!colObj0 || !colObj1) {
     return false;
+  }
 
+  CcdPhysicsController *ctrl0 = static_cast<CcdPhysicsController *>(colObj0->getUserPointer());
+  CcdPhysicsController *ctrl1 = static_cast<CcdPhysicsController *>(colObj1->getUserPointer());
+
+  if (!((proxy0->m_collisionFilterGroup & proxy1->m_collisionFilterMask) &&
+        (proxy1->m_collisionFilterGroup & proxy0->m_collisionFilterMask) &&
+        (ctrl0->GetCollisionGroup() & ctrl1->GetCollisionMask()) &&
+        (ctrl1->GetCollisionGroup() & ctrl0->GetCollisionMask())))
+  {
+    return false;
+  }
+
+  CcdPhysicsController *sensorCtrl, *objCtrl;
   // additional check for sensor object
   if (proxy0->m_collisionFilterGroup & btBroadphaseProxy::SensorTrigger) {
     // this is a sensor object, the other one can't be a sensor object because
     // they exclude each other in the above test
     BLI_assert(!(proxy1->m_collisionFilterGroup & btBroadphaseProxy::SensorTrigger));
-    colObj0 = (btCollisionObject *)proxy0->m_clientObject;
-    colObj1 = (btCollisionObject *)proxy1->m_clientObject;
+    sensorCtrl = ctrl0;
+    objCtrl = ctrl1;
   }
   else if (proxy1->m_collisionFilterGroup & btBroadphaseProxy::SensorTrigger) {
-    colObj0 = (btCollisionObject *)proxy1->m_clientObject;
-    colObj1 = (btCollisionObject *)proxy0->m_clientObject;
+    sensorCtrl = ctrl1;
+    objCtrl = ctrl0;
   }
   else {
     return true;
   }
-  if (!colObj0 || !colObj1)
-    return false;
-  sensorCtrl = static_cast<CcdPhysicsController *>(colObj0->getUserPointer());
-  objCtrl = static_cast<CcdPhysicsController *>(colObj1->getUserPointer());
+
   if (m_physEnv->m_triggerCallbacks[PHY_BROADPH_RESPONSE]) {
     return m_physEnv->m_triggerCallbacks[PHY_BROADPH_RESPONSE](
-        m_physEnv->m_triggerCallbacksUserPtrs[PHY_BROADPH_RESPONSE], sensorCtrl, objCtrl, 0);
+        m_physEnv->m_triggerCallbacksUserPtrs[PHY_BROADPH_RESPONSE], sensorCtrl, objCtrl, nullptr, false);
   }
   return true;
 }
@@ -2220,7 +2206,7 @@ PHY_IVehicle *CcdPhysicsEnvironment::GetVehicleConstraint(int constraintId)
 PHY_ICharacter *CcdPhysicsEnvironment::GetCharacterController(KX_GameObject *ob)
 {
   CcdPhysicsController *controller = (CcdPhysicsController *)ob->GetPhysicsController();
-  return (controller) ? dynamic_cast<BlenderBulletCharacterController *>(
+  return (controller) ? static_cast<CcdCharacter *>(
                             controller->GetCharacterController()) :
                         nullptr;
 }
@@ -2229,7 +2215,6 @@ PHY_IPhysicsController *CcdPhysicsEnvironment::CreateSphereController(float radi
                                                                       const MT_Vector3 &position)
 {
   CcdConstructionInfo cinfo;
-  memset(&cinfo, 0, sizeof(cinfo));  // avoid uninitialized values
   cinfo.m_collisionShape = new btSphereShape(
       radius);  // memory leak! The shape is not deleted by Bullet and we cannot add it to the
                 // KX_Scene.m_shapes list
@@ -2245,6 +2230,8 @@ PHY_IPhysicsController *CcdPhysicsEnvironment::CreateSphereController(float radi
   // we will add later the possibility to select the filter from option
   cinfo.m_collisionFilterMask = CcdConstructionInfo::AllFilter ^ CcdConstructionInfo::SensorFilter;
   cinfo.m_collisionFilterGroup = CcdConstructionInfo::SensorFilter;
+  cinfo.m_collisionGroup = 0xFFFF;
+  cinfo.m_collisionMask = 0xFFFF;
   cinfo.m_bSensor = true;
   motionState->m_worldTransform.setIdentity();
   motionState->m_worldTransform.setOrigin(ToBullet(position));
@@ -2287,7 +2274,8 @@ PHY_IConstraint *CcdPhysicsEnvironment::CreateConstraint(class PHY_IPhysicsContr
                                                          float axis2X,
                                                          float axis2Y,
                                                          float axis2Z,
-                                                         int flags)
+                                                         int flags,
+                                                         bool replicate_dupli)
 {
   bool disableCollisionBetweenLinkedBodies = (0 !=
                                               (flags & CCD_CONSTRAINT_DISABLE_LINKED_COLLISION));
@@ -2300,6 +2288,12 @@ PHY_IConstraint *CcdPhysicsEnvironment::CreateConstraint(class PHY_IPhysicsContr
 
   bool rb0static = rb0 ? rb0->isStaticOrKinematicObject() : true;
   bool rb1static = rb1 ? rb1->isStaticOrKinematicObject() : true;
+
+  if (replicate_dupli) {
+    if (rb1) {
+      rb1->setCenterOfMassTransform(c1->GetTransformFromMotionState(c1->GetMotionState()));
+    }
+  }
 
   btCollisionObject *colObj0 = c0->GetCollisionObject();
   if (!colObj0) {
@@ -2620,7 +2614,6 @@ PHY_IPhysicsController *CcdPhysicsEnvironment::CreateConeController(float conera
                                                                     float coneheight)
 {
   CcdConstructionInfo cinfo;
-  // don't memset cinfo: this is C++ and values should be set in the constructor!
 
   // we don't need a CcdShapeConstructionInfo for this shape:
   // it is simple enough for the standard copy constructor (see CcdPhysicsController::GetReplica)
@@ -2635,6 +2628,8 @@ PHY_IPhysicsController *CcdPhysicsEnvironment::CreateConeController(float conera
   // we will add later the possibility to select the filter from option
   cinfo.m_collisionFilterMask = CcdConstructionInfo::AllFilter ^ CcdConstructionInfo::SensorFilter;
   cinfo.m_collisionFilterGroup = CcdConstructionInfo::SensorFilter;
+  cinfo.m_collisionGroup = 0xFFFF;
+  cinfo.m_collisionMask = 0xFFFF;
   cinfo.m_bSensor = true;
   motionState->m_worldTransform.setIdentity();
   //	motionState->m_worldTransform.setOrigin(btVector3(position[0],position[1],position[2]));
@@ -2737,8 +2732,8 @@ CcdPhysicsEnvironment *CcdPhysicsEnvironment::Create(Scene *blenderscene, bool v
 {
 
   static const PHY_SolverType solverTypeTable[] = {
-      PHY_SOLVER_SEQUENTIAL,    // GAME_SOLVER_SEQUENTIAL
-      PHY_SOLVER_NNCG,          // GAME_SOLVER_NNGC
+      PHY_SOLVER_SEQUENTIAL,  // GAME_SOLVER_SEQUENTIAL
+      PHY_SOLVER_NNCG,        // GAME_SOLVER_NNGC
   };
   CcdPhysicsEnvironment *ccdPhysEnv = new CcdPhysicsEnvironment(
       solverTypeTable[blenderscene->gm.solverType], false);
@@ -2759,7 +2754,7 @@ CcdPhysicsEnvironment *CcdPhysicsEnvironment::Create(Scene *blenderscene, bool v
   return ccdPhysEnv;
 }
 
-void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
+void CcdPhysicsEnvironment::ConvertObject(BL_SceneConverter *converter,
                                           KX_GameObject *gameobj,
                                           RAS_MeshObject *meshobj,
                                           DerivedMesh *dm,
@@ -2783,17 +2778,34 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
   Object *blenderparent = blenderobject->parent;
   Object *rootparent = nullptr;
   // Find the upper parent object using compound shape.
-  while (blenderparent) {
-    if ((blenderparent->gameflag & OB_CHILD) && (blenderobject->gameflag & (OB_COLLISION | OB_DYNAMIC | OB_RIGID_BODY)) &&
-        !(blenderobject->gameflag & OB_SOFT_BODY)) {
-      rootparent = blenderparent;
+  Object *blenderRoot = blenderobject->parent;
+  Object *blenderCompoundRoot = nullptr;
+  // Iterate over all parents in the object tree.
+  {
+    Object *parentit = blenderobject->parent;
+    while (parentit) {
+      // If the parent is valid for compound parent shape, update blenderCompoundRoot.
+      if ((parentit->gameflag & OB_CHILD) &&
+          (blenderobject->gameflag & (OB_COLLISION | OB_DYNAMIC | OB_RIGID_BODY)) &&
+          !(blenderobject->gameflag & OB_SOFT_BODY)) {
+        blenderCompoundRoot = parentit;
+      }
+      // Continue looking for root parent.
+      blenderRoot = parentit;
+
+      parentit = parentit->parent;
     }
-    blenderparent = blenderparent->parent;
   }
 
-  KX_GameObject *parent = nullptr;
-  if (rootparent) {
-    parent = converter->FindGameObject(rootparent);
+  KX_GameObject *compoundParent = nullptr;
+  if (blenderCompoundRoot) {
+    compoundParent = converter->FindGameObject(blenderCompoundRoot);
+    isbulletsoftbody = false;
+  }
+
+  KX_GameObject *parentRoot = nullptr;
+  if (blenderRoot) {
+    parentRoot = converter->FindGameObject(blenderRoot);
     isbulletsoftbody = false;
   }
 
@@ -2803,6 +2815,9 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
   if ((blenderobject->gameflag & (OB_GHOST | OB_SENSOR | OB_CHARACTER)) != 0) {
     ci.m_collisionFlags |= btCollisionObject::CF_NO_CONTACT_RESPONSE;
   }
+
+  ci.m_collisionGroup = blenderobject->col_group;
+  ci.m_collisionMask = blenderobject->col_mask;
 
   ci.m_MotionState = motionstate;
   ci.m_gravity = btVector3(0.0f, 0.0f, 0.0f);
@@ -2826,8 +2841,12 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
   ci.m_maxSlope = isbulletchar ? blenderobject->max_slope : 0.0f;
   ci.m_maxJumps = isbulletchar ? blenderobject->max_jumps : 0;
 
-  ci.m_ccd_motion_threshold = (isbulletdyna || isbulletrigidbody) ? blenderobject->ccd_motion_threshold : 0.0;
-  ci.m_ccd_swept_sphere_radius = (isbulletdyna || isbulletrigidbody) ? blenderobject->ccd_swept_sphere_radius : 0.0;
+  ci.m_ccd_motion_threshold = (isbulletdyna || isbulletrigidbody) ?
+                                  blenderobject->ccd_motion_threshold :
+                                  0.0;
+  ci.m_ccd_swept_sphere_radius = (isbulletdyna || isbulletrigidbody) ?
+                                     blenderobject->ccd_swept_sphere_radius :
+                                     0.0;
 
   // mmm, for now, take this for the size of the dynamicobject
   // Blender uses inertia for radius of dynamic object
@@ -2886,7 +2905,7 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
               ->numclusteriterations;  // number of iterations to refine collision clusters
     }
     else {
-      ci.m_margin = 0.1f; // 0.0f generates unstabilities/crashes
+      ci.m_margin = 0.1f;  // 0.0f generates unstabilities/crashes
       ci.m_gamesoftFlag = OB_BSB_BENDING_CONSTRAINTS | OB_BSB_SHAPE_MATCHING | OB_BSB_AERO_VPOINT;
 
       ci.m_softBendingDistance = 2;
@@ -2953,7 +2972,7 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
 
   // Get bounds information
   float bounds_center[3], bounds_extends[3];
-  BoundBox *bb = BKE_object_boundbox_get(blenderobject);
+  const BoundBox *bb = BKE_object_boundbox_get(blenderobject);
   if (bb == nullptr) {
     bounds_center[0] = bounds_center[1] = bounds_center[2] = 0.0f;
     bounds_extends[0] = bounds_extends[1] = bounds_extends[2] = 1.0f;
@@ -3057,7 +3076,8 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
   if (isCompoundChild) {
     // find parent, compound shape and add to it
     // take relative transform into account!
-    CcdPhysicsController *parentCtrl = (CcdPhysicsController *)parent->GetPhysicsController();
+    CcdPhysicsController *parentCtrl = (CcdPhysicsController *)
+                                           compoundParent->GetPhysicsController();
     BLI_assert(parentCtrl);
 
     // only makes compound shape if parent has a physics controller (i.e not an empty, etc)
@@ -3070,7 +3090,7 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
 
       // compute the local transform from parent, this may include several node in the chain
       SG_Node *gameNode = gameobj->GetSGNode();
-      SG_Node *parentNode = parent->GetSGNode();
+      SG_Node *parentNode = compoundParent->GetSGNode();
       // relative transform
       MT_Vector3 parentScale = parentNode->GetWorldScaling();
       parentScale[0] = MT_Scalar(1.0f) / parentScale[0];
@@ -3090,13 +3110,13 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
 
       parentShapeInfo->AddShape(shapeInfo);
       compoundShape->addChildShape(shapeInfo->m_childTrans, bm);
-      // do some recalc?
-      // recalc inertia for rigidbody
+
+      // Recalculate inertia for object owning compound shape.
       if (!rigidbody->isStaticOrKinematicObject()) {
         btVector3 localInertia;
-        float mass = 1.0f / rigidbody->getInvMass();
+        const float mass = 1.0f / rigidbody->getInvMass();
         compoundShape->calculateLocalInertia(mass, localInertia);
-        rigidbody->setMassProps(mass, localInertia);
+        rigidbody->setMassProps(mass, localInertia * parentCtrl->GetInertiaFactor());
       }
       shapeInfo->Release();
       // delete motionstate as it's not used
@@ -3143,7 +3163,8 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
 
   ci.m_collisionShape = bm;
   ci.m_shapeInfo = shapeInfo;
-  ci.m_friction = blenderobject->friction;  // tweak the friction a bit, so the default 0.5 works nice
+  ci.m_friction =
+      blenderobject->friction;  // tweak the friction a bit, so the default 0.5 works nice
   ci.m_rollingFriction = blenderobject->rolling_friction;
   ci.m_restitution = blenderobject->reflect;
   ci.m_physicsEnv = this;
@@ -3151,7 +3172,8 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
   ci.m_linearDamping = blenderobject->damping;
   ci.m_angularDamping = blenderobject->rdamping;
   // need a bit of damping, else system doesn't behave well
-  ci.m_inertiaFactor = blenderobject->formfactor / 0.4f;  // defaults to 0.4, don't want to change behavior
+  ci.m_inertiaFactor = blenderobject->formfactor /
+                       0.4f;  // defaults to 0.4, don't want to change behavior
 
   ci.m_do_anisotropic = (blenderobject->gameflag & OB_ANISOTROPIC_FRICTION);
   ci.m_anisotropicFriction = btVector3(blenderobject->anisotropicFriction[0],
@@ -3166,20 +3188,16 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
   ci.m_fh_normal = (blenderobject->dynamode & OB_FH_NOR);
   ci.m_fh_spring = blenderobject->fh;
 
-  ci.m_collisionFilterGroup = (isbulletsensor) ?
-                                  short(CcdConstructionInfo::SensorFilter) :
-                                  (isbulletdyna) ?
-                                  short(CcdConstructionInfo::DefaultFilter) :
-                                  (isbulletchar) ? short(CcdConstructionInfo::CharacterFilter) :
-                                                   short(CcdConstructionInfo::StaticFilter);
-  ci.m_collisionFilterMask = (isbulletsensor) ?
-                                 short(CcdConstructionInfo::AllFilter ^
-                                       CcdConstructionInfo::SensorFilter) :
-                                 (isbulletdyna) ?
-                                 short(CcdConstructionInfo::AllFilter) :
-                                 (isbulletchar) ? short(CcdConstructionInfo::AllFilter) :
-                                                  short(CcdConstructionInfo::AllFilter ^
-                                                        CcdConstructionInfo::StaticFilter);
+  ci.m_collisionFilterGroup = (isbulletsensor) ? short(CcdConstructionInfo::SensorFilter) :
+                              (isbulletdyna)   ? short(CcdConstructionInfo::DynamicFilter) :
+                              (isbulletchar)   ? short(CcdConstructionInfo::CharacterFilter) :
+                                                 short(CcdConstructionInfo::StaticFilter);
+  ci.m_collisionFilterMask = (isbulletsensor) ? short(CcdConstructionInfo::AllFilter ^
+                                                      CcdConstructionInfo::SensorFilter) :
+                             (isbulletdyna)   ? short(CcdConstructionInfo::AllFilter) :
+                             (isbulletchar)   ? short(CcdConstructionInfo::AllFilter) :
+                                                short(CcdConstructionInfo::AllFilter ^
+                                                    CcdConstructionInfo::StaticFilter);
   ci.m_bRigid = isbulletdyna && isbulletrigidbody;
   ci.m_bSoft = isbulletsoftbody;
   ci.m_bDyna = isbulletdyna;
@@ -3198,7 +3216,7 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
   physicscontroller->SetNewClientInfo(gameobj->getClientInfo());
 
   // don't add automatically sensor object, they are added when a collision sensor is registered
-  if (!isbulletsensor &&
+  if (!isbulletsensor && (blenderobject->lay & activeLayerBitInfo) != 0 &&
       (blenderobject->base_flag & (BASE_VISIBLE_VIEWLAYER | BASE_VISIBLE_DEPSGRAPH)) != 0) {
     this->AddCcdPhysicsController(physicscontroller);
   }
@@ -3224,18 +3242,20 @@ void CcdPhysicsEnvironment::ConvertObject(BL_BlenderSceneConverter *converter,
     }
   }
 
-  if (parent)
+  if (parentRoot) {
     physicscontroller->SuspendDynamics(false);
+  }
 
-  CcdPhysicsController *parentCtrl = parent ?
-                                         (CcdPhysicsController *)parent->GetPhysicsController() :
-                                         0;
-  physicscontroller->SetParentCtrl(parentCtrl);
+  CcdPhysicsController *parentCtrl = parentRoot ? static_cast<CcdPhysicsController *>(
+                                                      parentRoot->GetPhysicsController()) :
+                                                  nullptr;
+  physicscontroller->SetParentRoot(parentCtrl);
 }
 
 void CcdPhysicsEnvironment::SetupObjectConstraints(KX_GameObject *obj_src,
                                                    KX_GameObject *obj_dest,
-                                                   bRigidBodyJointConstraint *dat)
+                                                   bRigidBodyJointConstraint *dat,
+                                                   bool replicate_dupli)
 {
   PHY_IPhysicsController *phy_src = obj_src->GetPhysicsController();
   PHY_IPhysicsController *phy_dest = obj_dest->GetPhysicsController();
@@ -3266,7 +3286,8 @@ void CcdPhysicsEnvironment::SetupObjectConstraints(KX_GameObject *obj_src,
                                                            (float)(axis2.x() * scale.x()),
                                                            (float)(axis2.y() * scale.y()),
                                                            (float)(axis2.z() * scale.z()),
-                                                           dat->flag);
+                                                           dat->flag,
+                                                           replicate_dupli);
 
   /* PHY_POINT2POINT_CONSTRAINT = 1,
    * PHY_LINEHINGE_CONSTRAINT = 2,

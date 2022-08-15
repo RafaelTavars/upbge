@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2008 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2008 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup edobj
@@ -25,25 +9,19 @@
 #include <stdlib.h>
 
 #include "DNA_object_types.h"
-#include "DNA_scene_types.h"
-
-#include "BLI_utildefines.h"
 
 #include "BKE_context.h"
 
 #include "RNA_access.h"
-#include "RNA_enum_types.h"
 
 #include "WM_api.h"
 #include "WM_types.h"
 
 #include "ED_object.h"
-#include "ED_screen.h"
-#include "ED_select_utils.h"
-
-#include "DEG_depsgraph.h"
 
 #include "object_intern.h"
+
+#include "MOD_gpencil_lineart.h"
 
 /* ************************** registration **********************************/
 
@@ -55,6 +33,7 @@ void ED_operatortypes_object(void)
   WM_operatortype_append(OBJECT_OT_origin_clear);
   WM_operatortype_append(OBJECT_OT_visual_transform_apply);
   WM_operatortype_append(OBJECT_OT_transform_apply);
+  WM_operatortype_append(OBJECT_OT_parent_inverse_apply);
   WM_operatortype_append(OBJECT_OT_transform_axis_target);
   WM_operatortype_append(OBJECT_OT_origin_set);
 
@@ -62,16 +41,15 @@ void ED_operatortypes_object(void)
   WM_operatortype_append(OBJECT_OT_mode_set_with_submode);
   WM_operatortype_append(OBJECT_OT_editmode_toggle);
   WM_operatortype_append(OBJECT_OT_posemode_toggle);
-  WM_operatortype_append(OBJECT_OT_proxy_make);
   WM_operatortype_append(OBJECT_OT_shade_smooth);
   WM_operatortype_append(OBJECT_OT_shade_flat);
   WM_operatortype_append(OBJECT_OT_paths_calculate);
   WM_operatortype_append(OBJECT_OT_paths_update);
   WM_operatortype_append(OBJECT_OT_paths_clear);
-  WM_operatortype_append(OBJECT_OT_paths_range_update);
+  WM_operatortype_append(OBJECT_OT_paths_update_visible);
   WM_operatortype_append(OBJECT_OT_forcefield_toggle);
 
-  WM_operatortype_append(OBJECT_OT_switch_object);
+  WM_operatortype_append(OBJECT_OT_transfer_mode);
 
   WM_operatortype_append(OBJECT_OT_parent_set);
   WM_operatortype_append(OBJECT_OT_parent_no_inverse_set);
@@ -81,7 +59,6 @@ void ED_operatortypes_object(void)
   WM_operatortype_append(OBJECT_OT_track_clear);
   WM_operatortype_append(OBJECT_OT_make_local);
   WM_operatortype_append(OBJECT_OT_make_override_library);
-  WM_operatortype_append(OBJECT_OT_convert_proxy_to_override);
   WM_operatortype_append(OBJECT_OT_make_single_user);
   WM_operatortype_append(OBJECT_OT_make_links_scene);
   WM_operatortype_append(OBJECT_OT_make_links_data);
@@ -112,14 +89,17 @@ void ED_operatortypes_object(void)
   WM_operatortype_append(OBJECT_OT_light_add);
   WM_operatortype_append(OBJECT_OT_camera_add);
   WM_operatortype_append(OBJECT_OT_speaker_add);
-  WM_operatortype_append(OBJECT_OT_hair_add);
+  WM_operatortype_append(OBJECT_OT_curves_random_add);
+  WM_operatortype_append(OBJECT_OT_curves_empty_hair_add);
   WM_operatortype_append(OBJECT_OT_pointcloud_add);
   WM_operatortype_append(OBJECT_OT_volume_add);
   WM_operatortype_append(OBJECT_OT_volume_import);
   WM_operatortype_append(OBJECT_OT_add);
   WM_operatortype_append(OBJECT_OT_add_named);
+  WM_operatortype_append(OBJECT_OT_transform_to_mouse);
   WM_operatortype_append(OBJECT_OT_effector_add);
   WM_operatortype_append(OBJECT_OT_collection_instance_add);
+  WM_operatortype_append(OBJECT_OT_collection_external_asset_drop);
   WM_operatortype_append(OBJECT_OT_data_instance_add);
   WM_operatortype_append(OBJECT_OT_metaball_add);
   WM_operatortype_append(OBJECT_OT_duplicates_make_real);
@@ -151,6 +131,8 @@ void ED_operatortypes_object(void)
   WM_operatortype_append(OBJECT_OT_skin_loose_mark_clear);
   WM_operatortype_append(OBJECT_OT_skin_radii_equalize);
   WM_operatortype_append(OBJECT_OT_skin_armature_create);
+  WM_operatortype_append(OBJECT_OT_geometry_nodes_input_attribute_toggle);
+  WM_operatortype_append(OBJECT_OT_geometry_node_tree_copy_assign);
 
   /* grease pencil modifiers */
   WM_operatortype_append(OBJECT_OT_gpencil_modifier_add);
@@ -162,7 +144,14 @@ void ED_operatortypes_object(void)
   WM_operatortype_append(OBJECT_OT_gpencil_modifier_copy);
   WM_operatortype_append(OBJECT_OT_gpencil_modifier_copy_to_selected);
 
-  /* shader fx */
+  WM_operatortype_append(GPENCIL_OT_segment_add);
+  WM_operatortype_append(GPENCIL_OT_segment_remove);
+  WM_operatortype_append(GPENCIL_OT_segment_move);
+
+  /* grease pencil line art */
+  WM_operatortypes_lineart();
+
+  /* Shader FX. */
   WM_operatortype_append(OBJECT_OT_shaderfx_add);
   WM_operatortype_append(OBJECT_OT_shaderfx_remove);
   WM_operatortype_append(OBJECT_OT_shaderfx_move_up);
@@ -186,6 +175,9 @@ void ED_operatortypes_object(void)
   WM_operatortype_append(POSE_OT_ik_add);
   WM_operatortype_append(POSE_OT_ik_clear);
   WM_operatortype_append(CONSTRAINT_OT_delete);
+  WM_operatortype_append(CONSTRAINT_OT_apply);
+  WM_operatortype_append(CONSTRAINT_OT_copy);
+  WM_operatortype_append(CONSTRAINT_OT_copy_to_selected);
   WM_operatortype_append(CONSTRAINT_OT_move_up);
   WM_operatortype_append(CONSTRAINT_OT_move_down);
   WM_operatortype_append(CONSTRAINT_OT_move_to_index);
@@ -204,7 +196,6 @@ void ED_operatortypes_object(void)
   WM_operatortype_append(OBJECT_OT_vertex_group_remove_from);
   WM_operatortype_append(OBJECT_OT_vertex_group_select);
   WM_operatortype_append(OBJECT_OT_vertex_group_deselect);
-  WM_operatortype_append(OBJECT_OT_vertex_group_copy_to_linked);
   WM_operatortype_append(OBJECT_OT_vertex_group_copy_to_selected);
   WM_operatortype_append(OBJECT_OT_vertex_group_copy);
   WM_operatortype_append(OBJECT_OT_vertex_group_normalize);
@@ -301,7 +292,7 @@ void ED_operatormacros_object(void)
 
   ot = WM_operatortype_append_macro("OBJECT_OT_duplicate_move",
                                     "Duplicate Objects",
-                                    "Duplicate selected objects and move them",
+                                    "Duplicate the selected objects and move them",
                                     OPTYPE_UNDO | OPTYPE_REGISTER);
   if (ot) {
     WM_operatortype_macro_define(ot, "OBJECT_OT_duplicate");
@@ -309,11 +300,11 @@ void ED_operatormacros_object(void)
     RNA_boolean_set(otmacro->ptr, "use_proportional_edit", false);
   }
 
-  /* grr, should be able to pass options on... */
-  ot = WM_operatortype_append_macro("OBJECT_OT_duplicate_move_linked",
-                                    "Duplicate Linked",
-                                    "Duplicate selected objects and move them",
-                                    OPTYPE_UNDO | OPTYPE_REGISTER);
+  ot = WM_operatortype_append_macro(
+      "OBJECT_OT_duplicate_move_linked",
+      "Duplicate Linked",
+      "Duplicate the selected objects, but not their object data, and move them",
+      OPTYPE_UNDO | OPTYPE_REGISTER);
   if (ot) {
     otmacro = WM_operatortype_macro_define(ot, "OBJECT_OT_duplicate");
     RNA_boolean_set(otmacro->ptr, "linked", true);
@@ -336,7 +327,7 @@ void ED_keymap_object(wmKeyConfig *keyconf)
   keymap = WM_keymap_ensure(keyconf, "Object Non-modal", 0, 0);
 
   /* Object Mode ---------------------------------------------------------------- */
-  /* Note: this keymap gets disabled in non-objectmode,  */
+  /* NOTE: this keymap gets disabled in non-objectmode. */
   keymap = WM_keymap_ensure(keyconf, "Object Mode", 0, 0);
   keymap->poll = object_mode_poll;
 }

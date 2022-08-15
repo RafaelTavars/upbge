@@ -31,14 +31,11 @@
 
 #pragma once
 
-
 #include "RAS_Rasterizer.h"
 
 class RAS_Rect;
 
-struct ARegion;
 struct ImageFormatData;
-struct Scene;
 struct TaskPool;
 
 /**
@@ -163,4 +160,3 @@ class RAS_ICanvas {
    */
   void SaveScreeshot(const Screenshot &screenshot);
 };
-

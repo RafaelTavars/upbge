@@ -1,32 +1,8 @@
-
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2020 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2020 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup gpu
- *
- * GPU Framebuffer
- * - this is a wrapper for an OpenGL framebuffer object (FBO). in practice
- *   multiple FBO's may be created.
- * - actual FBO creation & config is deferred until GPU_framebuffer_bind or
- *   GPU_framebuffer_check_valid to allow creation & config while another
- *   opengl context is bound (since FBOs are not shared between ogl contexts).
  */
 
 #pragma once
@@ -52,15 +28,19 @@ class GLTexture : public Texture {
   /** All samplers states. */
   static GLuint samplers_[GPU_SAMPLER_MAX];
 
-  /** Target to bind the texture to (GL_TEXTURE_1D, GL_TEXTURE_2D, etc...)*/
+  /** Target to bind the texture to (#GL_TEXTURE_1D, #GL_TEXTURE_2D, etc...). */
   GLenum target_ = -1;
   /** opengl identifier for texture. */
   GLuint tex_id_ = 0;
   /** Legacy workaround for texture copy. Created when using framebuffer_get(). */
-  struct GPUFrameBuffer *framebuffer_ = NULL;
+  struct GPUFrameBuffer *framebuffer_ = nullptr;
   /** True if this texture is bound to at least one texture unit. */
   /* TODO(fclem): How do we ensure thread safety here? */
   bool is_bound_ = false;
+  /** Same as is_bound_ but for image slots. */
+  bool is_bound_image_ = false;
+  /** True if pixels in the texture have been initialized. */
+  bool has_pixels_ = false;
 
  public:
   GLTexture(const char *name);
@@ -69,35 +49,45 @@ class GLTexture : public Texture {
   void update_sub(
       int mip, int offset[3], int extent[3], eGPUDataFormat type, const void *data) override;
 
-  void generate_mipmap(void) override;
+  /**
+   * This will create the mipmap images and populate them with filtered data from base level.
+   *
+   * \warning Depth textures are not populated but they have their mips correctly defined.
+   * \warning This resets the mipmap range.
+   */
+  void generate_mipmap() override;
   void copy_to(Texture *dst) override;
   void clear(eGPUDataFormat format, const void *data) override;
   void swizzle_set(const char swizzle_mask[4]) override;
+  void stencil_texture_mode_set(bool use_stencil) override;
   void mip_range_set(int min, int max) override;
   void *read(int mip, eGPUDataFormat type) override;
 
-  void check_feedback_loop(void);
+  void check_feedback_loop();
 
   /* TODO(fclem): Legacy. Should be removed at some point. */
-  uint gl_bindcode_get(void) const override;
+  uint gl_bindcode_get() const override;
 
-  static void samplers_init(void);
-  static void samplers_free(void);
-  static void samplers_update(void);
+  static void samplers_init();
+  static void samplers_free();
+  static void samplers_update();
 
-  /* Game engine transition */
-  void gl_bindcode_set(int bindcode);
+  /* UPBGE */
+  void gl_bindcode_set(int bindcode) override;
 
  protected:
-  bool init_internal(void) override;
+  /** Return true on success. */
+  bool init_internal() override;
+  /** Return true on success. */
   bool init_internal(GPUVertBuf *vbo) override;
+  /** Return true on success. */
+  bool init_internal(const GPUTexture *src, int mip_offset, int layer_offset) override;
 
  private:
   bool proxy_check(int mip);
-  void ensure_mipmaps(int mip);
   void update_sub_direct_state_access(
       int mip, int offset[3], int extent[3], GLenum gl_format, GLenum gl_type, const void *data);
-  GPUFrameBuffer *framebuffer_get(void);
+  GPUFrameBuffer *framebuffer_get();
 
   MEM_CXX_CLASS_ALLOC_FUNCS("GLTexture")
 };
@@ -169,6 +159,8 @@ inline GLenum to_gl_internal_format(eGPUTextureFormat format)
     case GPU_R16:
       return GL_R16;
     /* Special formats texture & renderbuffer */
+    case GPU_RGB10_A2:
+      return GL_RGB10_A2;
     case GPU_R11F_G11F_B10F:
       return GL_R11F_G11F_B10F;
     case GPU_DEPTH32F_STENCIL8:
@@ -201,7 +193,7 @@ inline GLenum to_gl_internal_format(eGPUTextureFormat format)
     case GPU_DEPTH_COMPONENT16:
       return GL_DEPTH_COMPONENT16;
     default:
-      BLI_assert(!"Texture format incorrect or unsupported\n");
+      BLI_assert_msg(0, "Texture format incorrect or unsupported");
       return 0;
   }
 }
@@ -285,21 +277,25 @@ inline GLenum to_gl(eGPUDataFormat format)
       return GL_FLOAT;
     case GPU_DATA_INT:
       return GL_INT;
-    case GPU_DATA_UNSIGNED_INT:
+    case GPU_DATA_UINT:
       return GL_UNSIGNED_INT;
-    case GPU_DATA_UNSIGNED_BYTE:
+    case GPU_DATA_UBYTE:
       return GL_UNSIGNED_BYTE;
-    case GPU_DATA_UNSIGNED_INT_24_8:
+    case GPU_DATA_UINT_24_8:
       return GL_UNSIGNED_INT_24_8;
+    case GPU_DATA_2_10_10_10_REV:
+      return GL_UNSIGNED_INT_2_10_10_10_REV;
     case GPU_DATA_10_11_11_REV:
       return GL_UNSIGNED_INT_10F_11F_11F_REV;
     default:
-      BLI_assert(!"Unhandled data format");
+      BLI_assert_msg(0, "Unhandled data format");
       return GL_FLOAT;
   }
 }
 
-/* Definitely not complete, edit according to the gl specification. */
+/**
+ * Definitely not complete, edit according to the OpenGL specification.
+ */
 inline GLenum to_gl_data_format(eGPUTextureFormat format)
 {
   /* You can add any of the available type to this list
@@ -344,6 +340,7 @@ inline GLenum to_gl_data_format(eGPUTextureFormat format)
     case GPU_RGBA16:
     case GPU_RGBA16F:
     case GPU_RGBA32F:
+    case GPU_RGB10_A2:
       return GL_RGBA;
     case GPU_DEPTH24_STENCIL8:
     case GPU_DEPTH32F_STENCIL8:
@@ -365,12 +362,14 @@ inline GLenum to_gl_data_format(eGPUTextureFormat format)
     case GPU_RGBA8_DXT5:
       return GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
     default:
-      BLI_assert(!"Texture format incorrect or unsupported\n");
+      BLI_assert_msg(0, "Texture format incorrect or unsupported\n");
       return 0;
   }
 }
 
-/* Assume Unorm / Float target. Used with glReadPixels. */
+/**
+ * Assume UNORM/Float target. Used with #glReadPixels.
+ */
 inline GLenum channel_len_to_gl(int channel_len)
 {
   switch (channel_len) {
@@ -383,7 +382,7 @@ inline GLenum channel_len_to_gl(int channel_len)
     case 4:
       return GL_RGBA;
     default:
-      BLI_assert(!"Wrong number of texture channels");
+      BLI_assert_msg(0, "Wrong number of texture channels");
       return GL_RED;
   }
 }

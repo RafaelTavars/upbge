@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup gpu
@@ -27,8 +13,6 @@
 
 #include "BLI_math_vector.h"
 #include "BLI_utildefines.h"
-
-#include "BKE_global.h"
 
 #include "GPU_state.h"
 
@@ -60,6 +44,12 @@ void GPU_blend(eGPUBlend blend)
 void GPU_face_culling(eGPUFaceCullTest culling)
 {
   SET_IMMUTABLE_STATE(culling_test, culling);
+}
+
+eGPUFaceCullTest GPU_face_culling_get()
+{
+  GPUState &state = Context::get()->state_manager->state;
+  return (eGPUFaceCullTest)state.culling_test;
 }
 
 void GPU_front_facing(bool invert)
@@ -179,10 +169,6 @@ void GPU_point_size(float size)
   state.point_size = size * ((state.point_size > 0.0) ? 1.0f : -1.0f);
 }
 
-/* Programmable point size
- * - shaders set their own point size when enabled
- * - use GPU_point_size when disabled */
-/* TODO remove and use program point size everywhere */
 void GPU_program_point_size(bool enable)
 {
   StateManager *stack = Context::get()->state_manager;
@@ -243,7 +229,7 @@ eGPUWriteMask GPU_write_mask_get()
 
 uint GPU_stencil_mask_get()
 {
-  GPUStateMutable &state = Context::get()->state_manager->mutable_state;
+  const GPUStateMutable &state = Context::get()->state_manager->mutable_state;
   return state.stencil_write_mask;
 }
 
@@ -259,10 +245,9 @@ eGPUStencilTest GPU_stencil_test_get()
   return (eGPUStencilTest)state.stencil_test;
 }
 
-/* NOTE: Already premultiplied by U.pixelsize. */
 float GPU_line_width_get()
 {
-  GPUStateMutable &state = Context::get()->state_manager->mutable_state;
+  const GPUStateMutable &state = Context::get()->state_manager->mutable_state;
   return state.line_width;
 }
 
@@ -287,7 +272,7 @@ void GPU_viewport_size_get_i(int coords[4])
 
 bool GPU_depth_mask_get()
 {
-  GPUState &state = Context::get()->state_manager->state;
+  const GPUState &state = Context::get()->state_manager->state;
   return (state.write_mask & GPU_WRITE_DEPTH) != 0;
 }
 
@@ -339,12 +324,25 @@ void GPU_bgl_start()
     /* Expected by many addons (see T80169, T81289).
      * This will reset the blend function. */
     GPU_blend(GPU_BLEND_NONE);
+
+    /* Equivalent of setting the depth func `glDepthFunc(GL_LEQUAL)`
+     * Needed since Python scripts may enable depth test.
+     * Without this block the depth test function is undefined. */
+    {
+      eGPUDepthTest depth_test_real = GPU_depth_test_get();
+      eGPUDepthTest depth_test_temp = GPU_DEPTH_LESS_EQUAL;
+      if (depth_test_real != depth_test_temp) {
+        GPU_depth_test(depth_test_temp);
+        state_manager.apply_state();
+        GPU_depth_test(depth_test_real);
+      }
+    }
+
     state_manager.apply_state();
     state_manager.use_bgl = true;
   }
 }
 
-/* Just turn off the bgl safeguard system. Can be called even without GPU_bgl_start. */
 void GPU_bgl_end()
 {
   Context *ctx = Context::get();

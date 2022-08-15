@@ -38,15 +38,11 @@
 
 #include <boost/format.hpp>
 
-#include "DNA_scene_types.h"
 #include "DRW_render.h"
-#include "GPU_framebuffer.h"
 #include "GPU_matrix.h"
-#include "GPU_state.h"
 
-#include "BL_BlenderConverter.h"
-#include "BL_BlenderSceneConverter.h"
-#include "CM_Message.h"
+#include "BL_Converter.h"
+#include "BL_SceneConverter.h"
 #include "DEV_Joystick.h"  // for DEV_Joystick::HandleEvents
 #include "KX_Camera.h"
 #include "KX_Globals.h"
@@ -119,10 +115,13 @@ const std::string KX_KetsjiEngine::m_profileLabels[tc_numCategories] = {
 /**
  * Constructor of the Ketsji Engine
  */
-KX_KetsjiEngine::KX_KetsjiEngine(KX_ISystem *system, bContext *C, bool useViewportRender, int shadingTypeRuntime)
-    : m_context(C),                             // eevee
-      m_useViewportRender(useViewportRender),   // eevee
-      m_shadingTypeRuntime(shadingTypeRuntime), // eevee
+KX_KetsjiEngine::KX_KetsjiEngine(KX_ISystem *system,
+                                 bContext *C,
+                                 bool useViewportRender,
+                                 int shadingTypeRuntime)
+    : m_context(C),                              // eevee
+      m_useViewportRender(useViewportRender),    // eevee
+      m_shadingTypeRuntime(shadingTypeRuntime),  // eevee
       m_canvas(nullptr),
       m_rasterizer(nullptr),
       m_kxsystem(system),
@@ -145,7 +144,7 @@ KX_KetsjiEngine::KX_KetsjiEngine(KX_ISystem *system, bContext *C, bool useViewpo
       m_exitstring(""),
       m_cameraZoom(1.0f),
       m_overrideCamZoom(1.0f),
-      m_logger(KX_TimeCategoryLogger(25)),
+      m_logger(KX_TimeCategoryLogger(m_clock, 25)),
       m_average_framerate(0.0),
       m_showBoundingBox(KX_DebugOption::DISABLE),
       m_showArmature(KX_DebugOption::DISABLE),
@@ -161,6 +160,7 @@ KX_KetsjiEngine::KX_KetsjiEngine(KX_ISystem *system, bContext *C, bool useViewpo
 #endif
 
   m_scenes = new EXP_ListValue<KX_Scene>();
+  m_renderingCameras = {};
 }
 
 /**
@@ -196,13 +196,19 @@ int KX_KetsjiEngine::ShadingTypeRuntime()
  */
 void KX_KetsjiEngine::CountDepsgraphTime()
 {
-  m_logger.StartLog(tc_depsgraph, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_depsgraph);
 }
 
 void KX_KetsjiEngine::EndCountDepsgraphTime()
 {
-  m_logger.StartLog(tc_rasterizer, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_rasterizer);
 }
+
+std::vector<KX_Camera *> KX_KetsjiEngine::GetRenderingCameras()
+{
+  return m_renderingCameras;
+}
+
 /* End of EEVEE integration */
 
 void KX_KetsjiEngine::SetInputDevice(SCA_IInputDevice *inputDevice)
@@ -236,7 +242,7 @@ PyObject *KX_KetsjiEngine::GetPyProfileDict()
 }
 #endif
 
-void KX_KetsjiEngine::SetConverter(BL_BlenderConverter *converter)
+void KX_KetsjiEngine::SetConverter(BL_Converter *converter)
 {
   BLI_assert(converter);
   m_converter = converter;
@@ -244,7 +250,8 @@ void KX_KetsjiEngine::SetConverter(BL_BlenderConverter *converter)
 
 void KX_KetsjiEngine::StartEngine()
 {
-  m_previousRealTime = m_kxsystem->GetTimeInSeconds();
+  // Reset the clock to start at 0.0.
+  m_clock.Reset();
 
   m_bInitialized = true;
 }
@@ -267,7 +274,7 @@ void KX_KetsjiEngine::EndFrame()
   GPU_matrix_ortho_set(0, width, 0, height, -100, 100);
 
   // Show profiling info
-  m_logger.StartLog(tc_overhead, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_overhead);
   if (m_flags & (SHOW_PROFILE | SHOW_FRAMERATE | SHOW_DEBUG_PROPERTIES)) {
     RenderDebugProperties();
   }
@@ -293,18 +300,18 @@ void KX_KetsjiEngine::EndFrame()
   m_average_framerate = 1.0 / tottime;
 
   // Go to next profiling measurement, time spent after this call is shown in the next frame.
-  m_logger.NextMeasurement(m_kxsystem->GetTimeInSeconds());
+  m_logger.NextMeasurement();
 
-  m_logger.StartLog(tc_rasterizer, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_rasterizer);
   m_rasterizer->EndFrame();
 
-  m_logger.StartLog(tc_logic, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_logic);
   m_canvas->FlushScreenshots();
 
   // swap backbuffer (drawing into this buffer) <-> front/visible buffer
-  m_logger.StartLog(tc_latency, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_latency);
   m_canvas->SwapBuffers();
-  m_logger.StartLog(tc_rasterizer, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_rasterizer);
 
   m_canvas->EndDraw();
 }
@@ -312,7 +319,7 @@ void KX_KetsjiEngine::EndFrame()
 void KX_KetsjiEngine::EndFrameViewportRender()
 {
   // Show profiling info
-  m_logger.StartLog(tc_overhead, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_overhead);
   if (m_flags & (SHOW_PROFILE | SHOW_FRAMERATE | SHOW_DEBUG_PROPERTIES)) {
     RenderDebugProperties();
   }
@@ -338,26 +345,24 @@ void KX_KetsjiEngine::EndFrameViewportRender()
   m_average_framerate = 1.0 / tottime;
 
   // Go to next profiling measurement, time spent after this call is shown in the next frame.
-  m_logger.NextMeasurement(m_kxsystem->GetTimeInSeconds());
+  m_logger.NextMeasurement();
 
-  m_logger.StartLog(tc_rasterizer, m_kxsystem->GetTimeInSeconds());
-  //m_rasterizer->EndFrame();
+  m_logger.StartLog(tc_rasterizer);
+  // m_rasterizer->EndFrame();
 
-  m_logger.StartLog(tc_logic, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_logic);
   m_canvas->FlushScreenshots();
 
   // swap backbuffer (drawing into this buffer) <-> front/visible buffer
-  m_logger.StartLog(tc_latency, m_kxsystem->GetTimeInSeconds());
-  //m_canvas->SwapBuffers();
-  m_logger.StartLog(tc_rasterizer, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_latency);
+  // m_canvas->SwapBuffers();
+  m_logger.StartLog(tc_rasterizer);
 
   m_canvas->EndDraw();
 }
 
-bool KX_KetsjiEngine::NextFrame()
+KX_KetsjiEngine::FrameTimes KX_KetsjiEngine::GetFrameTimes()
 {
-  m_logger.StartLog(tc_services, m_kxsystem->GetTimeInSeconds());
-
   /*
    * Clock advancement. There is basically two case:
    *   - USE_EXTERNAL_CLOCK is true, the user is responsible to advance the time
@@ -375,66 +380,92 @@ bool KX_KetsjiEngine::NextFrame()
    *   - max_physic_frame
    *   - max_logic_frame
    *   - fixed_framerate
-   * XXX The logic over computation framestep is definitively not clear (and
-   * I'm not even sure it is correct). If needed frame is strictly greater
-   * than max_physics_frame, we are doing a jump in game time, but keeping
-   * framestep = 1 / ticrate, while if frames is greater than
-   * max_logic_frame, we increase framestep.
-   *
-   * XXX render.fps is not considred anywhere.
    */
 
-  double timestep = m_timescale / m_ticrate;
+  // Update time if the user is not controlling it.
   if (!(m_flags & USE_EXTERNAL_CLOCK)) {
-    double current_time = m_kxsystem->GetTimeInSeconds();
-    double dt = current_time - m_previousRealTime;
-    m_previousRealTime = current_time;
-    m_clockTime += dt * m_timescale;
-
-    if (!(m_flags & FIXED_FRAMERATE)) {
-      timestep = dt * m_timescale;
-    }
+    m_clockTime = m_clock.GetTimeSecond();
   }
 
-  double deltatime = m_clockTime - m_frameTime;
-  if (deltatime < 0.0) {
-    // We got here too quickly, which means there is nothing to do, just return and don't render.
-    // Not sure if this is the best fix, but it seems to stop the jumping framerate issue (#33088)
+  // Get elapsed time.
+  const double dt = m_clockTime - m_previousRealTime;
+
+  // Time of a frame (without scale).
+  double timestep;
+  if (m_flags & FIXED_FRAMERATE) {
+    // Normal time step for fixed frame.
+    timestep = 1.0 / m_ticrate;
+  }
+  else {
+    // The frame is the smallest as possible.
+    timestep = dt;
+  }
+
+  // Number of frames to proceed.
+  int frames;
+  if (m_flags & FIXED_FRAMERATE) {
+    // As many as possible for the elapsed time.
+    frames = int(dt * m_ticrate);
+  }
+  else {
+    // Proceed always one frame in non-fixed framerate.
+    frames = 1;
+  }
+
+  // Fix timestep to not exceed max physics and logic frames.
+  int maxFrames = max_ii(m_maxLogicFrame, m_maxPhysicsFrame);
+  if (frames > maxFrames) {
+    timestep = dt / maxFrames;
+    frames = maxFrames;
+  }
+
+  // If the number of frame is non-zero, update previous time.
+  if (frames > 0) {
+    m_previousRealTime = m_clockTime;
+  }
+  //// Else in case of fixed framerate, try to sleep until the next frame.
+  // else if (m_flags & FIXED_FRAMERATE) {
+  //  const double sleeptime = timestep - dt - 1.0e-3;
+  //  /* If the remaining time is greather than 1ms (sleep resolution) sleep this thread.
+  //   * The other 1ms will be busy wait.
+  //   */
+  //  if (sleeptime > 0.0) {
+  //    std::this_thread::sleep_for(std::chrono::nanoseconds((long)(sleeptime * 1.0e9)));
+  //  }
+  //}
+
+  // Frame time with time scale.
+  const double framestep = timestep * m_timescale;
+
+  FrameTimes times;
+  times.frames = frames;
+  times.timestep = timestep;
+  times.framestep = framestep;
+
+  return times;
+}
+
+bool KX_KetsjiEngine::NextFrame()
+{
+  m_logger.StartLog(tc_services);
+
+  const FrameTimes times = GetFrameTimes();
+
+  // Exit if zero frame is sheduled.
+  if (times.frames == 0) {
+    // Start logging time spent outside main loop
+    m_logger.StartLog(tc_outside);
+
     return false;
   }
 
-  // In case of non-fixed framerate, we always proceed one frame.
-  int frames = 1;
-
-  // Compute the number of logic frames to do each update in case of fixed framerate.
-  if (m_flags & FIXED_FRAMERATE) {
-    frames = int(deltatime * m_ticrate / m_timescale + 1e-6);
-  }
-
-  //	CM_Debug("dt = " << dt << ", deltatime = " << deltatime << ", frames = " << frames);
-
-  double framestep = timestep;
-
-  if (frames > m_maxPhysicsFrame) {
-    m_frameTime += (frames - m_maxPhysicsFrame) * timestep;
-    frames = m_maxPhysicsFrame;
-  }
-
-  bool doRender = frames > 0;
-
-  if (frames > m_maxLogicFrame) {
-    framestep = (frames * timestep) / m_maxLogicFrame;
-    frames = m_maxLogicFrame;
-  }
-
-  for (unsigned short i = 0; i < frames; ++i) {
-    m_frameTime += framestep;
+  for (unsigned short i = 0; i < times.frames; ++i) {
+    m_frameTime += times.framestep;
 
     m_converter->MergeAsyncLoads();
 
-    if (m_inputDevice) {
-      m_inputDevice->ReleaseMoveEvent();
-    }
+    m_inputDevice->ReleaseMoveEvent();
+
 #ifdef WITH_SDL
     // Handle all SDL Joystick events here to share them for all scenes properly.
     short addrem[JOYINDEX_MAX] = {0};
@@ -442,6 +473,14 @@ bool KX_KetsjiEngine::NextFrame()
 #  ifdef WITH_PYTHON
       updatePythonJoysticks(addrem);
 #  endif  // WITH_PYTHON
+    }
+
+    // Process Joystick force feedback duration
+    for (unsigned short j = 0; j < JOYINDEX_MAX; ++j) {
+      DEV_Joystick *joy = DEV_Joystick::GetInstance(j);
+      if (joy && joy->Connected() && joy->GetRumbleSupport() && joy->GetRumbleStatus()) {
+        joy->ProcessRumbleStatus();
+      }
     }
 #endif  // WITH_SDL
 
@@ -451,74 +490,71 @@ bool KX_KetsjiEngine::NextFrame()
        * entire scene. Objects can be suspended individually, and
        * the settings for that precede the logic and physics
        * update. */
-      m_logger.StartLog(tc_logic, m_kxsystem->GetTimeInSeconds());
+      m_logger.StartLog(tc_logic);
 
-      scene->UpdateObjectActivity();
+      if (i == 0) {  // No need to UpdateObjectActivity several times
+        scene->UpdateObjectActivity();
+      }
 
-      m_logger.StartLog(tc_physics, m_kxsystem->GetTimeInSeconds());
+      m_logger.StartLog(tc_physics);
+
       // set Python hooks for each scene
-#ifdef WITH_PYTHON
-      PHY_SetActiveEnvironment(scene->GetPhysicsEnvironment());
-#endif
       KX_SetActiveScene(scene);
 
       // Process sensors, and controllers
-      m_logger.StartLog(tc_logic, m_kxsystem->GetTimeInSeconds());
-      scene->LogicBeginFrame(m_frameTime, framestep);
+      m_logger.StartLog(tc_logic);
+      scene->LogicBeginFrame(m_frameTime, times.framestep);
 
       // Scenegraph needs to be updated again, because Logic Controllers
       // can affect the local matrices.
-      m_logger.StartLog(tc_scenegraph, m_kxsystem->GetTimeInSeconds());
+      m_logger.StartLog(tc_scenegraph);
       scene->UpdateParents(m_frameTime);
 
       // Process actuators
 
       // Do some cleanup work for this logic frame
-      m_logger.StartLog(tc_logic, m_kxsystem->GetTimeInSeconds());
+      m_logger.StartLog(tc_logic);
       scene->LogicUpdateFrame(m_frameTime);
 
       scene->LogicEndFrame();
 
       // Actuators can affect the scenegraph
-      m_logger.StartLog(tc_scenegraph, m_kxsystem->GetTimeInSeconds());
+      m_logger.StartLog(tc_scenegraph);
       scene->UpdateParents(m_frameTime);
 
-      m_logger.StartLog(tc_physics, m_kxsystem->GetTimeInSeconds());
+      m_logger.StartLog(tc_physics);
 
       // Perform physics calculations on the scene. This can involve
       // many iterations of the physics solver.
       scene->GetPhysicsEnvironment()->ProceedDeltaTime(
-          m_frameTime, timestep, framestep);  // m_deltatimerealDeltaTime);
+          m_frameTime, times.timestep, times.framestep);  // m_deltatimerealDeltaTime);
 
       /* No need to call sofbody update more than 1 time */
-      if (i == frames - 1) {
+      if (i == times.frames - 1) {
         scene->GetPhysicsEnvironment()->UpdateSoftBodies();
       }
 
-      m_logger.StartLog(tc_scenegraph, m_kxsystem->GetTimeInSeconds());
+      m_logger.StartLog(tc_scenegraph);
       scene->UpdateParents(m_frameTime);
 
-      m_logger.StartLog(tc_services, m_kxsystem->GetTimeInSeconds());
+      m_logger.StartLog(tc_services);
     }
 
-    m_logger.StartLog(tc_network, m_kxsystem->GetTimeInSeconds());
+    m_logger.StartLog(tc_network);
     m_networkMessageManager->ClearMessages();
 
     // update system devices
-    m_logger.StartLog(tc_logic, m_kxsystem->GetTimeInSeconds());
-    if (m_inputDevice) {
-      m_inputDevice->ClearInputs();
-    }
+    m_logger.StartLog(tc_logic);
+    m_inputDevice->ClearInputs();
 
     // scene management
     ProcessScheduledScenes();
-
   }
 
   // Start logging time spent outside main loop
-  m_logger.StartLog(tc_outside, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_outside);
 
-  return doRender && m_doRender;
+  return m_doRender;
 }
 
 KX_KetsjiEngine::CameraRenderData KX_KetsjiEngine::GetCameraRenderData(
@@ -535,12 +571,16 @@ KX_KetsjiEngine::CameraRenderData KX_KetsjiEngine::GetCameraRenderData(
    * and its name is based on with the eye number in addition.
    */
   if (usestereo) {
-    rendercam = new KX_Camera(scene, scene->m_callbacks, *camera->GetCameraData(), true, true);
+    rendercam = new KX_Camera();
+
+    rendercam->SetScene(scene);
+    rendercam->SetCameraData(*camera->GetCameraData());
     rendercam->SetName("__stereo_" + camera->GetName() + "_" + std::to_string(eye) + "__");
     rendercam->NodeSetGlobalOrientation(camera->NodeGetWorldOrientation());
     rendercam->NodeSetWorldPosition(camera->NodeGetWorldPosition());
     rendercam->NodeSetWorldScale(camera->NodeGetWorldScaling());
     rendercam->NodeUpdateGS(0.0);
+    rendercam->MarkForDeletion();
   }
   // Else use the native camera.
   else {
@@ -677,11 +717,15 @@ bool KX_KetsjiEngine::GetFrameRenderData(std::vector<FrameRenderData> &frameData
         overlay_cam_at_the_end_of_camera_list_ensure(scene);
       }
 
+      m_renderingCameras.clear();
+
       KX_Camera *overrideCullingCam = scene->GetOverrideCullingCamera();
       for (KX_Camera *cam : scene->GetCameraList()) {
         if ((cam != activecam && cam != scene->GetOverlayCamera()) && !cam->GetViewport()) {
           continue;
         }
+
+        m_renderingCameras.push_back(cam);
 
         for (RAS_Rasterizer::StereoEye eye : eyes) {
           sceneFrameData.m_cameraDataList.push_back(GetCameraRenderData(
@@ -696,7 +740,7 @@ bool KX_KetsjiEngine::GetFrameRenderData(std::vector<FrameRenderData> &frameData
 
 void KX_KetsjiEngine::Render()
 {
-  m_logger.StartLog(tc_rasterizer, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_rasterizer);
 
   BeginFrame();
 
@@ -980,15 +1024,14 @@ void KX_KetsjiEngine::RenderCamera(KX_Scene *scene,
 
   m_rasterizer->SetEye(RAS_Rasterizer::RAS_STEREO_LEFTEYE /*cameraFrameData.m_eye*/);
 
-  m_logger.StartLog(tc_scenegraph, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_scenegraph);
 
-  m_logger.StartLog(tc_animations, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_animations);
   UpdateAnimations(scene);
 
-  m_logger.StartLog(tc_rasterizer, m_kxsystem->GetTimeInSeconds());
+  m_logger.StartLog(tc_rasterizer);
 
 #ifdef WITH_PYTHON
-  PHY_SetActiveEnvironment(scene->GetPhysicsEnvironment());
   // Run any pre-drawing python callbacks
   scene->RunDrawingCallbacks(KX_Scene::PRE_DRAW, rendercam);
 #endif
@@ -1003,7 +1046,9 @@ void KX_KetsjiEngine::RenderCamera(KX_Scene *scene,
     m_rasterizer->SetBlendFunc(RAS_Rasterizer::RAS_ONE, RAS_Rasterizer::RAS_ONE_MINUS_SRC_ALPHA);
   }
 
-  scene->RenderAfterCameraSetup(rendercam, viewport, is_overlay_pass);
+  bool is_last_render_pass = rendercam == m_renderingCameras.back();
+
+  scene->RenderAfterCameraSetup(rendercam, viewport, is_overlay_pass, is_last_render_pass);
 
   if (scene->GetPhysicsEnvironment()) {
     scene->GetPhysicsEnvironment()->DebugDrawWorld();
@@ -1031,7 +1076,6 @@ RAS_FrameBuffer *KX_KetsjiEngine::PostRenderScene(KX_Scene *scene,
   RAS_FrameBuffer *frameBuffer = scene->Render2DFilters(m_rasterizer, m_canvas, inputfb, targetfb);
 
 #ifdef WITH_PYTHON
-  PHY_SetActiveEnvironment(scene->GetPhysicsEnvironment());
   /* We can't deduce what camera should be passed to the python callbacks
    * because the post draw callbacks are per scenes and not per cameras.
    */
@@ -1079,12 +1123,15 @@ void KX_KetsjiEngine::PostProcessScene(KX_Scene *scene)
   if (!scene->GetActiveCamera() || override_camera) {
     KX_Camera *activecam = nullptr;
 
-    activecam = new KX_Camera(
-        scene, KX_Scene::m_callbacks, override_camera ? m_overrideCamData : RAS_CameraData());
+    activecam = new KX_Camera();
+
+    activecam->SetScene(scene);
+    activecam->SetBlenderObject(scene->GetGameDefaultCamera());
+    activecam->SetCameraData(override_camera ? m_overrideCamData : RAS_CameraData());
     activecam->SetName("__default__cam__");
 
-    activecam->SetBlenderObject(scene->GetGameDefaultCamera());
-    scene->GetBlenderSceneConverter()->RegisterGameObject(activecam, activecam->GetBlenderObject());
+    scene->GetBlenderSceneConverter()->RegisterGameObject(activecam,
+                                                          activecam->GetBlenderObject());
 
     // set transformation
     if (override_camera) {
@@ -1097,8 +1144,11 @@ void KX_KetsjiEngine::PostProcessScene(KX_Scene *scene)
       activecam->NodeUpdateGS(0.0f);
     }
     else {
-      activecam->NodeSetLocalPosition(MT_Vector3(0.0f, 0.0f, 0.0f));
-      activecam->NodeSetLocalOrientation(MT_Matrix3x3(MT_Vector3(0.0f, 0.0f, 0.0f)));
+      bContext *C = KX_GetActiveEngine()->GetContext();
+      RegionView3D *rv3d = CTX_wm_region_view3d(C);
+      MT_Vector3 pos = MT_Vector3(rv3d->viewinv[3]);
+      activecam->NodeSetLocalPosition(pos);
+      activecam->NodeSetLocalOrientation(MT_Matrix3x3(&rv3d->viewinv[0][0]));
       activecam->NodeUpdateGS(0.0f);
     }
 
@@ -1433,7 +1483,7 @@ double KX_KetsjiEngine::GetFrameTime(void) const
 
 double KX_KetsjiEngine::GetRealTime(void) const
 {
-  return m_kxsystem->GetTimeInSeconds();
+  return m_clock.GetTimeSecond();
 }
 
 void KX_KetsjiEngine::SetAnimFrameRate(double framerate)

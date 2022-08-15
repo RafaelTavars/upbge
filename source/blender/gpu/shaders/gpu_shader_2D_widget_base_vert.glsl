@@ -1,23 +1,3 @@
-
-uniform mat4 ModelViewProjectionMatrix;
-
-#define MAX_PARAM 12
-#ifdef USE_INSTANCE
-#  define MAX_INSTANCE 6
-uniform vec4 parameters[MAX_PARAM * MAX_INSTANCE];
-#else
-uniform vec4 parameters[MAX_PARAM];
-#endif
-
-/* gl_InstanceID is supposed to be 0 if not drawing instances, but this seems
- * to be violated in some drivers. For example, macOS 10.15.4 and Intel Iris
- * causes T78307 when using gl_InstanceID outside of instance. */
-#ifdef USE_INSTANCE
-#  define widgetID gl_InstanceID
-#else
-#  define widgetID 0
-#endif
-
 #define recti parameters[widgetID * MAX_PARAM + 0]
 #define rect parameters[widgetID * MAX_PARAM + 1]
 #define radsi parameters[widgetID * MAX_PARAM + 2].x
@@ -41,31 +21,33 @@ uniform vec4 parameters[MAX_PARAM];
 #define doAlphaCheck (alphaDiscard < 0.0)
 #define discardFactor abs(alphaDiscard)
 
-noperspective out vec2 uvInterp;
-flat out vec2 outRectSize;
-flat out vec4 outRoundCorners;
-noperspective out vec4 innerColor;
-flat out vec4 borderColor;
-flat out vec4 embossColor;
-flat out float lineWidth;
-noperspective out float butCo;
-flat out float discardFac;
-
-#ifdef OS_MAC
-in float dummy;
-#endif
-
 vec2 do_widget(void)
 {
-  /* Offset to avoid loosing pixels (mimics conservative rasterization). */
+  /* Offset to avoid losing pixels (mimics conservative rasterization). */
   const vec2 ofs = vec2(0.5, -0.5);
   lineWidth = abs(rect.x - recti.x);
   vec2 emboss_ofs = vec2(0.0, -lineWidth);
-  vec2 v_pos[4] = vec2[4](rect.xz + emboss_ofs + ofs.yy,
-                          rect.xw + ofs.yx,
-                          rect.yz + emboss_ofs + ofs.xy,
-                          rect.yw + ofs.xx);
-  vec2 pos = v_pos[gl_VertexID];
+
+  vec2 pos;
+  switch (gl_VertexID) {
+    default:
+    case 0: {
+      pos = rect.xz + emboss_ofs + ofs.yy;
+      break;
+    }
+    case 1: {
+      pos = rect.xw + ofs.yx;
+      break;
+    }
+    case 2: {
+      pos = rect.yz + emboss_ofs + ofs.xy;
+      break;
+    }
+    case 3: {
+      pos = rect.yw + ofs.xx;
+      break;
+    }
+  }
 
   uvInterp = pos - rect.xz;
   outRectSize = rect.yw - rect.xz;

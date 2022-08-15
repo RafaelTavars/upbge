@@ -24,7 +24,8 @@
 
 #include "DRW_render.h"
 
-#include "glew-mx.h" // We'll remove that later (or skip 2D filters when there will be vulkan)
+#include "GPU_immediate.h"
+#include "glew-mx.h"  // We'll remove that later (or skip 2D filters when there will be vulkan)
 
 #include "EXP_Value.h"
 #include "RAS_2DFilterFrameBuffer.h"
@@ -129,6 +130,10 @@ RAS_FrameBuffer *RAS_2DFilter::Start(RAS_Rasterizer *rasty,
 
   Initialize(canvas);
 
+  GPUVertFormat *vert_format = immVertexFormat();
+  uint pos = GPU_vertformat_attr_add(vert_format, "pos", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
+  uint texco = GPU_vertformat_attr_add(vert_format, "texCoord", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
+
   SetProg(true);
 
   BindTextures(depthfb, colorfb);
@@ -138,7 +143,15 @@ RAS_FrameBuffer *RAS_2DFilter::Start(RAS_Rasterizer *rasty,
 
   ApplyShader();
 
-  rasty->DrawOverlayPlane();
+  immBegin(GPU_PRIM_TRIS, 3);
+  immAttr2f(texco, 0.0f, 0.0f);
+  immVertex2f(pos, -1.0f, -1.0f);
+  immAttr2f(texco, 2.0f, 0.0f);
+  immVertex2f(pos, 3.0f, -1.0f);
+
+  immAttr2f(texco, 0.0f, 2.0f);
+  immVertex2f(pos, -1.0f, 3.0f);
+  immEnd();
 
   UnbindTextures(depthfb, colorfb);
 
@@ -162,7 +175,7 @@ bool RAS_2DFilter::LinkProgram()
     return false;
   }
 
-  BindAttributes({{0, "bgl_InPosition"}, {1, "bgl_InTexCoord"}});
+  // BindAttributes({{0, "bgl_InPosition"}, {1, "bgl_InTexCoord"}});
 
   m_uniformInitialized = false;
 
@@ -178,7 +191,7 @@ void RAS_2DFilter::ParseShaderProgram()
 
   if (m_gameObject) {
     std::vector<std::string> foundProperties;
-    for (const std::string& prop : m_properties) {
+    for (const std::string &prop : m_properties) {
       const unsigned int loc = GetUniformLocation(prop, false);
       if (loc != -1) {
         m_propertiesLoc.push_back(loc);

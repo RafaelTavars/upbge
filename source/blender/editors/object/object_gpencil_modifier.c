@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2018 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2018 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup edobj
@@ -28,6 +12,7 @@
 
 #include "MEM_guardedalloc.h"
 
+#include "DNA_defaults.h"
 #include "DNA_gpencil_modifier_types.h"
 #include "DNA_gpencil_types.h"
 #include "DNA_object_types.h"
@@ -35,11 +20,13 @@
 
 #include "BLI_listbase.h"
 #include "BLI_string_utf8.h"
+#include "BLI_string_utils.h"
 #include "BLI_utildefines.h"
 
 #include "BKE_context.h"
 #include "BKE_gpencil.h"
 #include "BKE_gpencil_modifier.h"
+#include "BKE_lib_id.h"
 #include "BKE_main.h"
 #include "BKE_object.h"
 #include "BKE_report.h"
@@ -51,9 +38,12 @@
 #include "RNA_access.h"
 #include "RNA_define.h"
 #include "RNA_enum_types.h"
+#include "RNA_prototypes.h"
 
 #include "ED_object.h"
 #include "ED_screen.h"
+
+#include "BLT_translation.h"
 
 #include "UI_interface.h"
 
@@ -173,28 +163,28 @@ void ED_object_gpencil_modifier_clear(Main *bmain, Object *ob)
   DEG_relations_tag_update(bmain);
 }
 
-int ED_object_gpencil_modifier_move_up(ReportList *UNUSED(reports),
-                                       Object *ob,
-                                       GpencilModifierData *md)
+bool ED_object_gpencil_modifier_move_up(ReportList *UNUSED(reports),
+                                        Object *ob,
+                                        GpencilModifierData *md)
 {
   if (md->prev) {
     BLI_remlink(&ob->greasepencil_modifiers, md);
     BLI_insertlinkbefore(&ob->greasepencil_modifiers, md->prev, md);
   }
 
-  return 1;
+  return true;
 }
 
-int ED_object_gpencil_modifier_move_down(ReportList *UNUSED(reports),
-                                         Object *ob,
-                                         GpencilModifierData *md)
+bool ED_object_gpencil_modifier_move_down(ReportList *UNUSED(reports),
+                                          Object *ob,
+                                          GpencilModifierData *md)
 {
   if (md->next) {
     BLI_remlink(&ob->greasepencil_modifiers, md);
     BLI_insertlinkafter(&ob->greasepencil_modifiers, md->next, md);
   }
 
-  return 1;
+  return true;
 }
 
 bool ED_object_gpencil_modifier_move_to_index(ReportList *reports,
@@ -234,57 +224,57 @@ bool ED_object_gpencil_modifier_move_to_index(ReportList *reports,
   return true;
 }
 
-static int gpencil_modifier_apply_obdata(
+static bool gpencil_modifier_apply_obdata(
     ReportList *reports, Main *bmain, Depsgraph *depsgraph, Object *ob, GpencilModifierData *md)
 {
   const GpencilModifierTypeInfo *mti = BKE_gpencil_modifier_get_info(md->type);
 
   if (mti->isDisabled && mti->isDisabled(md, 0)) {
     BKE_report(reports, RPT_ERROR, "Modifier is disabled, skipping apply");
-    return 0;
+    return false;
   }
 
   if (ob->type == OB_GPENCIL) {
     if (ELEM(NULL, ob, ob->data)) {
-      return 0;
+      return false;
     }
     if (mti->bakeModifier == NULL) {
       BKE_report(reports, RPT_ERROR, "Not implemented");
-      return 0;
+      return false;
     }
     mti->bakeModifier(bmain, depsgraph, md, ob);
     DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
   }
   else {
     BKE_report(reports, RPT_ERROR, "Cannot apply modifier for this object type");
-    return 0;
+    return false;
   }
 
-  return 1;
+  return true;
 }
 
-int ED_object_gpencil_modifier_apply(Main *bmain,
-                                     ReportList *reports,
-                                     Depsgraph *depsgraph,
-                                     Object *ob,
-                                     GpencilModifierData *md,
-                                     int UNUSED(mode))
+bool ED_object_gpencil_modifier_apply(Main *bmain,
+                                      ReportList *reports,
+                                      Depsgraph *depsgraph,
+                                      Object *ob,
+                                      GpencilModifierData *md,
+                                      int UNUSED(mode))
 {
 
   if (ob->type == OB_GPENCIL) {
     if (ob->mode != OB_MODE_OBJECT) {
       BKE_report(reports, RPT_ERROR, "Modifiers cannot be applied in paint, sculpt or edit mode");
-      return 0;
+      return false;
     }
 
     if (((ID *)ob->data)->us > 1) {
       BKE_report(reports, RPT_ERROR, "Modifiers cannot be applied to multi-user data");
-      return 0;
+      return false;
     }
   }
   else if (((ID *)ob->data)->us > 1) {
     BKE_report(reports, RPT_ERROR, "Modifiers cannot be applied to multi-user data");
-    return 0;
+    return false;
   }
 
   if (md != ob->greasepencil_modifiers.first) {
@@ -292,16 +282,16 @@ int ED_object_gpencil_modifier_apply(Main *bmain,
   }
 
   if (!gpencil_modifier_apply_obdata(reports, bmain, depsgraph, ob, md)) {
-    return 0;
+    return false;
   }
 
   BLI_remlink(&ob->greasepencil_modifiers, md);
   BKE_gpencil_modifier_free(md);
 
-  return 1;
+  return true;
 }
 
-int ED_object_gpencil_modifier_copy(ReportList *reports, Object *ob, GpencilModifierData *md)
+bool ED_object_gpencil_modifier_copy(ReportList *reports, Object *ob, GpencilModifierData *md)
 {
   GpencilModifierData *nmd;
   const GpencilModifierTypeInfo *mti = BKE_gpencil_modifier_get_info(md->type);
@@ -310,7 +300,7 @@ int ED_object_gpencil_modifier_copy(ReportList *reports, Object *ob, GpencilModi
   if (mti->flags & eGpencilModifierTypeFlag_Single) {
     if (BKE_gpencil_modifiers_findby_type(ob, type)) {
       BKE_report(reports, RPT_WARNING, "Only one modifier of this type is allowed");
-      return 0;
+      return false;
     }
   }
 
@@ -321,7 +311,7 @@ int ED_object_gpencil_modifier_copy(ReportList *reports, Object *ob, GpencilModi
 
   nmd->flag |= eGpencilModifierFlag_OverrideLibrary_Local;
 
-  return 1;
+  return true;
 }
 
 void ED_object_gpencil_modifier_copy_to_object(Object *ob_dst, GpencilModifierData *md)
@@ -414,7 +404,7 @@ void OBJECT_OT_gpencil_modifier_add(wmOperatorType *ot)
   /* properties */
   prop = RNA_def_enum(ot->srna,
                       "type",
-                      rna_enum_object_modifier_type_items,
+                      rna_enum_object_greasepencil_modifier_type_items,
                       eGpencilModifierType_Thick,
                       "Type",
                       "");
@@ -429,17 +419,18 @@ static bool gpencil_edit_modifier_poll_generic(bContext *C,
                                                int obtype_flag,
                                                const bool is_liboverride_allowed)
 {
+  Main *bmain = CTX_data_main(C);
   PointerRNA ptr = CTX_data_pointer_get_type(C, "modifier", rna_type);
   Object *ob = (ptr.owner_id) ? (Object *)ptr.owner_id : ED_object_active_context(C);
   GpencilModifierData *mod = ptr.data; /* May be NULL. */
 
-  if (!ob || ID_IS_LINKED(ob)) {
+  if (!ob || !BKE_id_is_editable(bmain, &ob->id)) {
     return false;
   }
   if (obtype_flag && ((1 << ob->type) & obtype_flag) == 0) {
     return false;
   }
-  if (ptr.owner_id && ID_IS_LINKED(ptr.owner_id)) {
+  if (ptr.owner_id && !BKE_id_is_editable(bmain, ptr.owner_id)) {
     return false;
   }
 
@@ -529,6 +520,10 @@ static GpencilModifierData *gpencil_edit_modifier_property_get(wmOperator *op,
                                                                Object *ob,
                                                                int type)
 {
+  if (ob == NULL) {
+    return NULL;
+  }
+
   char modifier_name[MAX_NAME];
   GpencilModifierData *md;
   RNA_string_get(op->ptr, "modifier", modifier_name);
@@ -730,14 +725,18 @@ static int gpencil_modifier_apply_exec(bContext *C, wmOperator *op)
   Object *ob = ED_object_active_context(C);
   GpencilModifierData *md = gpencil_edit_modifier_property_get(op, ob, 0);
   int apply_as = RNA_enum_get(op->ptr, "apply_as");
+  const bool do_report = RNA_boolean_get(op->ptr, "report");
 
   if (md == NULL) {
     return OPERATOR_CANCELLED;
   }
 
-  /* Store name temporarily for report. */
+  int reports_len;
   char name[MAX_NAME];
-  strcpy(name, md->name);
+  if (do_report) {
+    reports_len = BLI_listbase_count(&op->reports->list);
+    strcpy(name, md->name); /* Store name temporarily since the modifier is removed. */
+  }
 
   if (!ED_object_gpencil_modifier_apply(bmain, op->reports, depsgraph, ob, md, apply_as)) {
     return OPERATOR_CANCELLED;
@@ -746,8 +745,12 @@ static int gpencil_modifier_apply_exec(bContext *C, wmOperator *op)
   DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
   WM_event_add_notifier(C, NC_OBJECT | ND_MODIFIER, ob);
 
-  if (RNA_boolean_get(op->ptr, "report")) {
-    BKE_reportf(op->reports, RPT_INFO, "Applied modifier: %s", name);
+  if (do_report) {
+    /* Only add this report if the operator didn't cause another one. The purpose here is
+     * to alert that something happened, and the previous report will do that anyway. */
+    if (BLI_listbase_count(&op->reports->list) == reports_len) {
+      BKE_reportf(op->reports, RPT_INFO, "Applied modifier: %s", name);
+    }
   }
 
   return OPERATOR_FINISHED;
@@ -930,4 +933,249 @@ void OBJECT_OT_gpencil_modifier_copy_to_selected(wmOperatorType *ot)
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
   gpencil_edit_modifier_properties(ot);
+}
+
+/************************* Dash Modifier *******************************/
+
+static bool dash_segment_poll(bContext *C)
+{
+  return gpencil_edit_modifier_poll_generic(C, &RNA_DashGpencilModifierData, 0, false);
+}
+
+static bool dash_segment_name_exists_fn(void *arg, const char *name)
+{
+  const DashGpencilModifierData *dmd = (const DashGpencilModifierData *)arg;
+  for (int i = 0; i < dmd->segments_len; i++) {
+    if (STREQ(dmd->segments[i].name, name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static int dash_segment_add_exec(bContext *C, wmOperator *op)
+{
+  Object *ob = ED_object_active_context(C);
+  DashGpencilModifierData *dmd = (DashGpencilModifierData *)gpencil_edit_modifier_property_get(
+      op, ob, eGpencilModifierType_Dash);
+
+  if (dmd == NULL) {
+    return OPERATOR_CANCELLED;
+  }
+  const int new_active_index = dmd->segment_active_index + 1;
+  DashGpencilModifierSegment *new_segments = MEM_malloc_arrayN(
+      dmd->segments_len + 1, sizeof(DashGpencilModifierSegment), __func__);
+
+  if (dmd->segments_len != 0) {
+    /* Copy the segments before the new segment. */
+    memcpy(new_segments, dmd->segments, sizeof(DashGpencilModifierSegment) * new_active_index);
+    /* Copy the segments after the new segment. */
+    memcpy(new_segments + new_active_index + 1,
+           dmd->segments + new_active_index,
+           sizeof(DashGpencilModifierSegment) * (dmd->segments_len - new_active_index));
+  }
+
+  /* Create the new segment. */
+  DashGpencilModifierSegment *ds = &new_segments[new_active_index];
+  memcpy(
+      ds, DNA_struct_default_get(DashGpencilModifierSegment), sizeof(DashGpencilModifierSegment));
+  BLI_uniquename_cb(
+      dash_segment_name_exists_fn, dmd, DATA_("Segment"), '.', ds->name, sizeof(ds->name));
+  ds->dmd = dmd;
+
+  MEM_SAFE_FREE(dmd->segments);
+  dmd->segments = new_segments;
+  dmd->segments_len++;
+  dmd->segment_active_index++;
+
+  DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY | ID_RECALC_COPY_ON_WRITE);
+  WM_event_add_notifier(C, NC_OBJECT | ND_MODIFIER, ob);
+
+  return OPERATOR_FINISHED;
+}
+
+static int dash_segment_add_invoke(bContext *C, wmOperator *op, const wmEvent *UNUSED(event))
+{
+  if (gpencil_edit_modifier_invoke_properties(C, op, NULL, NULL)) {
+    return dash_segment_add_exec(C, op);
+  }
+  return OPERATOR_CANCELLED;
+}
+
+void GPENCIL_OT_segment_add(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Add Segment";
+  ot->description = "Add a segment to the dash modifier";
+  ot->idname = "GPENCIL_OT_segment_add";
+
+  /* api callbacks */
+  ot->poll = dash_segment_poll;
+  ot->invoke = dash_segment_add_invoke;
+  ot->exec = dash_segment_add_exec;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  edit_modifier_properties(ot);
+}
+
+static int dash_segment_remove_exec(bContext *C, wmOperator *op)
+{
+  Object *ob = ED_object_active_context(C);
+
+  DashGpencilModifierData *dmd = (DashGpencilModifierData *)gpencil_edit_modifier_property_get(
+      op, ob, eGpencilModifierType_Dash);
+
+  if (dmd == NULL) {
+    return OPERATOR_CANCELLED;
+  }
+
+  if (dmd->segment_active_index < 0 || dmd->segment_active_index >= dmd->segments_len) {
+    return OPERATOR_CANCELLED;
+  }
+
+  if (dmd->segments_len == 1) {
+    MEM_SAFE_FREE(dmd->segments);
+    dmd->segment_active_index = -1;
+  }
+  else {
+    DashGpencilModifierSegment *new_segments = MEM_malloc_arrayN(
+        dmd->segments_len, sizeof(DashGpencilModifierSegment), __func__);
+
+    /* Copy the segments before the deleted segment. */
+    memcpy(new_segments,
+           dmd->segments,
+           sizeof(DashGpencilModifierSegment) * dmd->segment_active_index);
+
+    /* Copy the segments after the deleted segment. */
+    memcpy(new_segments + dmd->segment_active_index,
+           dmd->segments + dmd->segment_active_index + 1,
+           sizeof(DashGpencilModifierSegment) *
+               (dmd->segments_len - dmd->segment_active_index - 1));
+
+    MEM_freeN(dmd->segments);
+    dmd->segments = new_segments;
+    dmd->segment_active_index = MAX2(dmd->segment_active_index - 1, 0);
+  }
+
+  dmd->segments_len--;
+
+  DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY | ID_RECALC_COPY_ON_WRITE);
+  WM_event_add_notifier(C, NC_OBJECT | ND_MODIFIER, ob);
+
+  return OPERATOR_FINISHED;
+}
+
+static int dash_segment_remove_invoke(bContext *C, wmOperator *op, const wmEvent *UNUSED(event))
+{
+  if (gpencil_edit_modifier_invoke_properties(C, op, NULL, NULL)) {
+    return dash_segment_remove_exec(C, op);
+  }
+  return OPERATOR_CANCELLED;
+}
+
+void GPENCIL_OT_segment_remove(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Remove Dash Segment";
+  ot->description = "Remove the active segment from the dash modifier";
+  ot->idname = "GPENCIL_OT_segment_remove";
+
+  /* api callbacks */
+  ot->poll = dash_segment_poll;
+  ot->invoke = dash_segment_remove_invoke;
+  ot->exec = dash_segment_remove_exec;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  edit_modifier_properties(ot);
+
+  RNA_def_int(
+      ot->srna, "index", 0, 0, INT_MAX, "Index", "Index of the segment to remove", 0, INT_MAX);
+}
+
+enum {
+  GP_SEGEMENT_MOVE_UP = -1,
+  GP_SEGEMENT_MOVE_DOWN = 1,
+};
+
+static int dash_segment_move_exec(bContext *C, wmOperator *op)
+{
+  Object *ob = ED_object_active_context(C);
+
+  DashGpencilModifierData *dmd = (DashGpencilModifierData *)gpencil_edit_modifier_property_get(
+      op, ob, eGpencilModifierType_Dash);
+
+  if (dmd == NULL) {
+    return OPERATOR_CANCELLED;
+  }
+
+  if (dmd->segments_len < 2) {
+    return OPERATOR_CANCELLED;
+  }
+
+  const int direction = RNA_enum_get(op->ptr, "type");
+  if (direction == GP_SEGEMENT_MOVE_UP) {
+    if (dmd->segment_active_index == 0) {
+      return OPERATOR_CANCELLED;
+    }
+
+    SWAP(DashGpencilModifierSegment,
+         dmd->segments[dmd->segment_active_index],
+         dmd->segments[dmd->segment_active_index - 1]);
+
+    dmd->segment_active_index--;
+  }
+  else if (direction == GP_SEGEMENT_MOVE_DOWN) {
+    if (dmd->segment_active_index == dmd->segments_len - 1) {
+      return OPERATOR_CANCELLED;
+    }
+
+    SWAP(DashGpencilModifierSegment,
+         dmd->segments[dmd->segment_active_index],
+         dmd->segments[dmd->segment_active_index + 1]);
+
+    dmd->segment_active_index++;
+  }
+  else {
+    return OPERATOR_CANCELLED;
+  }
+
+  DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY | ID_RECALC_COPY_ON_WRITE);
+  WM_event_add_notifier(C, NC_OBJECT | ND_MODIFIER, ob);
+
+  return OPERATOR_FINISHED;
+}
+
+static int dash_segment_move_invoke(bContext *C, wmOperator *op, const wmEvent *UNUSED(event))
+{
+  if (gpencil_edit_modifier_invoke_properties(C, op, NULL, NULL)) {
+    return dash_segment_move_exec(C, op);
+  }
+  return OPERATOR_CANCELLED;
+}
+
+void GPENCIL_OT_segment_move(wmOperatorType *ot)
+{
+  static const EnumPropertyItem segment_move[] = {
+      {GP_SEGEMENT_MOVE_UP, "UP", 0, "Up", ""},
+      {GP_SEGEMENT_MOVE_DOWN, "DOWN", 0, "Down", ""},
+      {0, NULL, 0, NULL, NULL},
+  };
+
+  /* identifiers */
+  ot->name = "Move Dash Segment";
+  ot->description = "Move the active dash segment up or down";
+  ot->idname = "GPENCIL_OT_segment_move";
+
+  /* api callbacks */
+  ot->poll = dash_segment_poll;
+  ot->invoke = dash_segment_move_invoke;
+  ot->exec = dash_segment_move_exec;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  edit_modifier_properties(ot);
+
+  ot->prop = RNA_def_enum(ot->srna, "type", segment_move, 0, "Type", "");
 }

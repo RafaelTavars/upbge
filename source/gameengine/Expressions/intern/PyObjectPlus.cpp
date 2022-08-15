@@ -46,7 +46,6 @@
 
 #include "EXP_PyObjectPlus.h"
 
-
 #include "MEM_guardedalloc.h"
 
 #include "CM_Message.h"
@@ -112,7 +111,7 @@ void EXP_PyObjectPlus::DestructFromPython()
 PyTypeObject EXP_PyObjectPlus::Type = {
     PyVarObject_HEAD_INIT(nullptr, 0) "EXP_PyObjectPlus", /*tp_name*/
     sizeof(EXP_PyObjectPlus_Proxy),                       /*tp_basicsize*/
-    0,                                                /*tp_itemsize*/
+    0,                                                    /*tp_itemsize*/
     /* methods */
     py_base_dealloc, /* tp_dealloc */
     0,               /* printfunc tp_print; */
@@ -231,9 +230,12 @@ PyObject *EXP_PyObjectPlus::py_base_new(PyTypeObject *type, PyObject *args, PyOb
      * there is no reference to the BGE data now so it will throw an error on access */
     Py_DECREF(base);
     if (ret->ref) {
-      ret->ref->m_proxy = (PyObject *)
-          ret;         // No need to add a ref because one is added when creating.
-      Py_INCREF(ret);  // We return a new ref but m_proxy holds a ref so we need to add one.
+      ret->ref->m_proxy = (PyObject *)ret;
+
+      // Incref the proxy in case the python doesn't own the ref.
+      if (!ret->py_owns) {
+        Py_INCREF(ret);
+      }
     }
   }
   else {
@@ -300,7 +302,8 @@ PyAttributeDef EXP_PyObjectPlus::Attributes[] = {
     EXP_PYATTRIBUTE_NULL  // Sentinel
 };
 
-PyObject *EXP_PyObjectPlus::pyattr_get_invalid(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef)
+PyObject *EXP_PyObjectPlus::pyattr_get_invalid(EXP_PyObjectPlus *self_v,
+                                               const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   return PyBool_FromLong(self_v ? 0 : 1);
 }
@@ -514,7 +517,9 @@ static bool py_check_attr_float(float *var, PyObject *value, const PyAttributeDe
 }
 
 // Note, this is called as a python getset.
-int EXP_PyObjectPlus::py_set_attrdef(PyObject *self_py, PyObject *value, const PyAttributeDef *attrdef)
+int EXP_PyObjectPlus::py_set_attrdef(PyObject *self_py,
+                                     PyObject *value,
+                                     const PyAttributeDef *attrdef)
 {
   EXP_PyObjectPlus *ref = (EXP_PROXY_REF(self_py));
   char *ptr = (attrdef->m_usePtr) ? (char *)EXP_PROXY_PTR(self_py) : (char *)ref;
@@ -946,7 +951,7 @@ int EXP_PyObjectPlus::py_set_attrdef(PyObject *self_py, PyObject *value, const P
             goto FREE_AND_ERROR;
           }
           for (int i = 0; i < attrdef->m_imin; i++) {
-            PyObject *list = PySequence_GetItem(value, i); /* new ref */
+            list = PySequence_GetItem(value, i); /* new ref */
             if (!PySequence_Check(list) || PySequence_Size(list) != attrdef->m_imax) {
               PyErr_Format(PyExc_TypeError,
                            "expected a sequence of [%d][%d] floats for attribute \"%s\"",
@@ -1044,7 +1049,7 @@ int EXP_PyObjectPlus::py_set_attrdef(PyObject *self_py, PyObject *value, const P
       case EXP_PYATTRIBUTE_TYPE_CHAR: {
         if (PyUnicode_Check(value)) {
           Py_ssize_t val_size;
-          const char *val = _PyUnicode_AsStringAndSize(value, &val_size);
+          const char *val = PyUnicode_AsUTF8AndSize(value, &val_size);
           strncpy(ptr, val, attrdef->m_size);
           ptr[attrdef->m_size - 1] = 0;
         }
@@ -1059,7 +1064,7 @@ int EXP_PyObjectPlus::py_set_attrdef(PyObject *self_py, PyObject *value, const P
         std::string *var = reinterpret_cast<std::string *>(ptr);
         if (PyUnicode_Check(value)) {
           Py_ssize_t val_len;
-          const char *val = _PyUnicode_AsStringAndSize(
+          const char *val = PyUnicode_AsUTF8AndSize(
               value, &val_len); /* XXX, should be 'const' but we do a silly trick to have a shorter
                                    string */
           if (attrdef->m_clamp) {
@@ -1167,9 +1172,9 @@ PyObject *EXP_PyObjectPlus::GetProxyPlus_Ext(EXP_PyObjectPlus *self, PyTypeObjec
 }
 
 PyObject *EXP_PyObjectPlus::NewProxyPlus_Ext(EXP_PyObjectPlus *self,
-                                         PyTypeObject *tp,
-                                         void *ptr,
-                                         bool py_owns)
+                                             PyTypeObject *tp,
+                                             void *ptr,
+                                             bool py_owns)
 {
   if (!self) {
     // In case of proxy without reference to game object.
@@ -1222,7 +1227,7 @@ void EXP_PyObjectPlus::SetDeprecationWarnings(bool ignoreDeprecationWarnings)
 }
 
 void EXP_PyObjectPlus::ShowDeprecationWarning_func(const std::string &old_way,
-                                               const std::string &new_way)
+                                                   const std::string &new_way)
 {
   CM_PythonWarning("method " << old_way << " is deprecated, please use " << new_way
                              << " instead.");

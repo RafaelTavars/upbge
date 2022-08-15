@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup RNA
@@ -168,9 +154,11 @@ static const EnumPropertyItem rna_enum_gpencil_caps_modes_items[] = {
 
 #  include "BKE_action.h"
 #  include "BKE_animsys.h"
+#  include "BKE_deform.h"
 #  include "BKE_gpencil.h"
 #  include "BKE_gpencil_curve.h"
 #  include "BKE_gpencil_geom.h"
+#  include "BKE_gpencil_update_cache.h"
 #  include "BKE_icons.h"
 
 #  include "DEG_depsgraph.h"
@@ -178,8 +166,24 @@ static const EnumPropertyItem rna_enum_gpencil_caps_modes_items[] = {
 
 static void rna_GPencil_update(Main *UNUSED(bmain), Scene *UNUSED(scene), PointerRNA *ptr)
 {
+#  if 0
+  /* In case a property on a layer changed, tag it with a light update. */
+  if (ptr->type == &RNA_GPencilLayer) {
+    BKE_gpencil_tag_light_update((bGPdata *)(ptr->owner_id), (bGPDlayer *)(ptr->data), NULL, NULL);
+  }
+#  endif
   DEG_id_tag_update(ptr->owner_id, ID_RECALC_GEOMETRY);
   WM_main_add_notifier(NC_GPENCIL | NA_EDITED, NULL);
+}
+
+static void rna_GpencilLayerMatrix_update(Main *bmain, Scene *scene, PointerRNA *ptr)
+{
+  bGPDlayer *gpl = (bGPDlayer *)ptr->data;
+
+  loc_eul_size_to_mat4(gpl->layer_mat, gpl->location, gpl->rotation, gpl->scale);
+  invert_m4_m4(gpl->layer_invmat, gpl->layer_mat);
+
+  rna_GPencil_update(bmain, scene, ptr);
 }
 
 static void rna_GPencil_curve_edit_mode_toggle(Main *bmain, Scene *scene, PointerRNA *ptr)
@@ -303,7 +307,7 @@ bool rna_GPencil_datablocks_obdata_poll(PointerRNA *UNUSED(ptr), const PointerRN
   return (gpd->flag & GP_DATA_ANNOTATIONS) == 0;
 }
 
-static char *rna_GPencilLayer_path(PointerRNA *ptr)
+static char *rna_GPencilLayer_path(const PointerRNA *ptr)
 {
   bGPDlayer *gpl = (bGPDlayer *)ptr->data;
   char name_esc[sizeof(gpl->info) * 2];
@@ -352,6 +356,12 @@ static void set_parent(bGPDlayer *gpl, Object *par, const int type, const char *
       gpl->partype |= PARBONE;
       BLI_strncpy(gpl->parsubstr, substr, sizeof(gpl->parsubstr));
     }
+    else {
+      invert_m4_m4(gpl->inverse, par->obmat);
+      gpl->parent = par;
+      gpl->partype |= PAROBJECT;
+      gpl->parsubstr[0] = 0;
+    }
   }
 }
 
@@ -397,7 +407,7 @@ static void rna_GPencilLayer_parent_bone_set(PointerRNA *ptr, const char *value)
   }
 }
 
-static char *rna_GPencilLayerMask_path(PointerRNA *ptr)
+static char *rna_GPencilLayerMask_path(const PointerRNA *ptr)
 {
   bGPdata *gpd = (bGPdata *)ptr->owner_id;
   bGPDlayer *gpl = BKE_gpencil_layer_active_get(gpd);
@@ -706,7 +716,7 @@ static void rna_GPencil_stroke_point_select_set(PointerRNA *ptr, const bool valu
     }
 
     /* Check if the stroke should be selected or not... */
-    BKE_gpencil_stroke_sync_selection(gps);
+    BKE_gpencil_stroke_sync_selection(gpd, gps);
   }
 }
 
@@ -806,6 +816,70 @@ static void rna_GPencil_stroke_point_pop(ID *id,
   WM_main_add_notifier(NC_GPENCIL | NA_EDITED, NULL);
 }
 
+static void rna_GPencil_stroke_point_update(ID *id, bGPDstroke *stroke)
+{
+  bGPdata *gpd = (bGPdata *)id;
+
+  /* Calc geometry data. */
+  if (stroke) {
+    BKE_gpencil_stroke_geometry_update(gpd, stroke);
+
+    DEG_id_tag_update(&gpd->id,
+                      ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY | ID_RECALC_COPY_ON_WRITE);
+
+    WM_main_add_notifier(NC_GPENCIL | NA_EDITED, NULL);
+  }
+}
+
+static float rna_GPencilStrokePoints_weight_get(bGPDstroke *stroke,
+                                                ReportList *reports,
+                                                int vertex_group_index,
+                                                int point_index)
+{
+  MDeformVert *dvert = stroke->dvert;
+  if (dvert == NULL) {
+    BKE_report(reports, RPT_ERROR, "Groups: No groups for this stroke");
+    return -1.0f;
+  }
+
+  if (stroke->totpoints <= point_index || point_index < 0) {
+    BKE_report(reports, RPT_ERROR, "GPencilStrokePoints: index out of range");
+    return -1.0f;
+  }
+
+  MDeformVert *pt_dvert = stroke->dvert + point_index;
+
+  MDeformWeight *dw = BKE_defvert_find_index(pt_dvert, vertex_group_index);
+  if (dw) {
+    return dw->weight;
+  }
+
+  return -1.0f;
+}
+
+static void rna_GPencilStrokePoints_weight_set(
+    bGPDstroke *stroke, ReportList *reports, int vertex_group_index, int point_index, float weight)
+{
+  BKE_gpencil_dvert_ensure(stroke);
+
+  MDeformVert *dvert = stroke->dvert;
+  if (dvert == NULL) {
+    BKE_report(reports, RPT_ERROR, "Groups: No groups for this stroke");
+    return;
+  }
+
+  if (stroke->totpoints <= point_index || point_index < 0) {
+    BKE_report(reports, RPT_ERROR, "GPencilStrokePoints: index out of range");
+    return;
+  }
+
+  MDeformVert *pt_dvert = stroke->dvert + point_index;
+  MDeformWeight *dw = BKE_defvert_ensure_index(pt_dvert, vertex_group_index);
+  if (dw) {
+    dw->weight = weight;
+  }
+}
+
 static bGPDstroke *rna_GPencil_stroke_new(bGPDframe *frame)
 {
   bGPDstroke *stroke = BKE_gpencil_stroke_new(0, 0, 1.0f);
@@ -827,7 +901,8 @@ static void rna_GPencil_stroke_remove(ID *id,
     return;
   }
 
-  BLI_freelinkN(&frame->strokes, stroke);
+  BLI_remlink(&frame->strokes, stroke);
+  BKE_gpencil_free_stroke(stroke);
   RNA_POINTER_INVALIDATE(stroke_ptr);
 
   DEG_id_tag_update(&gpd->id, ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY | ID_RECALC_COPY_ON_WRITE);
@@ -854,6 +929,7 @@ static void rna_GPencil_stroke_close(ID *id,
 
 static void rna_GPencil_stroke_select_set(PointerRNA *ptr, const bool value)
 {
+  bGPdata *gpd = (bGPdata *)ptr->owner_id;
   bGPDstroke *gps = ptr->data;
   bGPDspoint *pt;
   int i;
@@ -861,9 +937,11 @@ static void rna_GPencil_stroke_select_set(PointerRNA *ptr, const bool value)
   /* set new value */
   if (value) {
     gps->flag |= GP_STROKE_SELECT;
+    BKE_gpencil_stroke_select_index_set(gpd, gps);
   }
   else {
     gps->flag &= ~GP_STROKE_SELECT;
+    BKE_gpencil_stroke_select_index_reset(gps);
   }
 
   /* ensure that the stroke's points are selected in the same way */
@@ -940,7 +1018,7 @@ static void rna_GPencil_frame_remove(bGPDlayer *layer, ReportList *reports, Poin
 
 static bGPDframe *rna_GPencil_frame_copy(bGPDlayer *layer, bGPDframe *src)
 {
-  bGPDframe *frame = BKE_gpencil_frame_duplicate(src);
+  bGPDframe *frame = BKE_gpencil_frame_duplicate(src, true);
 
   while (BKE_gpencil_layer_frame_find(layer, frame->framenum)) {
     frame->framenum++;
@@ -955,7 +1033,7 @@ static bGPDframe *rna_GPencil_frame_copy(bGPDlayer *layer, bGPDframe *src)
 
 static bGPDlayer *rna_GPencil_layer_new(bGPdata *gpd, const char *name, bool setactive)
 {
-  bGPDlayer *gpl = BKE_gpencil_layer_addnew(gpd, name, setactive != 0);
+  bGPDlayer *gpl = BKE_gpencil_layer_addnew(gpd, name, setactive != 0, false);
 
   WM_main_add_notifier(NC_GPENCIL | ND_DATA | NA_EDITED, NULL);
 
@@ -1044,22 +1122,7 @@ static void rna_GPencil_clear(bGPdata *gpd)
   WM_main_add_notifier(NC_GPENCIL | ND_DATA | NA_EDITED, NULL);
 }
 
-static void rna_GpencilVertex_groups_begin(CollectionPropertyIterator *iter, PointerRNA *ptr)
-{
-  bGPDstroke *gps = ptr->data;
-
-  if (gps->dvert) {
-    MDeformVert *dvert = gps->dvert;
-
-    rna_iterator_array_begin(
-        iter, (void *)dvert->dw, sizeof(MDeformWeight), dvert->totweight, 0, NULL);
-  }
-  else {
-    rna_iterator_array_begin(iter, NULL, 0, 0, 0, NULL);
-  }
-}
-
-static char *rna_GreasePencilGrid_path(PointerRNA *UNUSED(ptr))
+static char *rna_GreasePencilGrid_path(const PointerRNA *UNUSED(ptr))
 {
   return BLI_strdup("grid");
 }
@@ -1264,6 +1327,58 @@ static void rna_def_gpencil_stroke_points_api(BlenderRNA *brna, PropertyRNA *cpr
   RNA_def_function_ui_description(func, "Remove a grease pencil stroke point");
   RNA_def_function_flag(func, FUNC_USE_REPORTS | FUNC_USE_SELF_ID);
   RNA_def_int(func, "index", -1, INT_MIN, INT_MAX, "Index", "point index", INT_MIN, INT_MAX);
+
+  func = RNA_def_function(srna, "update", "rna_GPencil_stroke_point_update");
+  RNA_def_function_ui_description(func, "Recalculate internal triangulation data");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID);
+
+  func = RNA_def_function(srna, "weight_get", "rna_GPencilStrokePoints_weight_get");
+  RNA_def_function_ui_description(func, "Get vertex group point weight");
+  RNA_def_function_flag(func, FUNC_USE_REPORTS);
+  RNA_def_int(func,
+              "vertex_group_index",
+              0,
+              0,
+              INT_MAX,
+              "Vertex Group Index",
+              "Index of Vertex Group in the array of groups",
+              0,
+              INT_MAX);
+  RNA_def_int(func,
+              "point_index",
+              0,
+              0,
+              INT_MAX,
+              "Point Index",
+              "Index of the Point in the array",
+              0,
+              INT_MAX);
+  parm = RNA_def_float(
+      func, "weight", 0, -FLT_MAX, FLT_MAX, "Weight", "Point Weight", -FLT_MAX, FLT_MAX);
+  RNA_def_function_return(func, parm);
+
+  func = RNA_def_function(srna, "weight_set", "rna_GPencilStrokePoints_weight_set");
+  RNA_def_function_ui_description(func, "Set vertex group point weight");
+  RNA_def_function_flag(func, FUNC_USE_REPORTS);
+  RNA_def_int(func,
+              "vertex_group_index",
+              0,
+              0,
+              INT_MAX,
+              "Vertex Group Index",
+              "Index of Vertex Group in the array of groups",
+              0,
+              INT_MAX);
+  RNA_def_int(func,
+              "point_index",
+              0,
+              0,
+              INT_MAX,
+              "Point Index",
+              "Index of the Point in the array",
+              0,
+              INT_MAX);
+  RNA_def_float(func, "weight", 0, -FLT_MAX, FLT_MAX, "Weight", "Point Weight", -FLT_MAX, FLT_MAX);
 }
 
 /* This information is read only and it can be used by add-ons */
@@ -1491,21 +1606,6 @@ static void rna_def_gpencil_stroke(BlenderRNA *brna)
   RNA_def_property_ui_text(prop, "Stroke Points", "Stroke data points");
   rna_def_gpencil_stroke_points_api(brna, prop);
 
-  /* vertex groups */
-  prop = RNA_def_property(srna, "groups", PROP_COLLECTION, PROP_NONE);
-  RNA_def_property_collection_funcs(prop,
-                                    "rna_GpencilVertex_groups_begin",
-                                    "rna_iterator_array_next",
-                                    "rna_iterator_array_end",
-                                    "rna_iterator_array_get",
-                                    NULL,
-                                    NULL,
-                                    NULL,
-                                    NULL);
-  RNA_def_property_struct_type(prop, "GpencilVertexGroupElement");
-  RNA_def_property_ui_text(
-      prop, "Groups", "Weights for the vertex groups this vertex is member of");
-
   /* Triangles */
   prop = RNA_def_property(srna, "triangles", PROP_COLLECTION, PROP_NONE);
   RNA_def_property_collection_sdna(prop, NULL, "triangles", "tot_triangles");
@@ -1521,14 +1621,14 @@ static void rna_def_gpencil_stroke(BlenderRNA *brna)
   /* Material Index */
   prop = RNA_def_property(srna, "material_index", PROP_INT, PROP_NONE);
   RNA_def_property_int_sdna(prop, NULL, "mat_nr");
-  RNA_def_property_ui_text(prop, "Material Index", "Index of material used in this stroke");
+  RNA_def_property_ui_text(prop, "Material Index", "Material slot index of this stroke");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
 
   /* Settings */
   prop = RNA_def_property(srna, "display_mode", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_bitflag_sdna(prop, NULL, "flag");
   RNA_def_property_enum_items(prop, stroke_display_mode_items);
-  RNA_def_property_ui_text(prop, "Draw Mode", "Coordinate space that stroke is in");
+  RNA_def_property_ui_text(prop, "Display Mode", "Coordinate space that stroke is in");
   RNA_def_property_update(prop, 0, "rna_GPencil_update");
 
   prop = RNA_def_property(srna, "select", PROP_BOOLEAN, PROP_NONE);
@@ -1643,6 +1743,11 @@ static void rna_def_gpencil_stroke(BlenderRNA *brna)
   RNA_def_property_ui_text(
       prop, "Vertex Fill Color", "Color used to mix with fill color to get final color");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
+
+  /* Selection Index */
+  prop = RNA_def_property(srna, "select_index", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, NULL, "select_index");
+  RNA_def_property_ui_text(prop, "Select Index", "Index of selection used for interpolation");
 }
 
 static void rna_def_gpencil_strokes_api(BlenderRNA *brna, PropertyRNA *cprop)
@@ -1699,7 +1804,7 @@ static void rna_def_gpencil_frame(BlenderRNA *brna)
   /* Frame Number */
   prop = RNA_def_property(srna, "frame_number", PROP_INT, PROP_NONE);
   RNA_def_property_int_sdna(prop, NULL, "framenum");
-  /* XXX note: this cannot occur on the same frame as another sketch */
+  /* XXX NOTE: this cannot occur on the same frame as another sketch. */
   RNA_def_property_range(prop, -MAXFRAME, MAXFRAME);
   RNA_def_property_ui_text(prop, "Frame Number", "The frame on which this sketch appears");
 
@@ -1886,7 +1991,7 @@ static void rna_def_gpencil_layer(BlenderRNA *brna)
   RNA_def_property_ui_text(prop, "Opacity", "Layer Opacity");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
 
-  /* layer channel color (grease pencil)  */
+  /* Layer channel color (grease pencil). */
   prop = RNA_def_property(srna, "channel_color", PROP_FLOAT, PROP_COLOR_GAMMA);
   RNA_def_property_float_sdna(prop, NULL, "color");
   RNA_def_property_array(prop, 3);
@@ -1894,6 +1999,14 @@ static void rna_def_gpencil_layer(BlenderRNA *brna)
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_ui_text(
       prop, "Custom Channel Color", "Custom color for animation channel in Dopesheet");
+  RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
+
+  /* Layer Opacity (Annotations). */
+  prop = RNA_def_property(srna, "annotation_opacity", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, NULL, "opacity");
+  RNA_def_property_range(prop, 0.0, 1.0f);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Opacity", "Annotation Layer Opacity");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
 
   /* Stroke Drawing Color (Annotations) */
@@ -2005,12 +2118,57 @@ static void rna_def_gpencil_layer(BlenderRNA *brna)
       "ViewLayer",
       "Only include Layer in this View Layer render output (leave blank to include always)");
 
+  prop = RNA_def_property(srna, "use_viewlayer_masks", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, NULL, "flag", GP_LAYER_DISABLE_MASKS_IN_VIEWLAYER);
+  RNA_def_property_ui_text(
+      prop, "Use Masks in Render", "Include the mask layers when rendering the view-layer");
+  RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
+
   /* blend mode */
   prop = RNA_def_property(srna, "blend_mode", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, NULL, "blend_mode");
   RNA_def_property_enum_items(prop, rna_enum_layer_blend_modes_items);
   RNA_def_property_ui_text(prop, "Blend Mode", "Blend mode");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
+
+  /* Layer transforms. */
+  prop = RNA_def_property(srna, "location", PROP_FLOAT, PROP_TRANSLATION);
+  RNA_def_property_float_sdna(prop, NULL, "location");
+  RNA_def_property_ui_text(prop, "Location", "Values for change location");
+  RNA_def_property_ui_range(prop, -FLT_MAX, FLT_MAX, 1, RNA_TRANSLATION_PREC_DEFAULT);
+  RNA_def_property_update(prop, 0, "rna_GpencilLayerMatrix_update");
+
+  prop = RNA_def_property(srna, "rotation", PROP_FLOAT, PROP_EULER);
+  RNA_def_property_float_sdna(prop, NULL, "rotation");
+  RNA_def_property_ui_text(prop, "Rotation", "Values for changes in rotation");
+  RNA_def_property_ui_range(prop, -FLT_MAX, FLT_MAX, 1, RNA_TRANSLATION_PREC_DEFAULT);
+  RNA_def_property_update(prop, 0, "rna_GpencilLayerMatrix_update");
+
+  prop = RNA_def_property(srna, "scale", PROP_FLOAT, PROP_XYZ);
+  RNA_def_property_float_sdna(prop, NULL, "scale");
+  RNA_def_property_float_default(prop, 1.0f);
+  RNA_def_property_ui_text(prop, "Scale", "Values for changes in scale");
+  RNA_def_property_ui_range(prop, -FLT_MAX, FLT_MAX, 1, RNA_TRANSLATION_PREC_DEFAULT);
+  RNA_def_property_update(prop, 0, "rna_GpencilLayerMatrix_update");
+
+  /* Layer matrix. */
+  prop = RNA_def_property(srna, "matrix_layer", PROP_FLOAT, PROP_MATRIX);
+  RNA_def_property_float_sdna(prop, NULL, "layer_mat");
+  RNA_def_property_multi_array(prop, 2, rna_matrix_dimsize_4x4);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_NO_COMPARISON);
+  RNA_def_property_override_clear_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_ui_text(prop, "Matrix Layer", "Local Layer transformation matrix");
+
+  /* Layer inverse matrix. */
+  prop = RNA_def_property(srna, "matrix_inverse_layer", PROP_FLOAT, PROP_MATRIX);
+  RNA_def_property_float_sdna(prop, NULL, "layer_invmat");
+  RNA_def_property_multi_array(prop, 2, rna_matrix_dimsize_4x4);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_NO_COMPARISON);
+  RNA_def_property_override_clear_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_ui_text(
+      prop, "Matrix Layer Inverse", "Local Layer transformation inverse matrix");
 
   /* Flags */
   prop = RNA_def_property(srna, "hide", PROP_BOOLEAN, PROP_NONE);
@@ -2049,7 +2207,10 @@ static void rna_def_gpencil_layer(BlenderRNA *brna)
 
   prop = RNA_def_property(srna, "use_mask_layer", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, NULL, "flag", GP_LAYER_USE_MASK);
-  RNA_def_property_ui_text(prop, "Mask Layer", "Mask pixels from underlying layers drawing");
+  RNA_def_property_ui_text(
+      prop,
+      "Use Mask",
+      "The visibility of drawings on this layer is affected by the layers in its masks list");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
 
   prop = RNA_def_property(srna, "use_lights", PROP_BOOLEAN, PROP_NONE);
@@ -2062,7 +2223,7 @@ static void rna_def_gpencil_layer(BlenderRNA *brna)
   prop = RNA_def_property(srna, "use_solo_mode", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, NULL, "flag", GP_LAYER_SOLO_MODE);
   RNA_def_property_ui_text(
-      prop, "Solo Mode", "In Paint mode display only layers with keyframe in current frame");
+      prop, "Solo Mode", "In Draw Mode only display layers with keyframe in current frame");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
 
   /* Layer is used as Ruler. */
@@ -2079,13 +2240,13 @@ static void rna_def_gpencil_layer(BlenderRNA *brna)
   prop = RNA_def_property(srna, "show_points", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, NULL, "flag", GP_LAYER_DRAWDEBUG);
   RNA_def_property_ui_text(
-      prop, "Show Points", "Draw the points which make up the strokes (for debugging purposes)");
+      prop, "Show Points", "Show the points which make up the strokes (for debugging purposes)");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
 
   /* In Front */
   prop = RNA_def_property(srna, "show_in_front", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_negative_sdna(prop, NULL, "flag", GP_LAYER_NO_XRAY);
-  RNA_def_property_ui_text(prop, "In Front", "Make the layer draw in front of objects");
+  RNA_def_property_ui_text(prop, "In Front", "Make the layer display in front of objects");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
 
   /* Parent object */
@@ -2420,7 +2581,7 @@ static void rna_def_gpencil_data(BlenderRNA *brna)
   RNA_def_property_ui_text(
       prop,
       "Auto-Lock Layers",
-      "Lock automatically all layers except active one to avoid accidental changes");
+      "Automatically lock all layers except the active one to avoid accidental changes");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_autolock");
 
   prop = RNA_def_property(srna, "edit_line_color", PROP_FLOAT, PROP_COLOR_GAMMA);

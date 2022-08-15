@@ -1,9 +1,11 @@
 SCA_ConstraintActuator(SCA_IActuator)
-====================================
+=====================================
 
-base class --- :class:`SCA_IActuator`
+.. currentmodule:: bge.types
 
-.. class:: SCA_ConstraintActuator(SCA_IActuator)
+base class --- :class:`~bge.types.SCA_IActuator`
+
+.. class:: SCA_ConstraintActuator
 
    A constraint actuator limits the position, rotation, distance or orientation of an object.
 
@@ -73,4 +75,4 @@ base class --- :class:`SCA_IActuator`
 
       :type: integer.
 
-      
+

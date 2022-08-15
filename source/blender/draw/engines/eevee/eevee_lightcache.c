@@ -1,20 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Copyright 2016, Blender Foundation.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2016 Blender Foundation. */
 
 /** \file
  * \ingroup draw_engine
@@ -75,7 +60,7 @@
   (IRRADIANCE_MAX_POOL_SIZE / IRRADIANCE_SAMPLE_SIZE_X) * \
       (IRRADIANCE_MAX_POOL_SIZE / IRRADIANCE_SAMPLE_SIZE_Y)
 
-/* TODO should be replace by a more elegant alternative. */
+/* TODO: should be replace by a more elegant alternative. */
 extern void DRW_opengl_context_enable(void);
 extern void DRW_opengl_context_disable(void);
 
@@ -99,9 +84,9 @@ typedef struct EEVEE_LightBake {
   GPUTexture *rt_color;
   /** Target cube depth texture. */
   GPUTexture *rt_depth;
-  /** Target cube framebuffers. */
+  /** Target cube frame-buffers. */
   GPUFrameBuffer *rt_fb[6];
-  /** Storage framebuffer. */
+  /** Storage frame-buffer. */
   GPUFrameBuffer *store_fb;
   /** Cube render target resolution. */
   int rt_res;
@@ -110,7 +95,7 @@ typedef struct EEVEE_LightBake {
   /** Target layer to store the data to. */
   int layer;
   /** Sample count for the convolution. */
-  float samples_ct, invsamples_ct;
+  float samples_count, invsamples_count;
   /** Sampling bias during convolution step. */
   float lod_factor;
   /** Max cube-map LOD to sample when convolving. */
@@ -135,7 +120,7 @@ typedef struct EEVEE_LightBake {
   int grid_curr;
   /** The current light bounce being evaluated. */
   int bounce_curr, bounce_len;
-  /** Resolution of the Visibility shadowmap. */
+  /** Resolution of the Visibility shadow-map. */
   float vis_res;
   /** Result of previous light bounce. */
   GPUTexture *grid_prev;
@@ -163,9 +148,9 @@ typedef struct EEVEE_LightBake {
   /** For only handling the resources. */
   bool resource_only;
   bool own_resources;
-  /** If the lightcache was created for baking, it's first owned by the baker. */
+  /** If the light-cache was created for baking, it's first owned by the baker. */
   bool own_light_cache;
-  /** ms. delay the start of the baking to not slowdown interactions (TODO remove) */
+  /** ms. delay the start of the baking to not slowdown interactions (TODO: remove). */
   int delay;
   /** Scene frame to bake. */
   int frame;
@@ -196,7 +181,7 @@ static uint eevee_lightcache_memsize_get(LightCache *lcache)
   return size;
 }
 
-static bool eevee_lightcache_version_check(LightCache *lcache)
+static bool eevee_lightcache_version_check(const LightCache *lcache)
 {
   switch (lcache->type) {
     case LIGHTCACHE_TYPE_STATIC:
@@ -297,14 +282,14 @@ static void irradiance_pool_size_get(int visibility_size, int total_samples, int
                     (visibility_size / IRRADIANCE_SAMPLE_SIZE_Y);
 
   /* The irradiance itself take one layer, hence the +1 */
-  int layer_ct = MIN2(irr_per_vis + 1, IRRADIANCE_MAX_POOL_LAYER);
+  int layer_count = MIN2(irr_per_vis + 1, IRRADIANCE_MAX_POOL_LAYER);
 
-  int texel_ct = (int)ceilf((float)total_samples / (float)(layer_ct - 1));
+  int texel_count = (int)ceilf((float)total_samples / (float)(layer_count - 1));
   r_size[0] = visibility_size *
-              max_ii(1, min_ii(texel_ct, (IRRADIANCE_MAX_POOL_SIZE / visibility_size)));
+              max_ii(1, min_ii(texel_count, (IRRADIANCE_MAX_POOL_SIZE / visibility_size)));
   r_size[1] = visibility_size *
-              max_ii(1, (texel_ct / (IRRADIANCE_MAX_POOL_SIZE / visibility_size)));
-  r_size[2] = layer_ct;
+              max_ii(1, (texel_count / (IRRADIANCE_MAX_POOL_SIZE / visibility_size)));
+  r_size[2] = layer_count;
 }
 
 static bool EEVEE_lightcache_validate(const LightCache *light_cache,
@@ -313,7 +298,14 @@ static bool EEVEE_lightcache_validate(const LightCache *light_cache,
                                       const int grid_len,
                                       const int irr_size[3])
 {
-  if (light_cache && !(light_cache->flag & LIGHTCACHE_INVALID)) {
+  if (light_cache == NULL) {
+    return false;
+  }
+  if (!eevee_lightcache_version_check(light_cache)) {
+    return false;
+  }
+
+  if (!(light_cache->flag & LIGHTCACHE_INVALID)) {
     /* See if we need the same amount of texture space. */
     if ((irr_size[0] == light_cache->grid_tx.tex_size[0]) &&
         (irr_size[1] == light_cache->grid_tx.tex_size[1]) &&
@@ -403,7 +395,7 @@ static bool eevee_lightcache_static_load(LightCache *lcache)
   if (lcache->grid_tx.tex == NULL) {
     lcache->grid_tx.tex = GPU_texture_create_2d_array(
         "lightcache_irradiance", UNPACK3(lcache->grid_tx.tex_size), 1, IRRADIANCE_FORMAT, NULL);
-    GPU_texture_update(lcache->grid_tx.tex, GPU_DATA_UNSIGNED_BYTE, lcache->grid_tx.data);
+    GPU_texture_update(lcache->grid_tx.tex, GPU_DATA_UBYTE, lcache->grid_tx.data);
 
     if (lcache->grid_tx.tex == NULL) {
       lcache->flag |= LIGHTCACHE_NOT_USABLE;
@@ -470,7 +462,7 @@ bool EEVEE_lightcache_load(LightCache *lcache)
 static void eevee_lightbake_readback_irradiance(LightCache *lcache)
 {
   MEM_SAFE_FREE(lcache->grid_tx.data);
-  lcache->grid_tx.data = GPU_texture_read(lcache->grid_tx.tex, GPU_DATA_UNSIGNED_BYTE, 0);
+  lcache->grid_tx.data = GPU_texture_read(lcache->grid_tx.tex, GPU_DATA_UBYTE, 0);
   lcache->grid_tx.data_type = LIGHTCACHETEX_BYTE;
   lcache->grid_tx.components = 4;
 }
@@ -708,7 +700,7 @@ static void eevee_lightbake_create_resources(EEVEE_LightBake *lbake)
    * by the DRW mutex. */
   lbake->lcache = eevee->light_cache_data;
 
-  /* TODO validate irradiance and reflection cache independently... */
+  /* TODO: validate irradiance and reflection cache independently... */
   if (!EEVEE_lightcache_validate(
           lbake->lcache, lbake->cube_len, lbake->ref_cube_res, lbake->grid_len, lbake->irr_size)) {
     eevee->light_cache_data = lbake->lcache = NULL;
@@ -757,7 +749,7 @@ wmJob *EEVEE_lightbake_job_create(struct wmWindowManager *wm,
   if (old_lbake && (old_lbake->view_layer_input == view_layer) && (old_lbake->bmain == bmain)) {
     lbake = MEM_callocN(sizeof(EEVEE_LightBake), "EEVEE_LightBake");
     /* Cannot reuse depsgraph for now because we cannot get the update from the
-     * main database directly. TODO reuse depsgraph and only update positions. */
+     * main database directly. TODO: reuse depsgraph and only update positions. */
     /* lbake->depsgraph = old_lbake->depsgraph; */
     lbake->depsgraph = DEG_graph_new(bmain, scene, view_layer, DAG_EVAL_RENDER);
 
@@ -799,7 +791,6 @@ wmJob *EEVEE_lightbake_job_create(struct wmWindowManager *wm,
   return wm_job;
 }
 
-/* MUST run on the main thread. */
 void *EEVEE_lightbake_job_data_alloc(struct Main *bmain,
                                      struct ViewLayer *view_layer,
                                      struct Scene *scene,
@@ -831,7 +822,7 @@ void EEVEE_lightbake_job_data_free(void *custom_data)
 {
   EEVEE_LightBake *lbake = (EEVEE_LightBake *)custom_data;
 
-  /* TODO reuse depsgraph. */
+  /* TODO: reuse depsgraph. */
   /* if (lbake->own_resources) { */
   DEG_graph_free(lbake->depsgraph);
   /* } */
@@ -859,7 +850,7 @@ static void eevee_lightbake_delete_resources(EEVEE_LightBake *lbake)
   }
 
   /* XXX Free the resources contained in the viewlayer data
-   * to be able to free the context before deleting the depsgraph.  */
+   * to be able to free the context before deleting the depsgraph. */
   if (lbake->sldata) {
     EEVEE_view_layer_data_free(lbake->sldata);
   }
@@ -907,15 +898,16 @@ static void eevee_lightbake_cache_create(EEVEE_Data *vedata, EEVEE_LightBake *lb
   Scene *scene_eval = DEG_get_evaluated_scene(lbake->depsgraph);
   lbake->sldata = sldata;
 
-  /* Disable all effects BUT high bitdepth shadows. */
+  /* Disable all effects BUT high bit-depth shadows. */
   scene_eval->eevee.flag &= SCE_EEVEE_SHADOW_HIGH_BITDEPTH;
   scene_eval->eevee.taa_samples = 1;
   scene_eval->eevee.gi_irradiance_smoothing = 0.0f;
 
   stl->g_data = MEM_callocN(sizeof(*stl->g_data), __func__);
   stl->g_data->background_alpha = 1.0f;
+  stl->g_data->render_timesteps = 1;
 
-  /* XXX TODO remove this. This is in order to make the init functions work. */
+  /* XXX TODO: remove this. This is in order to make the init functions work. */
   if (DRW_view_default_get() == NULL) {
     float winmat[4][4], viewmat[4][4];
     unit_m4(viewmat);
@@ -973,14 +965,14 @@ static void eevee_lightbake_cache_create(EEVEE_Data *vedata, EEVEE_LightBake *lb
   txl->color = NULL;
 
   DRW_render_instance_buffer_finish();
-  DRW_hair_update();
+  DRW_curves_update();
 }
 
 static void eevee_lightbake_copy_irradiance(EEVEE_LightBake *lbake, LightCache *lcache)
 {
   DRW_TEXTURE_FREE_SAFE(lbake->grid_prev);
 
-  /* Copy texture by reading back and reuploading it. */
+  /* Copy texture by reading back and re-uploading it. */
   float *tex = GPU_texture_read(lcache->grid_tx.tex, GPU_DATA_FLOAT, 0);
   lbake->grid_prev = DRW_texture_create_2d_array(lbake->irr_size[0],
                                                  lbake->irr_size[1],
@@ -1002,7 +994,7 @@ static void eevee_lightbake_render_world_sample(void *ved, void *user_data)
   float clamp = scene_eval->eevee.gi_glossy_clamp;
   float filter_quality = scene_eval->eevee.gi_filter_quality;
 
-  /* TODO do this once for the whole bake when we have independent DRWManagers. */
+  /* TODO: do this once for the whole bake when we have independent DRWManagers. */
   eevee_lightbake_cache_create(vedata, lbake);
 
   sldata->common_data.ray_type = EEVEE_RAY_GLOSSY;
@@ -1125,8 +1117,8 @@ static void eevee_lightbake_render_grid_sample(void *ved, void *user_data)
   /* Use the previous bounce for rendering this bounce. */
   SWAP(GPUTexture *, lbake->grid_prev, lcache->grid_tx.tex);
 
-  /* TODO do this once for the whole bake when we have independent DRWManagers.
-   * Warning: Some of the things above require this. */
+  /* TODO: do this once for the whole bake when we have independent DRWManagers.
+   * WARNING: Some of the things above require this. */
   eevee_lightbake_cache_create(vedata, lbake);
 
   /* Compute sample position */
@@ -1202,7 +1194,7 @@ static void eevee_lightbake_render_probe_sample(void *ved, void *user_data)
   float clamp = scene_eval->eevee.gi_glossy_clamp;
   float filter_quality = scene_eval->eevee.gi_filter_quality;
 
-  /* TODO do this once for the whole bake when we have independent DRWManagers. */
+  /* TODO: do this once for the whole bake when we have independent DRWManagers. */
   eevee_lightbake_cache_create(vedata, lbake);
 
   /* Disable specular lighting when rendering probes to avoid feedback loops (looks bad). */
@@ -1330,7 +1322,7 @@ void EEVEE_lightbake_update(void *custom_data)
   EEVEE_LightBake *lbake = (EEVEE_LightBake *)custom_data;
   Scene *scene_orig = lbake->scene;
 
-  /* If a new lightcache was created, free the old one and reference the new. */
+  /* If a new light-cache was created, free the old one and reference the new. */
   if (lbake->lcache && scene_orig->eevee.light_cache_data != lbake->lcache) {
     if (scene_orig->eevee.light_cache_data != NULL) {
       EEVEE_lightcache_free(scene_orig->eevee.light_cache_data);
@@ -1353,7 +1345,7 @@ static bool lightbake_do_sample(EEVEE_LightBake *lbake,
 
   Depsgraph *depsgraph = lbake->depsgraph;
 
-  /* TODO: make DRW manager instanciable (and only lock on drawing) */
+  /* TODO: make DRW manager instantiable (and only lock on drawing) */
   eevee_lightbake_context_enable(lbake);
   DRW_custom_pipeline(&draw_engine_eevee_type, depsgraph, render_callback, lbake);
   lbake->done += 1;
@@ -1412,7 +1404,7 @@ void EEVEE_lightbake_job(void *custom_data, short *stop, short *do_update, float
   /* HACK: Sleep to delay the first rendering operation
    * that causes a small freeze (caused by VBO generation)
    * because this step is locking at this moment. */
-  /* TODO remove this. */
+  /* TODO: remove this. */
   if (lbake->delay) {
     PIL_sleep_ms(lbake->delay);
   }
@@ -1471,13 +1463,8 @@ void EEVEE_lightbake_job(void *custom_data, short *stop, short *do_update, float
   }
 
   eevee_lightbake_delete_resources(lbake);
-
-  /* Free GPU smoke textures and the smoke domain list correctly: See also T73921.*/
-  EEVEE_volumes_free_smoke_textures();
 }
 
-/* This is to update the world irradiance and reflection contribution from
- * within the viewport drawing (does not have the overhead of a full light cache rebuild.) */
 void EEVEE_lightbake_update_world_quick(EEVEE_ViewLayerData *sldata,
                                         EEVEE_Data *vedata,
                                         const Scene *scene)

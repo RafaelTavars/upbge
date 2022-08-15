@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup freestyle
@@ -56,11 +42,6 @@ NodeGroup *BlenderFileLoader::Load()
   // creation of the scene root node
   _Scene = new NodeGroup;
 
-  _viewplane_left = _re->viewplane.xmin;
-  _viewplane_right = _re->viewplane.xmax;
-  _viewplane_bottom = _re->viewplane.ymin;
-  _viewplane_top = _re->viewplane.ymax;
-
   if (_re->clip_start < 0.0f) {
     // Adjust clipping start/end and set up a Z offset when the viewport preview
     // is used with the orthographic view.  In this case, _re->clip_start is negative,
@@ -75,14 +56,6 @@ NodeGroup *BlenderFileLoader::Load()
     _z_far = -_re->clip_end;
     _z_offset = 0.0f;
   }
-
-#if 0
-  if (G.debug & G_DEBUG_FREESTYLE) {
-    cout << "Frustum: l " << _viewplane_left << " r " << _viewplane_right << " b "
-         << _viewplane_bottom << " t " << _viewplane_top << " n " << _z_near << " f " << _z_far
-         << endl;
-  }
-#endif
 
   int id = 0;
   const eEvaluationMode eval_mode = DEG_get_mode(_depsgraph);
@@ -397,7 +370,7 @@ int BlenderFileLoader::testDegenerateTriangle(float v1[3], float v2[3], float v3
   return 0;
 }
 
-static bool testEdgeMark(Mesh *me, FreestyleEdge *fed, const MLoopTri *lt, int i)
+static bool testEdgeMark(Mesh *me, const FreestyleEdge *fed, const MLoopTri *lt, int i)
 {
   MLoop *mloop = &me->mloop[lt->tri[i]];
   MLoop *mloop_next = &me->mloop[lt->tri[(i + 1) % 3]];
@@ -422,7 +395,7 @@ void BlenderFileLoader::insertShapeNode(Object *ob, Mesh *me, int id)
 
   // Compute loop normals
   BKE_mesh_calc_normals_split(me);
-  float(*lnors)[3] = nullptr;
+  const float(*lnors)[3] = nullptr;
 
   if (CustomData_has_layer(&me->ldata, CD_NORMAL)) {
     lnors = (float(*)[3])CustomData_get_layer(&me->ldata, CD_NORMAL);
@@ -432,8 +405,8 @@ void BlenderFileLoader::insertShapeNode(Object *ob, Mesh *me, int id)
   MVert *mvert = me->mvert;
   MLoop *mloop = me->mloop;
   MPoly *mpoly = me->mpoly;
-  FreestyleEdge *fed = (FreestyleEdge *)CustomData_get_layer(&me->edata, CD_FREESTYLE_EDGE);
-  FreestyleFace *ffa = (FreestyleFace *)CustomData_get_layer(&me->pdata, CD_FREESTYLE_FACE);
+  const FreestyleEdge *fed = (FreestyleEdge *)CustomData_get_layer(&me->edata, CD_FREESTYLE_EDGE);
+  const FreestyleFace *ffa = (FreestyleFace *)CustomData_get_layer(&me->pdata, CD_FREESTYLE_FACE);
 
   // Compute view matrix
   Object *ob_camera_eval = DEG_get_evaluated_object(_depsgraph, RE_GetCamera(_re));
@@ -448,7 +421,7 @@ void BlenderFileLoader::insertShapeNode(Object *ob, Mesh *me, int id)
   transpose_m4(nmat);
 
   // We count the number of triangles after the clipping by the near and far view
-  // planes is applied (Note: mesh vertices are in the camera coordinate system).
+  // planes is applied (NOTE: mesh vertices are in the camera coordinate system).
   unsigned numFaces = 0;
   float v1[3], v2[3], v3[3];
   float n1[3], n2[3], n3[3], facenormal[3];

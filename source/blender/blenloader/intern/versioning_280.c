@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup blenloader
@@ -87,7 +73,9 @@
 #include "BKE_lib_id.h"
 #include "BKE_main.h"
 #include "BKE_mesh.h"
+#include "BKE_mesh_legacy_convert.h"
 #include "BKE_node.h"
+#include "BKE_node_tree_update.h"
 #include "BKE_paint.h"
 #include "BKE_pointcache.h"
 #include "BKE_report.h"
@@ -111,41 +99,12 @@
 #include "BLO_readfile.h"
 #include "readfile.h"
 
-#include "MEM_guardedalloc.h"
+#include "versioning_common.h"
 
-#include "wm_event_types.h"
+#include "MEM_guardedalloc.h"
 
 /* Make preferences read-only, use versioning_userdef.c. */
 #define U (*((const UserDef *)&U))
-
-/**
- * Rename if the ID doesn't exist.
- */
-static ID *rename_id_for_versioning(Main *bmain,
-                                    const short id_type,
-                                    const char *name_src,
-                                    const char *name_dst)
-{
-  /* We can ignore libraries */
-  ListBase *lb = which_libbase(bmain, id_type);
-  ID *id = NULL;
-  LISTBASE_FOREACH (ID *, idtest, lb) {
-    if (idtest->lib == NULL) {
-      if (STREQ(idtest->name + 2, name_src)) {
-        id = idtest;
-      }
-      if (STREQ(idtest->name + 2, name_dst)) {
-        return NULL;
-      }
-    }
-  }
-  if (id != NULL) {
-    BLI_strncpy(id->name + 2, name_dst, sizeof(id->name) - 2);
-    /* We know it's unique, this just sorts. */
-    BLI_libblock_ensure_unique_name(bmain, id->name);
-  }
-  return id;
-}
 
 static bScreen *screen_parent_find(const bScreen *screen)
 {
@@ -184,7 +143,7 @@ static void do_version_workspaces_create_from_screens(Main *bmain)
       workspace = BKE_workspace_add(bmain, screen->id.name + 2);
     }
     if (workspace == NULL) {
-      continue; /* Not much we can do.. */
+      continue; /* Not much we can do. */
     }
     BKE_workspace_layout_add(bmain, workspace, screen, screen->id.name + 2);
   }
@@ -350,7 +309,7 @@ static void do_version_layer_collection_post(ViewLayer *view_layer,
         lc->flag |= LAYER_COLLECTION_EXCLUDE;
       }
       if (enabled && !selectable) {
-        lc->collection->flag |= COLLECTION_RESTRICT_SELECT;
+        lc->collection->flag |= COLLECTION_HIDE_SELECT;
       }
     }
 
@@ -377,7 +336,7 @@ static void do_version_scene_collection_convert(
   LISTBASE_FOREACH (LinkData *, link, &sc->objects) {
     Object *ob = link->data;
     if (ob) {
-      BKE_collection_object_add(bmain, collection, ob);
+      BKE_collection_object_add_notest(bmain, collection, ob);
       id_us_min(&ob->id);
     }
   }
@@ -430,6 +389,8 @@ static void do_version_scene_collection_to_collection(Main *bmain, Scene *scene)
     do_version_layer_collection_pre(
         view_layer, &view_layer->layer_collections, enabled_set, selectable_set);
 
+    BKE_layer_collection_doversion_2_80(scene, view_layer);
+
     BKE_layer_collection_sync(scene, view_layer);
 
     do_version_layer_collection_post(
@@ -473,19 +434,19 @@ static void do_version_layers_to_collections(Main *bmain, Scene *scene)
 
           Collection *collection = BKE_collection_add(bmain, collection_master, name);
           collection->id.lib = scene->id.lib;
-          if (collection->id.lib != NULL) {
+          if (ID_IS_LINKED(collection)) {
             collection->id.tag |= LIB_TAG_INDIRECT;
           }
           collections[layer] = collection;
 
           if (!(scene->lay & (1 << layer))) {
-            collection->flag |= COLLECTION_RESTRICT_VIEWPORT | COLLECTION_RESTRICT_RENDER;
+            collection->flag |= COLLECTION_HIDE_VIEWPORT | COLLECTION_HIDE_RENDER;
           }
         }
 
         /* Note usually this would do slow collection syncing for view layers,
          * but since no view layers exists yet at this point it's fast. */
-        BKE_collection_object_add(bmain, collections[layer], base->object);
+        BKE_collection_object_add_notest(bmain, collections[layer], base->object);
       }
 
       if (base->flag & SELECT) {
@@ -603,10 +564,10 @@ static void do_version_layers_to_collections(Main *bmain, Scene *scene)
 
 static void do_version_collection_propagate_lib_to_children(Collection *collection)
 {
-  if (collection->id.lib != NULL) {
+  if (ID_IS_LINKED(collection)) {
     for (CollectionChild *collection_child = collection->children.first; collection_child != NULL;
          collection_child = collection_child->next) {
-      if (collection_child->collection->id.lib == NULL) {
+      if (!ID_IS_LINKED(collection_child->collection)) {
         collection_child->collection->id.lib = collection->id.lib;
       }
       do_version_collection_propagate_lib_to_children(collection_child->collection);
@@ -672,15 +633,8 @@ static ARegion *do_versions_find_region(ListBase *regionbase, int regiontype)
 {
   ARegion *region = do_versions_find_region_or_null(regionbase, regiontype);
   if (region == NULL) {
-    //BLI_assert(!"Did not find expected region in versioning");
+    // BLI_assert_msg(0, "Did not find expected region in versioning");
   }
-  return region;
-}
-
-static ARegion *do_versions_add_region(int regiontype, const char *name)
-{
-  ARegion *region = MEM_callocN(sizeof(ARegion), name);
-  region->regiontype = regiontype;
   return region;
 }
 
@@ -711,8 +665,8 @@ static void do_versions_area_ensure_tool_region(Main *bmain,
 static void do_version_bones_split_bbone_scale(ListBase *lb)
 {
   LISTBASE_FOREACH (Bone *, bone, lb) {
-    bone->scale_in_y = bone->scale_in_x;
-    bone->scale_out_y = bone->scale_out_x;
+    bone->scale_in_z = bone->scale_in_x;
+    bone->scale_out_z = bone->scale_out_x;
 
     do_version_bones_split_bbone_scale(&bone->childbase);
   }
@@ -925,7 +879,7 @@ static void do_versions_material_convert_legacy_blend_mode(bNodeTree *ntree, cha
   }
 
   if (need_update) {
-    ntreeUpdateTree(NULL, ntree);
+    version_socket_update_is_used(ntree);
   }
 }
 
@@ -1227,7 +1181,7 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
       /* Add fake user for all existing groups. */
       id_fake_user_set(&collection->id);
 
-      if (collection->flag & (COLLECTION_RESTRICT_VIEWPORT | COLLECTION_RESTRICT_RENDER)) {
+      if (collection->flag & (COLLECTION_HIDE_VIEWPORT | COLLECTION_HIDE_RENDER)) {
         continue;
       }
 
@@ -1258,11 +1212,10 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
             char name[MAX_ID_NAME];
             BLI_snprintf(name, sizeof(name), DATA_("Hidden %d"), coll_idx + 1);
             *collection_hidden = BKE_collection_add(bmain, collection, name);
-            (*collection_hidden)->flag |= COLLECTION_RESTRICT_VIEWPORT |
-                                          COLLECTION_RESTRICT_RENDER;
+            (*collection_hidden)->flag |= COLLECTION_HIDE_VIEWPORT | COLLECTION_HIDE_RENDER;
           }
 
-          BKE_collection_object_add(bmain, *collection_hidden, ob);
+          BKE_collection_object_add_notest(bmain, *collection_hidden, ob);
           BKE_collection_object_remove(bmain, collection, ob, true);
         }
       }
@@ -1270,7 +1223,7 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
 
     /* We need to assign lib pointer to generated hidden collections *after* all have been
      * created, otherwise we'll end up with several data-blocks sharing same name/library,
-     * which is FORBIDDEN! Note: we need this to be recursive, since a child collection may be
+     * which is FORBIDDEN! NOTE: we need this to be recursive, since a child collection may be
      * sorted before its parent in bmain. */
     for (Collection *collection = bmain->collections.first; collection != NULL;
          collection = collection->id.next) {
@@ -1392,7 +1345,7 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
       }
     }
 
-    /* Cleanup deprecated flag from particlesettings data-blocks. */
+    /* Cleanup deprecated flag from particle-settings data-blocks. */
     for (ParticleSettings *part = bmain->particles.first; part; part = part->id.next) {
       part->draw &= ~PART_DRAW_EMITTER;
     }
@@ -1591,7 +1544,7 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
 
   if (!MAIN_VERSION_ATLEAST(bmain, 280, 69)) {
     /* Unify DOF settings (EEVEE part only) */
-    const int SCE_EEVEE_DOF_ENABLED = (1 << 7);
+    enum { SCE_EEVEE_DOF_ENABLED = (1 << 7) };
     LISTBASE_FOREACH (Scene *, scene, &bmain->scenes) {
       if (STREQ(scene->r.engine, RE_engine_id_BLENDER_EEVEE)) {
         if (scene->eevee.flag & SCE_EEVEE_DOF_ENABLED) {
@@ -1617,8 +1570,8 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
 
   if (!MAIN_VERSION_ATLEAST(bmain, 281, 2)) {
     /* Replace Multiply and Additive blend mode by Alpha Blend
-     * now that we use dualsource blending. */
-    /* We take care of doing only nodetrees that are always part of materials
+     * now that we use dual-source blending. */
+    /* We take care of doing only node-trees that are always part of materials
      * with old blending modes. */
     for (Material *ma = bmain->materials.first; ma; ma = ma->id.next) {
       bNodeTree *ntree = ma->nodetree;
@@ -1654,7 +1607,7 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
      * which exact version fully deprecated tessfaces, so think we can keep that one here, no
      * harm to be expected anyway for being over-conservative. */
     for (Mesh *me = bmain->meshes.first; me != NULL; me = me->id.next) {
-      /*check if we need to convert mfaces to mpolys*/
+      /* Check if we need to convert mfaces to mpolys. */
       if (me->totface && !me->totpoly) {
         /* temporarily switch main so that reading from
          * external CustomData works */
@@ -1668,11 +1621,6 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
 
       /* Deprecated, only kept for conversion. */
       BKE_mesh_tessface_clear(me);
-
-      /* Moved from do_versions because we need updated polygons for calculating normals. */
-      if (!MAIN_VERSION_ATLEAST(bmain, 256, 6)) {
-        BKE_mesh_calc_normals(me);
-      }
     }
   }
 
@@ -1681,32 +1629,32 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
     Brush *brush;
     Material *ma;
     /* Pen Soft brush. */
-    brush = (Brush *)rename_id_for_versioning(bmain, ID_BR, "Draw Soft", "Pencil Soft");
+    brush = (Brush *)do_versions_rename_id(bmain, ID_BR, "Draw Soft", "Pencil Soft");
     if (brush) {
       brush->gpencil_settings->icon_id = GP_BRUSH_ICON_PEN;
     }
-    rename_id_for_versioning(bmain, ID_BR, "Draw Pencil", "Pencil");
-    rename_id_for_versioning(bmain, ID_BR, "Draw Pen", "Pen");
-    rename_id_for_versioning(bmain, ID_BR, "Draw Ink", "Ink Pen");
-    rename_id_for_versioning(bmain, ID_BR, "Draw Noise", "Ink Pen Rough");
-    rename_id_for_versioning(bmain, ID_BR, "Draw Marker", "Marker Bold");
-    rename_id_for_versioning(bmain, ID_BR, "Draw Block", "Marker Chisel");
+    do_versions_rename_id(bmain, ID_BR, "Draw Pencil", "Pencil");
+    do_versions_rename_id(bmain, ID_BR, "Draw Pen", "Pen");
+    do_versions_rename_id(bmain, ID_BR, "Draw Ink", "Ink Pen");
+    do_versions_rename_id(bmain, ID_BR, "Draw Noise", "Ink Pen Rough");
+    do_versions_rename_id(bmain, ID_BR, "Draw Marker", "Marker Bold");
+    do_versions_rename_id(bmain, ID_BR, "Draw Block", "Marker Chisel");
 
     ma = BLI_findstring(&bmain->materials, "Black", offsetof(ID, name) + 2);
     if (ma && ma->gp_style) {
-      rename_id_for_versioning(bmain, ID_MA, "Black", "Solid Stroke");
+      do_versions_rename_id(bmain, ID_MA, "Black", "Solid Stroke");
     }
     ma = BLI_findstring(&bmain->materials, "Red", offsetof(ID, name) + 2);
     if (ma && ma->gp_style) {
-      rename_id_for_versioning(bmain, ID_MA, "Red", "Squares Stroke");
+      do_versions_rename_id(bmain, ID_MA, "Red", "Squares Stroke");
     }
     ma = BLI_findstring(&bmain->materials, "Grey", offsetof(ID, name) + 2);
     if (ma && ma->gp_style) {
-      rename_id_for_versioning(bmain, ID_MA, "Grey", "Solid Fill");
+      do_versions_rename_id(bmain, ID_MA, "Grey", "Solid Fill");
     }
     ma = BLI_findstring(&bmain->materials, "Black Dots", offsetof(ID, name) + 2);
     if (ma && ma->gp_style) {
-      rename_id_for_versioning(bmain, ID_MA, "Black Dots", "Dots Stroke");
+      do_versions_rename_id(bmain, ID_MA, "Black Dots", "Dots Stroke");
     }
 
     brush = BLI_findstring(&bmain->brushes, "Pencil", offsetof(ID, name) + 2);
@@ -1747,18 +1695,8 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
     }
   }
 
-  /**
-   * Versioning code until next subversion bump goes here.
-   *
-   * \note Be sure to check when bumping the version:
-   * - #blo_do_versions_280 in this file.
-   * - "versioning_userdef.c", #blo_do_versions_userdef
-   * - "versioning_userdef.c", #do_versions_theme
-   *
-   * \note Keep this message at the bottom of the function.
-   */
-  {
-    /* Keep this block, even when empty. */
+  /* Old forgotten versioning code. */
+  if (!MAIN_VERSION_ATLEAST(bmain, 300, 39)) {
     /* Paint Brush. This ensure that the brush paints by default. Used during the development and
      * patch review of the initial Sculpt Vertex Colors implementation (D5975) */
     LISTBASE_FOREACH (Brush *, brush, &bmain->brushes) {
@@ -1778,6 +1716,20 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
       }
     }
   }
+
+  /**
+   * Versioning code until next subversion bump goes here.
+   *
+   * \note Be sure to check when bumping the version:
+   * - #blo_do_versions_280 in this file.
+   * - "versioning_userdef.c", #blo_do_versions_userdef
+   * - "versioning_userdef.c", #do_versions_theme
+   *
+   * \note Keep this message at the bottom of the function.
+   */
+  {
+    /* Keep this block, even when empty. */
+  }
 }
 
 /* NOTE: This version patch is intended for versions < 2.52.2,
@@ -1787,7 +1739,7 @@ void do_versions_after_linking_280(Main *bmain, ReportList *UNUSED(reports))
 static void do_versions_seq_unique_name_all_strips(Scene *sce, ListBase *seqbasep)
 {
   for (Sequence *seq = seqbasep->first; seq != NULL; seq = seq->next) {
-    SEQ_sequence_base_unique_name_recursive(&sce->ed->seqbase, seq);
+    SEQ_sequence_base_unique_name_recursive(sce, &sce->ed->seqbase, seq);
     if (seq->seqbase.first != NULL) {
       do_versions_seq_unique_name_all_strips(sce, &seq->seqbase);
     }
@@ -1802,124 +1754,20 @@ static void do_versions_seq_set_cache_defaults(Editing *ed)
   ed->recycle_max_cost = 10.0f;
 }
 
+static bool seq_update_flags_cb(Sequence *seq, void *UNUSED(user_data))
+{
+  seq->flag &= ~((1 << 6) | (1 << 18) | (1 << 19) | (1 << 21));
+  if (seq->type == SEQ_TYPE_SPEED) {
+    SpeedControlVars *s = (SpeedControlVars *)seq->effectdata;
+    s->flags &= ~(SEQ_SPEED_UNUSED_1);
+  }
+  return true;
+}
+
 /* NOLINTNEXTLINE: readability-function-size */
-void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
+void blo_do_versions_280(FileData *fd, Library *UNUSED(lib), Main *bmain)
 {
   bool use_collection_compat_28 = true;
-
-  /* Game engine hack to force defaults in files saved in normal blender2.8 */
-  if (!DNA_struct_elem_find(fd->filesdna, "Scene", "GameData", "gm")) {
-    for (Scene *sce = bmain->scenes.first; sce; sce = sce->id.next) {
-      /* game data */
-      sce->gm.stereoflag = STEREO_NOSTEREO;
-      sce->gm.stereomode = STEREO_ANAGLYPH;
-      sce->gm.eyeseparation = 0.10;
-
-      sce->gm.xplay = 1280;
-      sce->gm.yplay = 720;
-      sce->gm.freqplay = 60;
-      sce->gm.depth = 32;
-
-      sce->gm.gravity = 9.8f;
-      sce->gm.physicsEngine = WOPHY_BULLET;
-      // sce->gm.mode = WO_ACTIVITY_CULLING | WO_DBVT_CULLING;
-      sce->gm.occlusionRes = 128;
-      sce->gm.ticrate = 60;
-      sce->gm.maxlogicstep = 5;
-      sce->gm.physubstep = 1;
-      sce->gm.maxphystep = 5;
-      sce->gm.timeScale = 1.0f;
-      sce->gm.lineardeactthreshold = 0.8f;
-      sce->gm.angulardeactthreshold = 1.0f;
-      sce->gm.deactivationtime = 2.0f;
-      sce->gm.erp = 0.2f;
-      sce->gm.erp2 = 0.8f;
-      sce->gm.cfm = 0.0f;
-
-      sce->gm.obstacleSimulation = OBSTSIMULATION_NONE;
-      sce->gm.levelHeight = 2.f;
-
-      sce->gm.recastData.cellsize = 0.3f;
-      sce->gm.recastData.cellheight = 0.2f;
-      sce->gm.recastData.agentmaxslope = M_PI_4;
-      sce->gm.recastData.agentmaxclimb = 0.9f;
-      sce->gm.recastData.agentheight = 2.0f;
-      sce->gm.recastData.agentradius = 0.6f;
-      sce->gm.recastData.edgemaxlen = 12.0f;
-      sce->gm.recastData.edgemaxerror = 1.3f;
-      sce->gm.recastData.regionminsize = 8.f;
-      sce->gm.recastData.regionmergesize = 20.f;
-      sce->gm.recastData.vertsperpoly = 6;
-      sce->gm.recastData.detailsampledist = 6.0f;
-      sce->gm.recastData.detailsamplemaxerror = 1.0f;
-
-      sce->gm.exitkey = 218;  // Blender key code for ESC
-
-      sce->gm.lodflag = SCE_LOD_USE_HYST;
-      sce->gm.scehysteresis = 10;
-
-      sce->gm.flag |= GAME_USE_UNDO;
-
-      sce->gm.pythonkeys[0] = EVT_LEFTCTRLKEY;
-      sce->gm.pythonkeys[1] = EVT_LEFTSHIFTKEY;
-      sce->gm.pythonkeys[2] = EVT_LEFTALTKEY;
-      sce->gm.pythonkeys[3] = EVT_TKEY;
-    }
-
-    for (Object *ob = bmain->objects.first; ob; ob = ob->id.next) {
-      /* Game engine defaults*/
-      ob->mass = ob->inertia = 1.0f;
-      ob->formfactor = 0.4f;
-      ob->damping = 0.04f;
-      ob->rdamping = 0.1f;
-      ob->anisotropicFriction[0] = 1.0f;
-      ob->anisotropicFriction[1] = 1.0f;
-      ob->anisotropicFriction[2] = 1.0f;
-      ob->gameflag = OB_PROP | OB_COLLISION;
-      ob->gameflag2 = 0;
-      ob->margin = 0.04f;
-      ob->friction = 0.5;
-      ob->init_state = 1;
-      ob->state = 1;
-      ob->obstacleRad = 1.0f;
-      ob->step_height = 0.15f;
-      ob->jump_speed = 10.0f;
-      ob->fall_speed = 55.0f;
-      ob->max_jumps = 1;
-      ob->max_slope = M_PI_2;
-      ob->col_group = 0x01;
-      ob->col_mask = 0xffff;
-      ob->preview = NULL;
-      ob->duplicator_visibility_flag = OB_DUPLI_FLAG_VIEWPORT | OB_DUPLI_FLAG_RENDER;
-      ob->ccd_motion_threshold = 1.0f;
-      ob->ccd_swept_sphere_radius = 0.9f;
-      if (ob->bsoft) {
-        ob->bsoft->margin = 0.1f;
-        ob->bsoft->collisionflags |= OB_BSB_COL_CL_RS;
-      }
-    }
-  }
-  if (DNA_struct_elem_find(fd->filesdna, "Scene", "GameData", "gm") &&
-      !DNA_struct_elem_find(fd->filesdna, "Object", "float", "friction")) {
-    for (Object *ob = bmain->objects.first; ob; ob = ob->id.next) {
-      if (ob->type == OB_MESH) {
-        Mesh *me = blo_do_versions_newlibadr(fd, lib, ob->data);
-        for (int i = 0; i < me->totcol; ++i) {
-          Material *ma = blo_do_versions_newlibadr(fd, lib, me->mat[i]);
-          if (ma) {
-            ob->friction = ma->friction;
-            ob->rolling_friction = 0.0f;
-            ob->fh = ma->fh;
-            ob->reflect = ma->reflect;
-            ob->fhdist = ma->fhdist;
-            ob->xyfrict = ma->xyfrict;
-            break;
-          }
-        }
-      }
-    }
-  }
-  /* Game engine hack to force defaults in files saved in normal blender2.8 END */
 
   if (!MAIN_VERSION_ATLEAST(bmain, 280, 0)) {
     use_collection_compat_28 = false;
@@ -1930,7 +1778,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
   }
 
   if (!MAIN_VERSION_ATLEAST(bmain, 280, 1)) {
-    if (!DNA_struct_elem_find(fd->filesdna, "Light", "float", "bleedexp")) {
+    if (!DNA_struct_elem_find(fd->filesdna, "Lamp", "float", "bleedexp")) {
       for (Light *la = bmain->lights.first; la; la = la->id.next) {
         la->bleedexp = 2.5f;
       }
@@ -1956,7 +1804,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
   }
 
   if (!MAIN_VERSION_ATLEAST(bmain, 280, 2)) {
-    if (!DNA_struct_elem_find(fd->filesdna, "Light", "float", "cascade_max_dist")) {
+    if (!DNA_struct_elem_find(fd->filesdna, "Lamp", "float", "cascade_max_dist")) {
       for (Light *la = bmain->lights.first; la; la = la->id.next) {
         la->cascade_max_dist = 1000.0f;
         la->cascade_count = 4;
@@ -1965,7 +1813,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
       }
     }
 
-    if (!DNA_struct_elem_find(fd->filesdna, "Light", "float", "contact_dist")) {
+    if (!DNA_struct_elem_find(fd->filesdna, "Lamp", "float", "contact_dist")) {
       for (Light *la = bmain->lights.first; la; la = la->id.next) {
         la->contact_dist = 0.2f;
         la->contact_bias = 0.03f;
@@ -2028,7 +1876,9 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
     FOREACH_NODETREE_END;
 
     if (error & NTREE_DOVERSION_NEED_OUTPUT) {
-      BKE_report(fd->reports, RPT_ERROR, "Eevee material conversion problem. Error in console");
+      BKE_report(fd->reports != NULL ? fd->reports->reports : NULL,
+                 RPT_ERROR,
+                 "Eevee material conversion problem. Error in console");
       printf(
           "You need to connect Principled and Eevee Specular shader nodes to new material "
           "output "
@@ -2036,7 +1886,9 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
     }
 
     if (error & NTREE_DOVERSION_TRANSPARENCY_EMISSION) {
-      BKE_report(fd->reports, RPT_ERROR, "Eevee material conversion problem. Error in console");
+      BKE_report(fd->reports != NULL ? fd->reports->reports : NULL,
+                 RPT_ERROR,
+                 "Eevee material conversion problem. Error in console");
       printf(
           "You need to combine transparency and emission shaders to the converted Principled "
           "shader nodes.\n");
@@ -2051,7 +1903,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
         ViewLayer *view_layer;
         for (view_layer = scene->view_layers.first; view_layer; view_layer = view_layer->next) {
           view_layer->flag |= VIEW_LAYER_FREESTYLE;
-          view_layer->layflag = 0x7FFF; /* solid ztra halo edge strand */
+          view_layer->layflag = 0x7FFF; /* solid Z-transparency halo edge strand. */
           view_layer->passflag = SCE_PASS_COMBINED | SCE_PASS_Z;
           view_layer->pass_alpha_threshold = 0.5f;
           BKE_freestyle_config_init(&view_layer->freestyle_config);
@@ -2075,7 +1927,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
         }
       }
 
-      /* Grease pencil multiframe falloff curve */
+      /* Grease pencil multi-frame falloff curve. */
       if (!DNA_struct_elem_find(
               fd->filesdna, "GP_Sculpt_Settings", "CurveMapping", "cur_falloff")) {
         for (Scene *scene = bmain->scenes.first; scene; scene = scene->id.next) {
@@ -2226,7 +2078,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
     }
 
     for (Tex *tex = bmain->textures.first; tex; tex = tex->id.next) {
-      /* Removed envmap, pointdensity, voxeldata, ocean textures. */
+      /* Removed environment map, point-density, voxel-data, ocean textures. */
       if (ELEM(tex->type, 10, 14, 15, 16)) {
         tex->type = 0;
       }
@@ -2301,7 +2153,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
 
   if (!MAIN_VERSION_ATLEAST(bmain, 280, 13)) {
     /* Initialize specular factor. */
-    if (!DNA_struct_elem_find(fd->filesdna, "Light", "float", "spec_fac")) {
+    if (!DNA_struct_elem_find(fd->filesdna, "Lamp", "float", "spec_fac")) {
       for (Light *la = bmain->lights.first; la; la = la->id.next) {
         la->spec_fac = 1.0f;
       }
@@ -2449,7 +2301,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
     } \
   } \
   ((void)0)
-        const int SCE_EEVEE_DOF_ENABLED = (1 << 7);
+        enum { SCE_EEVEE_DOF_ENABLED = (1 << 7) };
         IDProperty *props = IDP_GetPropertyFromGroup(scene->layer_properties,
                                                      RE_engine_id_BLENDER_EEVEE);
         // EEVEE_GET_BOOL(props, volumetric_enable, SCE_EEVEE_VOLUMETRIC_ENABLED);
@@ -2548,41 +2400,42 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
       for (Scene *scene = bmain->scenes.first; scene; scene = scene->id.next) {
         switch (scene->toolsettings->snap_mode) {
           case 0:
-            scene->toolsettings->snap_mode = SCE_SNAP_MODE_INCREMENT;
+            scene->toolsettings->snap_mode = (1 << 4); /* SCE_SNAP_MODE_INCREMENT */
             break;
           case 1:
-            scene->toolsettings->snap_mode = SCE_SNAP_MODE_VERTEX;
+            scene->toolsettings->snap_mode = (1 << 0); /* SCE_SNAP_MODE_VERTEX */
             break;
           case 2:
-            scene->toolsettings->snap_mode = SCE_SNAP_MODE_EDGE;
+            scene->toolsettings->snap_mode = (1 << 1); /* SCE_SNAP_MODE_EDGE */
             break;
           case 3:
-            scene->toolsettings->snap_mode = SCE_SNAP_MODE_FACE;
+            scene->toolsettings->snap_mode = (1 << 2); /* SCE_SNAP_MODE_FACE_RAYCAST */
             break;
           case 4:
-            scene->toolsettings->snap_mode = SCE_SNAP_MODE_VOLUME;
+            scene->toolsettings->snap_mode = (1 << 3); /* SCE_SNAP_MODE_VOLUME */
             break;
         }
         switch (scene->toolsettings->snap_node_mode) {
           case 5:
-            scene->toolsettings->snap_node_mode = SCE_SNAP_MODE_NODE_X;
+            scene->toolsettings->snap_node_mode = (1 << 5); /* SCE_SNAP_MODE_NODE_X */
             break;
           case 6:
-            scene->toolsettings->snap_node_mode = SCE_SNAP_MODE_NODE_Y;
+            scene->toolsettings->snap_node_mode = (1 << 6); /* SCE_SNAP_MODE_NODE_Y */
             break;
           case 7:
-            scene->toolsettings->snap_node_mode = SCE_SNAP_MODE_NODE_X | SCE_SNAP_MODE_NODE_Y;
+            scene->toolsettings->snap_node_mode =
+                (1 << 5) | (1 << 6); /* SCE_SNAP_MODE_NODE_X | SCE_SNAP_MODE_NODE_Y */
             break;
           case 8:
-            scene->toolsettings->snap_node_mode = SCE_SNAP_MODE_GRID;
+            scene->toolsettings->snap_node_mode = (1 << 7); /* SCE_SNAP_MODE_GRID */
             break;
         }
         switch (scene->toolsettings->snap_uv_mode) {
           case 0:
-            scene->toolsettings->snap_uv_mode = SCE_SNAP_MODE_INCREMENT;
+            scene->toolsettings->snap_uv_mode = (1 << 4); /* SCE_SNAP_MODE_INCREMENT */
             break;
           case 1:
-            scene->toolsettings->snap_uv_mode = SCE_SNAP_MODE_VERTEX;
+            scene->toolsettings->snap_uv_mode = (1 << 0); /* SCE_SNAP_MODE_VERTEX */
             break;
         }
       }
@@ -3251,7 +3104,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
       }
     }
 
-    if (!DNA_struct_elem_find(fd->filesdna, "Light", "float", "att_dist")) {
+    if (!DNA_struct_elem_find(fd->filesdna, "Lamp", "float", "att_dist")) {
       for (Light *la = bmain->lights.first; la; la = la->id.next) {
         la->att_dist = la->clipend;
       }
@@ -3288,7 +3141,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
           bool is_blend = false;
 
           {
-            char tool = tool_init;
+            char tool;
             switch (tool_init) {
               case PAINT_BLEND_MIX:
                 tool = VPAINT_TOOL_DRAW;
@@ -3523,7 +3376,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
               SpaceImage *sima = (SpaceImage *)sl;
               sima->flag &= ~(SI_FLAG_UNUSED_0 | SI_FLAG_UNUSED_1 | SI_FLAG_UNUSED_3 |
                               SI_FLAG_UNUSED_6 | SI_FLAG_UNUSED_7 | SI_FLAG_UNUSED_8 |
-                              SI_FLAG_UNUSED_17 | SI_FLAG_UNUSED_18 | SI_FLAG_UNUSED_23 |
+                              SI_FLAG_UNUSED_17 | SI_CUSTOM_GRID | SI_FLAG_UNUSED_23 |
                               SI_FLAG_UNUSED_24);
               break;
             }
@@ -3545,8 +3398,8 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
             case SPACE_FILE: {
               SpaceFile *sfile = (SpaceFile *)sl;
               if (sfile->params) {
-                sfile->params->flag &= ~(FILE_PARAMS_FLAG_UNUSED_1 | FILE_PARAMS_FLAG_UNUSED_6 |
-                                         FILE_OBDATA_INSTANCE);
+                sfile->params->flag &= ~(FILE_PARAMS_FLAG_UNUSED_1 | FILE_PARAMS_FLAG_UNUSED_2 |
+                                         FILE_PARAMS_FLAG_UNUSED_3);
               }
               break;
             }
@@ -3586,22 +3439,13 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
       }
 
       if (scene->ed) {
-        Sequence *seq;
-        SEQ_ALL_BEGIN (scene->ed, seq) {
-          seq->flag &= ~(SEQ_FLAG_UNUSED_6 | SEQ_FLAG_UNUSED_18 | SEQ_FLAG_UNUSED_19 |
-                         SEQ_FLAG_UNUSED_21);
-          if (seq->type == SEQ_TYPE_SPEED) {
-            SpeedControlVars *s = (SpeedControlVars *)seq->effectdata;
-            s->flags &= ~(SEQ_SPEED_UNUSED_1);
-          }
-        }
-        SEQ_ALL_END;
+        SEQ_for_each_callback(&scene->ed->seqbase, seq_update_flags_cb, NULL);
       }
     }
 
     for (World *world = bmain->worlds.first; world; world = world->id.next) {
-      world->flag &= ~(WO_MODE_UNUSED_1 | WO_MODE_UNUSED_2 | WO_MODE_UNUSED_3 | WO_MODE_UNUSED_4 |
-                       WO_MODE_UNUSED_5 | WO_MODE_UNUSED_7);
+      world->flag &= ~(WO_MODE_UNUSED_1 | WO_MODE_UNUSED_2 | WO_MODE_UNUSED_4 | WO_MODE_UNUSED_5 |
+                       WO_MODE_UNUSED_7);
     }
 
     for (Image *image = bmain->images.first; image; image = image->id.next) {
@@ -3659,7 +3503,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
       }
     }
 
-    /* Grease pencil cutter/select segment intersection threshold  */
+    /* Grease pencil cutter/select segment intersection threshold. */
     if (!DNA_struct_elem_find(fd->filesdna, "GP_Sculpt_Settings", "float", "isect_threshold")) {
       for (Scene *scene = bmain->scenes.first; scene; scene = scene->id.next) {
         GP_Sculpt_Settings *gset = &scene->toolsettings->gp_sculpt;
@@ -3669,7 +3513,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
       }
     }
 
-    /* Fix anamorphic bokeh eevee rna limits.*/
+    /* Fix anamorphic bokeh eevee rna limits. */
     for (Camera *ca = bmain->cameras.first; ca; ca = ca->id.next) {
       if (ca->gpu_dof.ratio < 0.01f) {
         ca->gpu_dof.ratio = 0.01f;
@@ -3705,7 +3549,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
 
   if (!MAIN_VERSION_ATLEAST(bmain, 280, 43)) {
     ListBase *lb = which_libbase(bmain, ID_BR);
-    BKE_main_id_repair_duplicate_names_listbase(lb);
+    BKE_main_id_repair_duplicate_names_listbase(bmain, lb);
   }
 
   if (!MAIN_VERSION_ATLEAST(bmain, 280, 44)) {
@@ -3800,7 +3644,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
   if (!MAIN_VERSION_ATLEAST(bmain, 280, 48)) {
     for (Scene *scene = bmain->scenes.first; scene; scene = scene->id.next) {
       /* Those are not currently used, but are accessible through RNA API and were not
-       * properly initialized previously. This is mere copy of BKE_init_scene() code. */
+       * properly initialized previously. This is mere copy of #scene_init_data code. */
       if (scene->r.im_format.view_settings.look[0] == '\0') {
         BKE_color_managed_display_settings_init(&scene->r.im_format.display_settings);
         BKE_color_managed_view_settings_init_render(
@@ -4085,8 +3929,8 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
       LISTBASE_FOREACH (Object *, ob, &bmain->objects) {
         if (ob->pose) {
           LISTBASE_FOREACH (bPoseChannel *, pchan, &ob->pose->chanbase) {
-            pchan->scale_in_y = pchan->scale_in_x;
-            pchan->scale_out_y = pchan->scale_out_x;
+            pchan->scale_in_z = pchan->scale_in_x;
+            pchan->scale_out_z = pchan->scale_out_x;
           }
         }
       }
@@ -4167,7 +4011,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
     }
 
     /* Initializes sun lights with the new angular diameter property */
-    if (!DNA_struct_elem_find(fd->filesdna, "Light", "float", "sun_angle")) {
+    if (!DNA_struct_elem_find(fd->filesdna, "Lamp", "float", "sun_angle")) {
       LISTBASE_FOREACH (Light *, light, &bmain->lights) {
         light->sun_angle = 2.0f * atanf(light->area_size);
       }
@@ -4177,7 +4021,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
   if (!MAIN_VERSION_ATLEAST(bmain, 280, 70)) {
     /* New image alpha modes. */
     LISTBASE_FOREACH (Image *, image, &bmain->images) {
-      const int IMA_IGNORE_ALPHA = (1 << 12);
+      enum { IMA_IGNORE_ALPHA = (1 << 12) };
       if (image->flag & IMA_IGNORE_ALPHA) {
         image->alpha_mode = IMA_ALPHA_IGNORE;
         image->flag &= ~IMA_IGNORE_ALPHA;
@@ -4221,9 +4065,8 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
   if (!MAIN_VERSION_ATLEAST(bmain, 280, 75)) {
     for (Scene *scene = bmain->scenes.first; scene; scene = scene->id.next) {
       if (scene->master_collection != NULL) {
-        scene->master_collection->flag &= ~(COLLECTION_RESTRICT_VIEWPORT |
-                                            COLLECTION_RESTRICT_SELECT |
-                                            COLLECTION_RESTRICT_RENDER);
+        scene->master_collection->flag &= ~(COLLECTION_HIDE_VIEWPORT | COLLECTION_HIDE_SELECT |
+                                            COLLECTION_HIDE_RENDER);
       }
 
       UnitSettings *unit = &scene->unit;
@@ -4260,7 +4103,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
     LISTBASE_FOREACH (Object *, ob, &bmain->objects) {
       LISTBASE_FOREACH (ModifierData *, md, &ob->modifiers) {
         if (md->type == eModifierType_DataTransfer) {
-          /* Now datatransfer's mix factor is multiplied with weights when any,
+          /* Now data-transfer's mix factor is multiplied with weights when any,
            * instead of being ignored,
            * we need to take care of that to keep 'old' files compatible. */
           DataTransferModifierData *dtmd = (DataTransferModifierData *)md;
@@ -4419,7 +4262,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
       }
     }
 
-    /* Elatic deform brush */
+    /* Elastic deform brush */
     for (Brush *br = bmain->brushes.first; br; br = br->id.next) {
       if (br->ob_mode & OB_MODE_SCULPT && br->elastic_deform_volume_preservation == 0.0f) {
         br->elastic_deform_volume_preservation = 0.5f;
@@ -4643,7 +4486,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
           clmd->sim_parms->max_internal_tension = 15.0f;
           clmd->sim_parms->internal_compression = 15.0f;
           clmd->sim_parms->max_internal_compression = 15.0f;
-          clmd->sim_parms->internal_spring_max_diversion = M_PI / 4.0f;
+          clmd->sim_parms->internal_spring_max_diversion = M_PI_4;
         }
       }
     }
@@ -4652,7 +4495,6 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
     if (!DNA_struct_elem_find(fd->filesdna, "Image", "ListBase", "tiles")) {
       for (Image *ima = bmain->images.first; ima; ima = ima->id.next) {
         ImageTile *tile = MEM_callocN(sizeof(ImageTile), "Image Tile");
-        tile->ok = 1;
         tile->tile_number = 1001;
         BLI_addtail(&ima->tiles, tile);
       }
@@ -5028,7 +4870,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
       }
     }
 
-    /* Boundary Edges Automasking. */
+    /* Boundary Edges Auto-masking. */
     if (!DNA_struct_elem_find(
             fd->filesdna, "Brush", "int", "automasking_boundary_edges_propagation_steps")) {
       for (Brush *br = bmain->brushes.first; br; br = br->id.next) {
@@ -5036,7 +4878,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
       }
     }
 
-    /* Corrective smooth modifier scale*/
+    /* Corrective smooth modifier scale. */
     if (!DNA_struct_elem_find(fd->filesdna, "CorrectiveSmoothModifierData", "float", "scale")) {
       for (Object *ob = bmain->objects.first; ob; ob = ob->id.next) {
         LISTBASE_FOREACH (ModifierData *, md, &ob->modifiers) {
@@ -5051,7 +4893,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
     /* Default Face Set Color. */
     for (Mesh *me = bmain->meshes.first; me != NULL; me = me->id.next) {
       if (me->totpoly > 0) {
-        int *face_sets = CustomData_get_layer(&me->pdata, CD_SCULPT_FACE_SETS);
+        const int *face_sets = CustomData_get_layer(&me->pdata, CD_SCULPT_FACE_SETS);
         if (face_sets) {
           me->face_sets_color_default = abs(face_sets[0]);
         }
@@ -5085,7 +4927,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
       }
     }
 
-    /* Surface deform modifier strength*/
+    /* Surface deform modifier strength. */
     if (!DNA_struct_elem_find(fd->filesdna, "SurfaceDeformModifierData", "float", "strength")) {
       for (Object *ob = bmain->objects.first; ob; ob = ob->id.next) {
         LISTBASE_FOREACH (ModifierData *, md, &ob->modifiers) {
@@ -5105,7 +4947,7 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
         for (SpaceLink *sl = area->spacedata.first; sl; sl = sl->next) {
           if (sl->spacetype == SPACE_SEQ) {
             SpaceSeq *sseq = (SpaceSeq *)sl;
-            sseq->flag |= SEQ_SHOW_FCURVES;
+            sseq->flag |= SEQ_TIMELINE_SHOW_FCURVES;
           }
         }
       }
@@ -5205,17 +5047,8 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
     }
   }
 
-  /**
-   * Versioning code until next subversion bump goes here.
-   *
-   * \note Be sure to check when bumping the version:
-   * - #do_versions_after_linking_280 in this file.
-   * - "versioning_userdef.c", #blo_do_versions_userdef
-   * - "versioning_userdef.c", #do_versions_theme
-   *
-   * \note Keep this message at the bottom of the function.
-   */
-  {
+  /* Old forgotten versioning code. */
+  if (!MAIN_VERSION_ATLEAST(bmain, 300, 39)) {
     /* Set the cloth wind factor to 1 for old forces. */
     if (!DNA_struct_elem_find(fd->filesdna, "PartDeflect", "float", "f_wind_factor")) {
       LISTBASE_FOREACH (Object *, ob, &bmain->objects) {
@@ -5235,10 +5068,22 @@ void blo_do_versions_280(FileData *fd, Library *lib, Main *bmain)
 
     for (wmWindowManager *wm = bmain->wm.first; wm; wm = wm->id.next) {
       /* Don't rotate light with the viewer by default, make it fixed. Shading settings can't be
-       * edited and this flag should always be set. So we can always execute this. */
+       * edited and this flag should always be set. */
       wm->xr.session_settings.shading.flag |= V3D_SHADING_WORLD_ORIENTATION;
     }
+  }
 
+  /**
+   * Versioning code until next subversion bump goes here.
+   *
+   * \note Be sure to check when bumping the version:
+   * - #do_versions_after_linking_280 in this file.
+   * - "versioning_userdef.c", #blo_do_versions_userdef
+   * - "versioning_userdef.c", #do_versions_theme
+   *
+   * \note Keep this message at the bottom of the function.
+   */
+  {
     /* Keep this block, even when empty. */
   }
 }

@@ -1,9 +1,11 @@
 SCA_ActionActuator(SCA_IActuator)
-================================
+=================================
 
-base class --- :class:`SCA_IActuator`
+.. currentmodule:: bge.types
 
-.. class:: SCA_ActionActuator(SCA_IActuator)
+base class --- :class:`~bge.types.SCA_IActuator`
+
+.. class:: SCA_ActionActuator
 
    Action Actuators apply an action to an actor.
 

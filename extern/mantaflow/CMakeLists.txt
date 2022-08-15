@@ -1,27 +1,7 @@
-# ***** BEGIN GPL LICENSE BLOCK *****
-#
-# This program is free software; you can redistribute it and/or
-# modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
-# of the License, or (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software Foundation,
-# Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# The Original Code is Copyright (C) 2016, Blender Foundation
-# All rights reserved.
-#
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright 2016 Blender Foundation. All rights reserved.
 # The Original Code is: all of this file.
-#
-# Contributor(s): Sebastian Barschkis (sebbas)
-#
-# ***** END GPL LICENSE BLOCK *****
+# Contributor(s): Sebastian Barschkis (sebbas).
 
 # Mantaflow triggers a clang-cl compiler error with versions before 9.0.1
 # Since mantaflow does not appear to be using OpenMP at this point in time,
@@ -32,9 +12,7 @@ if(MSVC_CLANG AND WITH_OPENMP AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.0.1
 endif()
 
 # Exporting functions from the blender binary gives linker warnings on Apple arm64 systems.
-# For now and until Apple arm64 is officially supported, these will just be silenced here.
-# TODO (sebbas): Check if official arm64 devices give linker warnings without this block.
-
+# Silence them here.
 if(APPLE AND ("${CMAKE_OSX_ARCHITECTURES}" STREQUAL "arm64"))
   if(CMAKE_COMPILER_IS_GNUCXX OR "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_C_FLAGS " -fvisibility=hidden")
@@ -75,6 +53,8 @@ endif()
 
 if(WITH_OPENVDB)
   add_definitions(-DOPENVDB=1)
+  # OpenVDB headers use deprecated TBB headers, silence warning.
+  add_definitions(-DTBB_SUPPRESS_DEPRECATED_MESSAGES=1)
 endif()
 
 if(WITH_OPENVDB_BLOSC)
@@ -131,6 +111,14 @@ if(WITH_OPENVDB)
   list(APPEND LIB
     ${OPENVDB_LIBRARIES}
   )
+  if(WIN32)
+    # OpenVDB emits lots of these, they should be suppressed through other
+    # means but MSVC 16.8/16.9 has broken this functionality, so C4251 is
+    # suppressed here explicitly. See
+    # https://developercommunity.visualstudio.com/content/problem/1167590/bug.html
+    # for details.
+    string(APPEND CMAKE_CXX_FLAGS " /wd4251")
+  endif()
 endif()
 
 set(SRC
@@ -271,3 +259,10 @@ set(LIB
 )
 
 blender_add_lib(extern_mantaflow "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
+
+# The VDB libs above are only added to as INTERFACE libs by blender_add_lib,
+# meaning extern_mantaflow itself actually does not have a dependency on the
+# openvdb libraries, and CMAKE is free to link the vdb libs before
+# extern_mantaflow causing linker errors on linux. By explicitly declaring
+# a dependency here, cmake will do the right thing.
+target_link_libraries(extern_mantaflow PRIVATE ${OPENVDB_LIBRARIES})

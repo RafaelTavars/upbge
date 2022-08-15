@@ -1,24 +1,26 @@
 BL_ArmatureConstraint(EXP_PyObjectPlus)
-===================================
+=======================================
 
-base class --- :class:`EXP_PyObjectPlus`
+.. currentmodule:: bge.types
 
-.. class:: BL_ArmatureConstraint(EXP_PyObjectPlus)
+base class --- :class:`~bge.types.EXP_PyObjectPlus`
+
+.. class:: BL_ArmatureConstraint
 
    Proxy to Armature Constraint. Allows to change constraint on the fly.
-   Obtained through :class:`BL_ArmatureObject`.constraints.
+   Obtained through :class:`~bge.types.BL_ArmatureObject`.constraints.
 
    .. note::
-   
+
       Not all armature constraints are supported in the GE.
 
-      
+
    .. attribute:: type
 
       Type of constraint, (read-only).
 
       Use one of :ref:`these constants<armatureconstraint-constants-type>`.
-      
+
       :type: integer, one of CONSTRAINT_TYPE_* constants
 
    .. attribute:: name
@@ -27,7 +29,7 @@ base class --- :class:`EXP_PyObjectPlus`
 
       :type: string
 
-      This name is also the key subscript on :class:`BL_ArmatureObject`.
+      This name is also the key subscript on :class:`~bge.types.BL_ArmatureObject`.
 
    .. attribute:: enforce
 
@@ -42,7 +44,7 @@ base class --- :class:`EXP_PyObjectPlus`
       :type: float.
 
       .. note::
-      
+
          Only used if the target is a bone (i.e target object is an armature.
 
    .. attribute:: lin_error
@@ -67,13 +69,13 @@ base class --- :class:`EXP_PyObjectPlus`
 
       Primary target object for the constraint. The position of this object in the GE will be used as target for the constraint.
 
-      :type: :class:`KX_GameObject`.
+      :type: :class:`~bge.types.KX_GameObject`.
 
    .. attribute:: subtarget
 
       Secondary target object for the constraint. The position of this object in the GE will be used as secondary target for the constraint.
 
-      :type: :class:`KX_GameObject`.
+      :type: :class:`~bge.types.KX_GameObject`.
 
       Currently this is only used for pole target on IK constraint.
 
@@ -82,9 +84,9 @@ base class --- :class:`EXP_PyObjectPlus`
       True if the constraint is active.
 
       :type: boolean
-      
+
       .. note::
-      
+
          An inactive constraint does not update lin_error and rot_error.
 
    .. attribute:: ik_weight
@@ -100,13 +102,13 @@ base class --- :class:`EXP_PyObjectPlus`
       Type of IK constraint, (read-only).
 
       Use one of :ref:`these constants<armatureconstraint-constants-ik-type>`.
-      
+
       :type: integer.
 
    .. attribute:: ik_flag
 
       Combination of IK constraint option flags, read-only.
-      
+
       Use one of :ref:`these constants<armatureconstraint-constants-ik-flag>`.
 
       :type: integer
@@ -120,7 +122,7 @@ base class --- :class:`EXP_PyObjectPlus`
    .. attribute:: ik_mode
 
       Use one of :ref:`these constants<armatureconstraint-constants-ik-mode>`.
-      
+
       Additional mode for IK constraint. Currently only used for Distance constraint:
 
       :type: integer

@@ -1,35 +1,11 @@
-/*
- * ***** BEGIN GPL LICENSE BLOCK *****
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software  Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Copyright (c) 2006 The Zdeno Ash Miklas
- *
- * This source file is part of VideoTexture library
- *
- * Contributor(s):
- *
- * ***** END GPL LICENSE BLOCK *****
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2007 The Zdeno Ash Miklas. */
 
 /** \file VideoTexture/Texture.h
  *  \ingroup bgevideotex
  */
 
 #pragma once
-
 
 #include "DNA_image_types.h"
 
@@ -68,6 +44,7 @@ class Texture : public EXP_Value {
   RAS_Texture *m_matTexture;
 
   KX_Scene *m_scene;
+  KX_GameObject *m_gameobj;
 
   // use mipmapping
   bool m_mipmap;
@@ -123,4 +100,3 @@ short getMaterialID(PyObject *obj, const char *name);
 // Exceptions
 extern ExceptionID MaterialNotAvail;
 extern ExceptionID TextureNotAvail;
-

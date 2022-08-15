@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup bke
@@ -25,6 +11,7 @@
 #include "DNA_defs.h"
 #include "DNA_meshdata_types.h"
 
+#include "BKE_customdata.h"
 #include "BKE_editmesh.h"
 #include "BKE_editmesh_tangent.h"
 #include "BKE_mesh.h"
@@ -272,13 +259,6 @@ static void emDM_calc_loop_tangents_thread(TaskPool *__restrict UNUSED(pool), vo
   }
 }
 
-/**
- * \see #BKE_mesh_calc_loop_tangent, same logic but used arrays instead of #BMesh data.
- *
- * \note This function is not so normal, its using #BMesh.ldata as input,
- * but output's to #Mesh.ldata.
- * This is done because #CD_TANGENT is cache data used only for drawing.
- */
 void BKE_editmesh_loop_tangent_calc(BMEditMesh *em,
                                     bool calc_active_tangent,
                                     const char (*tangent_names)[MAX_NAME],
@@ -341,7 +321,7 @@ void BKE_editmesh_loop_tangent_calc(BMEditMesh *em,
 
     /* map faces to quads */
     if (em->tottri != bm->totface) {
-      /* over alloc, since we dont know how many ngon or quads we have */
+      /* Over allocate, since we don't know how many ngon or quads we have. */
 
       /* map fake face index to looptri */
       face_as_quad_map = MEM_mallocN(sizeof(int) * totface, __func__);
@@ -362,7 +342,7 @@ void BKE_editmesh_loop_tangent_calc(BMEditMesh *em,
     /* Calculation */
     if (em->tottri != 0) {
       TaskPool *task_pool;
-      task_pool = BLI_task_pool_create(NULL, TASK_PRIORITY_LOW);
+      task_pool = BLI_task_pool_create(NULL, TASK_PRIORITY_HIGH);
 
       tangent_mask_curr = 0;
       /* Calculate tangent layers */
@@ -381,7 +361,7 @@ void BKE_editmesh_loop_tangent_calc(BMEditMesh *em,
         mesh2tangent->num_face_as_quad_map = num_face_as_quad_map;
 #endif
         mesh2tangent->precomputedFaceNormals = poly_normals;
-        /* Note, we assume we do have tessellated loop normals at this point
+        /* NOTE: we assume we do have tessellated loop normals at this point
          * (in case it is object-enabled), have to check this is valid. */
         mesh2tangent->precomputedLoopNormals = loop_normals;
         mesh2tangent->cd_loop_uv_offset = CustomData_get_n_offset(&bm->ldata, CD_MLOOPUV, n);

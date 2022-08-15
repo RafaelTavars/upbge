@@ -1,8 +1,10 @@
 SCA_AlwaysSensor(SCA_ISensor)
 =============================
 
-base class --- :class:`SCA_ISensor`
+.. currentmodule:: bge.types
 
-.. class:: SCA_AlwaysSensor(SCA_ISensor)
+base class --- :class:`~bge.types.SCA_ISensor`
+
+.. class:: SCA_AlwaysSensor
 
    This sensor is always activated.

@@ -23,7 +23,6 @@
 
 #pragma once
 
-
 #include <map>
 #include <set>
 #include <vector>
@@ -38,8 +37,6 @@
 #include "PHY_IPhysicsEnvironment.h"
 
 class btTypedConstraint;
-class btSimulationIslandManager;
-class btCollisionDispatcher;
 class btDispatcher;
 class WrapperVehicle;
 class btPersistentManifold;
@@ -98,8 +95,7 @@ class CcdPhysicsEnvironment : public PHY_IPhysicsEnvironment {
   void ProcessFhSprings(double curTime, float timeStep);
 
  public:
-  CcdPhysicsEnvironment(PHY_SolverType solverType,
-                        bool useDbvtCulling);
+  CcdPhysicsEnvironment(PHY_SolverType solverType, bool useDbvtCulling);
 
   virtual ~CcdPhysicsEnvironment();
 
@@ -180,7 +176,8 @@ class CcdPhysicsEnvironment : public PHY_IPhysicsEnvironment {
                                             float axis2X = 0,
                                             float axis2Y = 0,
                                             float axis2Z = 0,
-                                            int flag = 0);
+                                            int flag = 0,
+                                            bool replicate_dupli = false);
   virtual PHY_IVehicle *CreateVehicle(PHY_IPhysicsController *ctrl);
 
   virtual void RemoveConstraintById(int constraintid, bool free);
@@ -216,6 +213,7 @@ class CcdPhysicsEnvironment : public PHY_IPhysicsEnvironment {
   virtual void AddCollisionCallback(int response_class, PHY_ResponseCallback callback, void *user);
   virtual bool RequestCollisionCallback(PHY_IPhysicsController *ctrl);
   virtual bool RemoveCollisionCallback(PHY_IPhysicsController *ctrl);
+  virtual PHY_CollisionTestResult CheckCollision(PHY_IPhysicsController *ctrl0, PHY_IPhysicsController *ctrl1);
   // These two methods are used *solely* to create controllers for Near/Radar sensor! Don't use for
   // anything else
   virtual PHY_IPhysicsController *CreateSphereController(float radius, const MT_Vector3 &position);
@@ -241,6 +239,7 @@ class CcdPhysicsEnvironment : public PHY_IPhysicsEnvironment {
 
   void UpdateCcdPhysicsController(CcdPhysicsController *ctrl,
                                   btScalar newMass,
+                                  btScalar newFriction,
                                   int newCollisionFlags,
                                   short int newCollisionGroup,
                                   short int newCollisionMask);
@@ -284,7 +283,7 @@ class CcdPhysicsEnvironment : public PHY_IPhysicsEnvironment {
 
   static CcdPhysicsEnvironment *Create(struct Scene *blenderscene, bool visualizePhysics);
 
-  virtual void ConvertObject(BL_BlenderSceneConverter *converter,
+  virtual void ConvertObject(BL_SceneConverter *converter,
                              KX_GameObject *gameobj,
                              RAS_MeshObject *meshobj,
                              DerivedMesh *dm,
@@ -298,7 +297,8 @@ class CcdPhysicsEnvironment : public PHY_IPhysicsEnvironment {
    * instances. */
   virtual void SetupObjectConstraints(KX_GameObject *obj_src,
                                       KX_GameObject *obj_dest,
-                                      bRigidBodyJointConstraint *dat);
+                                      bRigidBodyJointConstraint *dat,
+                                      bool replicate_dupli);
 
  protected:
   std::set<CcdPhysicsController *> m_controllers;
@@ -319,8 +319,6 @@ class CcdPhysicsEnvironment : public PHY_IPhysicsEnvironment {
 
   class btConstraintSolver *m_solver;
 
-  class btOverlappingPairCache *m_ownPairCache;
-
   class CcdOverlapFilterCallBack *m_filterCallback;
 
   class btGhostPairCallback *m_ghostPairCallback;
@@ -330,7 +328,7 @@ class CcdPhysicsEnvironment : public PHY_IPhysicsEnvironment {
   virtual void ExportFile(const std::string &filename);
 };
 
-class CcdCollData : public PHY_CollData {
+class CcdCollData : public PHY_ICollData {
   const btPersistentManifold *m_manifoldPoint;
 
  public:
@@ -347,4 +345,3 @@ class CcdCollData : public PHY_CollData {
   virtual float GetCombinedRestitution(unsigned int index, bool first) const;
   virtual float GetAppliedImpulse(unsigned int index, bool first) const;
 };
-

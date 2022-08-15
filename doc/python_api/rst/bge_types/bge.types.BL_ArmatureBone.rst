@@ -1,9 +1,11 @@
 BL_ArmatureBone(EXP_PyObjectPlus)
-=============================
+=================================
 
-base class --- :class:`EXP_PyObjectPlus`
+.. currentmodule:: bge.types
 
-.. class:: BL_ArmatureBone(EXP_PyObjectPlus)
+base class --- :class:`~bge.types.EXP_PyObjectPlus`
+
+.. class:: BL_ArmatureBone
 
    Proxy to Blender bone structure. All fields are read-only and comply to RNA names.
    All space attribute correspond to the rest pose.
@@ -81,8 +83,8 @@ base class --- :class:`EXP_PyObjectPlus`
       :type: matrix [4][4]
 
       .. note::
-      
-         This matrix has no scale part. 
+
+         This matrix has no scale part.
 
    .. attribute:: bone_mat
 
@@ -94,10 +96,10 @@ base class --- :class:`EXP_PyObjectPlus`
 
       parent bone, or None for root bone.
 
-      :type: :class:`BL_ArmatureBone`
+      :type: :class:`~bge.types.BL_ArmatureBone`
 
    .. attribute:: children
 
       list of bone's children.
 
-      :type: list of :class:`BL_ArmatureBone`
+      :type: list of :class:`~bge.types.BL_ArmatureBone`

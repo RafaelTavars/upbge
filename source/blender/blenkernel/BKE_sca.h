@@ -44,7 +44,9 @@ struct bActuator;
 /* Logicbricks */
 void BKE_sca_link_logicbricks(void **poin, void ***ppoin, short *tot, short size);
 void BKE_sca_unlink_logicbricks(void **poin, void ***ppoin, short *tot);
-void BKE_sca_remap_links_logicbricks(struct Main *bmain, struct Object *ob_old, struct Object *ob_new);
+void BKE_sca_remap_data_postprocess_links_logicbricks_update(struct Main *bmain,
+                                     struct Object *ob_old,
+                                     struct Object *ob_new);
 void BKE_sca_copy_logicbricks(struct Object *ob_new, const struct Object *ob, const int flag);
 
 /* Controllers */
@@ -63,8 +65,8 @@ void BKE_sca_unlink_actuator(struct bActuator *act);
 void BKE_sca_unlink_actuators(struct ListBase *lb);
 void BKE_sca_free_actuator(struct bActuator *act);
 void BKE_sca_free_actuators(struct ListBase *lb);
-struct bActuator *BKE_sca_copy_actuator(struct bActuator *act, const int flag);
-void BKE_sca_copy_actuators(struct ListBase *lbn, const struct ListBase *lbo, const int flag);
+struct bActuator *BKE_sca_copy_actuator(struct bActuator *act);
+void BKE_sca_copy_actuators(struct ListBase *lbn, const struct ListBase *lbo);
 void BKE_sca_init_actuator(struct bActuator *act);
 struct bActuator *BKE_sca_new_actuator(int type);
 void BKE_sca_move_actuator(struct bActuator *act_to_move, struct Object *ob, int move_up);
@@ -86,7 +88,6 @@ void BKE_sca_set_new_points(void);
 
 /* States */
 const char *BKE_sca_get_name_state(Object *ob, short bit);
-
 
 /* Callback format for performing operations on ID-pointers for sensors/controllers/actuators. */
 typedef void (*SCASensorIDFunc)(struct bSensor *sensor,

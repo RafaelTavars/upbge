@@ -39,6 +39,7 @@
 #include "DNA_controller_types.h"
 #include "DNA_object_types.h"
 #include "DNA_sensor_types.h"
+#include "DNA_text_types.h"
 
 #include "BLI_blenlib.h"
 #include "BLI_ghash.h"
@@ -151,11 +152,11 @@ void BKE_sca_init_sensor(bSensor *sens)
     case SENS_RANDOM:
       sens->data = MEM_callocN(sizeof(bRandomSensor), "randomsens");
       break;
-	case SENS_MOVEMENT:
-	  sens->data = MEM_callocN(sizeof(bMovementSensor), "movementsens");
-	  movs = sens->data;
-	  movs->threshold = 0.01f;
-	  break;
+    case SENS_MOVEMENT:
+      sens->data = MEM_callocN(sizeof(bMovementSensor), "movementsens");
+      movs = sens->data;
+      movs->threshold = 0.01f;
+      break;
     case SENS_RAY:
       sens->data = MEM_callocN(sizeof(bRaySensor), "raysens");
       rs = sens->data;
@@ -227,8 +228,9 @@ void BKE_sca_free_controller(bController *cont)
     MEM_freeN(cont->links);
 
   /* the controller itself */
-  if (cont->data)
+  if (cont->data) {
     MEM_freeN(cont->data);
+  }
   MEM_freeN(cont);
 }
 
@@ -368,7 +370,7 @@ void BKE_sca_free_actuators(ListBase *lb)
   }
 }
 
-bActuator *BKE_sca_copy_actuator(bActuator *act, const int flag)
+bActuator *BKE_sca_copy_actuator(bActuator *act)
 {
   bActuator *actn;
 
@@ -398,14 +400,14 @@ bActuator *BKE_sca_copy_actuator(bActuator *act, const int flag)
   return actn;
 }
 
-void BKE_sca_copy_actuators(ListBase *lbn, const ListBase *lbo, const int flag)
+void BKE_sca_copy_actuators(ListBase *lbn, const ListBase *lbo)
 {
   bActuator *act, *actn;
 
   lbn->first = lbn->last = NULL;
   act = lbo->first;
   while (act) {
-    actn = BKE_sca_copy_actuator(act, flag);
+    actn = BKE_sca_copy_actuator(act);
     BLI_addtail(lbn, actn);
     act = act->next;
   }
@@ -687,7 +689,7 @@ void BKE_sca_set_new_points(void)
  * reference to data-block involved). This is bad, bad, bad!!!
  *     ...and forces us to add yet another very ugly hack to get remapping with logic bricks
  * working. */
-void BKE_sca_remap_links_logicbricks(Main *bmain, Object *ob_old, Object *ob_new)
+void BKE_sca_remap_data_postprocess_links_logicbricks_update(Main *bmain, Object *ob_old, Object *ob_new)
 {
   if (ob_new == NULL || (ob_old->controllers.first == NULL && ob_old->actuators.first == NULL)) {
     /* Nothing to do here... */
@@ -761,7 +763,8 @@ void BKE_sca_remap_links_logicbricks(Main *bmain, Object *ob_old, Object *ob_new
                * which means we ignore it totally here. */
             }
             else if (*new_link_p == NULL) {
-              BKE_sca_unlink_logicbricks((void **)&old_link, (void ***)&(sens->links), &sens->totlinks);
+              BKE_sca_unlink_logicbricks(
+                  (void **)&old_link, (void ***)&(sens->links), &sens->totlinks);
               a--;
             }
             else {
@@ -784,7 +787,8 @@ void BKE_sca_remap_links_logicbricks(Main *bmain, Object *ob_old, Object *ob_new
                * which means we ignore it totally here. */
             }
             else if (*new_link_p == NULL) {
-              BKE_sca_unlink_logicbricks((void **)&old_link, (void ***)&(cont->links), &cont->totlinks);
+              BKE_sca_unlink_logicbricks(
+                  (void **)&old_link, (void ***)&(cont->links), &cont->totlinks);
               a--;
             }
             else {
@@ -812,7 +816,7 @@ void BKE_sca_copy_logicbricks(Object *ob_new, const Object *ob, const int flag)
 {
   BKE_sca_copy_sensors(&ob_new->sensors, &ob->sensors, flag);
   BKE_sca_copy_controllers(&ob_new->controllers, &ob->controllers, flag);
-  BKE_sca_copy_actuators(&ob_new->actuators, &ob->actuators, flag);
+  BKE_sca_copy_actuators(&ob_new->actuators, &ob->actuators);
 
   for (bSensor *sens = ob_new->sensors.first; sens; sens = sens->next) {
     if (sens->flag & SENS_NEW) {
@@ -1068,7 +1072,38 @@ void BKE_sca_controllers_id_loop(ListBase *contlist, SCAControllerIDFunc func, v
     switch (controller->type) {
       case CONT_PYTHON: {
         bPythonCont *pc = controller->data;
-        func(controller, (ID **)&pc->text, userdata, IDWALK_CB_NOP);
+        // if (strlen(pc->module)) {
+        //  if (!pc->module_script) {
+        //    char modulename[FILE_MAX];
+        //    BLI_strncpy(modulename, pc->module, sizeof(modulename));
+        //    char ext[FILE_MAX];
+        //    strcpy(ext, ".py");
+        //    char dest[FILE_MAX];
+        //    strcpy(dest, "");
+        //    char *classname;
+        //    char *pos = strrchr(modulename, '.');
+        //    if (pos) {
+        //      *pos = '\0';
+        //      classname = pos + 1;
+        //    }
+        //    strcat(dest, modulename);
+        //    strcat(dest, ext);
+        //    if (G_MAIN /* && G.file_loaded */) { // FIXME: Need to wait file has been completely
+        //    read
+        //      LISTBASE_FOREACH (Text *, text, &G_MAIN->texts) {
+        //        if (strcmp(text->id.name + 2, dest) == 0) {
+        //          if (text->filepath == NULL) {  // Means the script is embedded
+        //            pc->module_script = text;
+        //          }
+        //          break;
+        //        }
+        //      }
+        //    }
+        //  }
+        //}
+
+        func(controller, (ID **)&pc->module_script, userdata, IDWALK_CB_USER);
+        func(controller, (ID **)&pc->text, userdata, IDWALK_CB_USER);
         break;
       }
       case CONT_LOGIC_AND:

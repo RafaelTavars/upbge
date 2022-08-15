@@ -1,24 +1,10 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2009 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2009 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup spgraph
+ *
+ * Graph editor space & buttons.
  */
 
 #include <float.h>
@@ -55,6 +41,8 @@
 #include "WM_types.h"
 
 #include "RNA_access.h"
+#include "RNA_path.h"
+#include "RNA_prototypes.h"
 
 #include "ED_anim_api.h"
 #include "ED_keyframing.h"
@@ -66,11 +54,11 @@
 
 #include "graph_intern.h" /* own include */
 
-/* ******************* graph editor space & buttons ************** */
-
 #define B_REDR 1
 
-/* -------------- */
+/* -------------------------------------------------------------------- */
+/** \name Internal Utilities
+ * \{ */
 
 static bool graph_panel_context(const bContext *C, bAnimListElem **ale, FCurve **fcu)
 {
@@ -105,12 +93,26 @@ static bool graph_panel_context(const bContext *C, bAnimListElem **ale, FCurve *
   return true;
 }
 
+FCurve *ANIM_graph_context_fcurve(const bContext *C)
+{
+  FCurve *fcu;
+  if (!graph_panel_context(C, NULL, &fcu)) {
+    return NULL;
+  }
+
+  return fcu;
+}
+
 static bool graph_panel_poll(const bContext *C, PanelType *UNUSED(pt))
 {
   return graph_panel_context(C, NULL, NULL);
 }
 
-/* -------------- */
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Cursor Header
+ * \{ */
 
 static void graph_panel_cursor_header(const bContext *C, Panel *panel)
 {
@@ -164,7 +166,11 @@ static void graph_panel_cursor(const bContext *C, Panel *panel)
   uiItemO(sub, IFACE_("Cursor Value to Selection"), ICON_NONE, "GRAPH_OT_snap_cursor_value");
 }
 
-/* ******************* active F-Curve ************** */
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Active F-Curve
+ * \{ */
 
 static void graph_panel_properties(const bContext *C, Panel *panel)
 {
@@ -233,7 +239,11 @@ static void graph_panel_properties(const bContext *C, Panel *panel)
   MEM_freeN(ale);
 }
 
-/* ******************* active Keyframe ************** */
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Active Keyframe
+ * \{ */
 
 /* get 'active' keyframe for panel editing */
 static bool get_active_fcurve_keyframe_edit(const FCurve *fcu,
@@ -268,7 +278,7 @@ static void graphedit_activekey_update_cb(bContext *UNUSED(C),
 
   /* make sure F-Curve and its handles are still valid after this editing */
   sort_time_fcurve(fcu);
-  calchandles_fcurve(fcu);
+  BKE_fcurve_handles_recalc(fcu);
 }
 
 /* update callback for active keyframe properties - handle-editing wrapper */
@@ -354,7 +364,7 @@ static void graph_panel_key_properties(const bContext *C, Panel *panel)
   }
 
   block = uiLayoutGetBlock(layout);
-  /* UI_block_func_handle_set(block, do_graph_region_buttons, NULL); */
+  // UI_block_func_handle_set(block, do_graph_region_buttons, NULL);
   uiLayoutSetPropSep(layout, true);
   uiLayoutSetPropDecorate(layout, false);
 
@@ -583,24 +593,28 @@ static void graph_panel_key_properties(const bContext *C, Panel *panel)
   else {
     if ((fcu->bezt == NULL) && (fcu->modifiers.first)) {
       /* modifiers only - so no keyframes to be active */
-      uiItemL(layout, IFACE_("F-Curve only has F-Modifiers"), ICON_NONE);
-      uiItemL(layout, IFACE_("See Modifiers panel below"), ICON_INFO);
+      uiItemL(layout, TIP_("F-Curve only has F-Modifiers"), ICON_NONE);
+      uiItemL(layout, TIP_("See Modifiers panel below"), ICON_INFO);
     }
     else if (fcu->fpt) {
       /* samples only */
       uiItemL(layout,
-              IFACE_("F-Curve doesn't have any keyframes as it only contains sampled points"),
+              TIP_("F-Curve doesn't have any keyframes as it only contains sampled points"),
               ICON_NONE);
     }
     else {
-      uiItemL(layout, IFACE_("No active keyframe on F-Curve"), ICON_NONE);
+      uiItemL(layout, TIP_("No active keyframe on F-Curve"), ICON_NONE);
     }
   }
 
   MEM_freeN(ale);
 }
 
-/* ******************* drivers ******************************** */
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Drivers
+ * \{ */
 
 #define B_IPO_DEPCHANGE 10
 
@@ -678,28 +692,30 @@ static void driver_dvar_invalid_name_query_cb(bContext *C, void *dvar_v, void *U
   DriverVar *dvar = (DriverVar *)dvar_v;
 
   if (dvar->flag & DVAR_FLAG_INVALID_EMPTY) {
-    uiItemL(layout, "It cannot be left blank", ICON_ERROR);
+    uiItemL(layout, TIP_("It cannot be left blank"), ICON_ERROR);
   }
   if (dvar->flag & DVAR_FLAG_INVALID_START_NUM) {
-    uiItemL(layout, "It cannot start with a number", ICON_ERROR);
+    uiItemL(layout, TIP_("It cannot start with a number"), ICON_ERROR);
   }
   if (dvar->flag & DVAR_FLAG_INVALID_START_CHAR) {
     uiItemL(layout,
-            "It cannot start with a special character,"
-            " including '$', '@', '!', '~', '+', '-', '_', '.', or ' '",
+            TIP_("It cannot start with a special character,"
+                 " including '$', '@', '!', '~', '+', '-', '_', '.', or ' '"),
             ICON_NONE);
   }
   if (dvar->flag & DVAR_FLAG_INVALID_HAS_SPACE) {
-    uiItemL(layout, "It cannot contain spaces (e.g. 'a space')", ICON_ERROR);
+    uiItemL(layout, TIP_("It cannot contain spaces (e.g. 'a space')"), ICON_ERROR);
   }
   if (dvar->flag & DVAR_FLAG_INVALID_HAS_DOT) {
-    uiItemL(layout, "It cannot contain dots (e.g. 'a.dot')", ICON_ERROR);
+    uiItemL(layout, TIP_("It cannot contain dots (e.g. 'a.dot')"), ICON_ERROR);
   }
   if (dvar->flag & DVAR_FLAG_INVALID_HAS_SPECIAL) {
-    uiItemL(layout, "It cannot contain special (non-alphabetical/numeric) characters", ICON_ERROR);
+    uiItemL(layout,
+            TIP_("It cannot contain special (non-alphabetical/numeric) characters"),
+            ICON_ERROR);
   }
   if (dvar->flag & DVAR_FLAG_INVALID_PY_KEYWORD) {
-    uiItemL(layout, "It cannot be a reserved keyword in Python", ICON_INFO);
+    uiItemL(layout, TIP_("It cannot be a reserved keyword in Python"), ICON_INFO);
   }
 
   UI_popup_menu_end(C, pup);
@@ -912,7 +928,7 @@ static void graph_draw_driven_property_panel(uiLayout *layout, ID *id, FCurve *f
   uiItemL(row, id->name + 2, icon);
 
   /* -> user friendly 'name' for F-Curve/driver target */
-  uiItemL(row, "", ICON_SMALL_TRI_RIGHT_VEC);
+  uiItemL(row, "", ICON_RIGHTARROW);
   uiItemL(row, name, ICON_RNA);
 }
 
@@ -1308,17 +1324,32 @@ static void graph_panel_drivers_popover(const bContext *C, Panel *panel)
   uiItemO(layout, IFACE_("Show in Drivers Editor"), ICON_DRIVER, "SCREEN_OT_drivers_editor_show");
 }
 
-/* ******************* F-Modifiers ******************************** */
-/* All the drawing code is in editors/animation/fmodifier_ui.c */
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name F-Curve Modifiers
+ *
+ * \note All the drawing code is in `editors/animation/fmodifier_ui.c`
+ * \{ */
 
 #define B_FMODIFIER_REDRAW 20
+/** The start of FModifier panels registered for the graph editor. */
+#define GRAPH_FMODIFIER_PANEL_PREFIX "GRAPH"
+
+static void graph_fmodifier_panel_id(void *fcm_link, char *r_name)
+{
+  FModifier *fcm = (FModifier *)fcm_link;
+  eFModifier_Types type = fcm->type;
+  const FModifierTypeInfo *fmi = get_fmodifier_typeinfo(type);
+  BLI_snprintf(r_name, BKE_ST_MAXNAME, "%s_PT_%s", GRAPH_FMODIFIER_PANEL_PREFIX, fmi->name);
+}
 
 static void do_graph_region_modifier_buttons(bContext *C, void *UNUSED(arg), int event)
 {
   switch (event) {
     case B_FMODIFIER_REDRAW: /* XXX this should send depsgraph updates too */
-      WM_event_add_notifier(
-          C, NC_ANIMATION, NULL); /* XXX need a notifier specially for F-Modifiers */
+      /* XXX: need a notifier specially for F-Modifiers */
+      WM_event_add_notifier(C, NC_ANIMATION, NULL);
       break;
   }
 }
@@ -1327,10 +1358,8 @@ static void graph_panel_modifiers(const bContext *C, Panel *panel)
 {
   bAnimListElem *ale;
   FCurve *fcu;
-  FModifier *fcm;
-  uiLayout *col, *row;
+  uiLayout *row;
   uiBlock *block;
-  bool active;
 
   if (!graph_panel_context(C, &ale, &fcu)) {
     return;
@@ -1355,19 +1384,16 @@ static void graph_panel_modifiers(const bContext *C, Panel *panel)
     uiItemO(row, "", ICON_PASTEDOWN, "GRAPH_OT_fmodifier_paste");
   }
 
-  active = !(fcu->flag & FCURVE_MOD_OFF);
-  /* draw each modifier */
-  for (fcm = fcu->modifiers.first; fcm; fcm = fcm->next) {
-    col = uiLayoutColumn(panel->layout, true);
-    uiLayoutSetActive(col, active);
-
-    ANIM_uiTemplate_fmodifier_draw(col, ale->fcurve_owner_id, &fcu->modifiers, fcm);
-  }
+  ANIM_fmodifier_panels(C, ale->fcurve_owner_id, &fcu->modifiers, graph_fmodifier_panel_id);
 
   MEM_freeN(ale);
 }
 
-/* ******************* general ******************************** */
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Registration
+ * \{ */
 
 void graph_buttons_register(ARegionType *art)
 {
@@ -1426,9 +1452,13 @@ void graph_buttons_register(ARegionType *art)
   strcpy(pt->label, N_("Modifiers"));
   strcpy(pt->category, "Modifiers");
   strcpy(pt->translation_context, BLT_I18NCONTEXT_DEFAULT_BPYRNA);
+  pt->flag = PANEL_TYPE_NO_HEADER;
   pt->draw = graph_panel_modifiers;
   pt->poll = graph_panel_poll;
   BLI_addtail(&art->paneltypes, pt);
+
+  ANIM_modifier_panels_register_graph_and_NLA(art, GRAPH_FMODIFIER_PANEL_PREFIX, graph_panel_poll);
+  ANIM_modifier_panels_register_graph_only(art, GRAPH_FMODIFIER_PANEL_PREFIX, graph_panel_poll);
 
   pt = MEM_callocN(sizeof(PanelType), "spacetype graph panel view");
   strcpy(pt->idname, "GRAPH_PT_view");
@@ -1439,3 +1469,5 @@ void graph_buttons_register(ARegionType *art)
   pt->draw_header = graph_panel_cursor_header;
   BLI_addtail(&art->paneltypes, pt);
 }
+
+/** \} */

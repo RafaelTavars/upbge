@@ -83,7 +83,7 @@ ARegion *logic_has_buttons_region(ScrArea *sa)
   return arnew;
 }
 
-/* ******************** default callbacks for image space ***************** */
+/* ******************** default callbacks for logic space ***************** */
 
 static SpaceLink *logic_new(const ScrArea *sa, const Scene *UNUSED(scene))
 {
@@ -171,7 +171,7 @@ static void logic_operatortypes(void)
   WM_operatortype_append(LOGIC_OT_links_cut);
 }
 
-static void logic_keymap(struct wmKeyConfig *keyconf)
+static void logic_keymap(struct wmKeyConfig *UNUSED(keyconf))
 {
 }
 
@@ -181,12 +181,10 @@ static void logic_refresh(const bContext *UNUSED(C), ScrArea *UNUSED(sa))
   //	Object *obedit= CTX_data_edit_object(C);
 }
 
-static void logic_listener(wmWindow *UNUSED(win),
-                           ScrArea *UNUSED(sa),
-                           ARegion *ar,
-                           wmNotifier *wmn,
-                           const Scene *UNUSED(scene))
+static void logic_listener(const wmRegionListenerParams *params)
 {
+  ARegion *ar = params->region;
+  wmNotifier *wmn = params->notifier;
   /* context changes */
   switch (wmn->category) {
     case NC_LOGIC:

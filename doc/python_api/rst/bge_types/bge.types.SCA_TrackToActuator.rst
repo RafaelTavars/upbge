@@ -1,14 +1,16 @@
 SCA_TrackToActuator(SCA_IActuator)
-=================================
+==================================
 
-base class --- :class:`SCA_IActuator`
+.. currentmodule:: bge.types
 
-.. class:: SCA_TrackToActuator(SCA_IActuator)
+base class --- :class:`~bge.types.SCA_IActuator`
+
+.. class:: SCA_TrackToActuator
 
    Edit Object actuator in Track To mode.
 
    .. warning::
-   
+
       Track To Actuators will be ignored if at game start, the object to track to is invalid.
 
       This will generate a warning in the console:
@@ -21,7 +23,7 @@ base class --- :class:`SCA_IActuator`
 
       the object this actuator tracks.
 
-      :type: :class:`KX_GameObject` or None
+      :type: :class:`~bge.types.KX_GameObject` or None
 
    .. attribute:: time
 

@@ -31,7 +31,6 @@
 
 #pragma once
 
-
 #ifdef WITH_PYTHON
 
 #  include <Python.h>
@@ -39,7 +38,3 @@
 PyMODINIT_FUNC initConstraintPythonBinding();
 
 #endif /* WITH_PYTHON */
-
-void PHY_SetActiveEnvironment(class PHY_IPhysicsEnvironment *env);
-PHY_IPhysicsEnvironment *PHY_GetActiveEnvironment();
-

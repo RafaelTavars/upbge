@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup balembic
@@ -94,7 +80,7 @@ void ABCTransformWriter::do_write(HierarchyContext &context)
     scale_mat[3][3] = args_.export_params->global_scale; /* also scale translation */
     mul_m4_m4m4(parent_relative_matrix, parent_relative_matrix, scale_mat);
     parent_relative_matrix[3][3] /=
-        args_.export_params->global_scale; /* normalise the homogeneous component */
+        args_.export_params->global_scale; /* Normalize the homogeneous component. */
   }
 
   XformSample xform_sample;

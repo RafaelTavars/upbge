@@ -1,35 +1,11 @@
-/*
- * ***** BEGIN GPL LICENSE BLOCK *****
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software  Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Copyright (c) 2007 The Zdeno Ash Miklas
- *
- * This source file is part of blendTex library
- *
- * Contributor(s):
- *
- * ***** END GPL LICENSE BLOCK *****
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2006 The Zdeno Ash Miklas. */
 
 /** \file ImageBase.h
  *  \ingroup bgevideotex
  */
 
 #pragma once
-
 
 #include <vector>
 
@@ -308,8 +284,8 @@ class ImageBase {
 // python structure for image filter
 struct PyImage {
   PyObject_HEAD
-      // source object
-      ImageBase *m_image;
+  // source object
+  ImageBase *m_image;
 };
 
 // size of id
@@ -430,4 +406,3 @@ int Image_setFilter(PyImage *self, PyObject *value, void *closure);
 PyObject *Image_valid(PyImage *self, void *closure);
 // for buffer access to PyImage objects
 extern PyBufferProcs imageBufferProcs;
-

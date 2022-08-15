@@ -1,5 +1,4 @@
-# Distributed under the OSI-approved BSD 3-Clause License,
-# see accompanying file BSD-3-Clause-license.txt for details.
+# SPDX-License-Identifier: BSD-3-Clause
 
 #[=======================================================================[.rst:
 GoogleTest
@@ -272,7 +271,7 @@ cmake_policy(SET CMP0057 NEW) # if IN_LIST
 #------------------------------------------------------------------------------
 function(gtest_add_tests)
 
-  if (ARGC LESS 1)
+  if(ARGC LESS 1)
     message(FATAL_ERROR "No arguments supplied to gtest_add_tests()")
   endif()
 
@@ -298,7 +297,7 @@ function(gtest_add_tests)
     set(autoAddSources YES)
   else()
     # Non-keyword syntax, convert to keyword form
-    if (ARGC LESS 3)
+    if(ARGC LESS 3)
       message(FATAL_ERROR "gtest_add_tests() without keyword options requires at least 3 arguments")
     endif()
     set(ARGS_TARGET     "${ARGV0}")

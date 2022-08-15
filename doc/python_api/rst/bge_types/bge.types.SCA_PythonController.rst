@@ -1,18 +1,20 @@
 SCA_PythonController(SCA_IController)
 =====================================
 
-base class --- :class:`SCA_IController`
+.. currentmodule:: bge.types
 
-.. class:: SCA_PythonController(SCA_IController)
+base class --- :class:`~bge.types.SCA_IController`
 
-   A Python controller uses a Python script to activate it's actuators, 
+.. class:: SCA_PythonController
+
+   A Python controller uses a Python script to activate it's actuators,
    based on it's sensors.
 
    .. attribute:: owner
 
       The object the controller is attached to.
 
-      :type: :class:`KX_GameObject`
+      :type: :class:`~bge.types.KX_GameObject`
 
    .. attribute:: script
 
@@ -22,17 +24,17 @@ base class --- :class:`SCA_IController`
       * When 'Module' execution mode is set this value will contain a single line string - module name and function "module.func" or "package.modile.func" where the module names are python textblocks or external scripts.
 
       :type: string
-      
+
       .. note::
-      
+
          Once this is set the script name given for warnings will remain unchanged.
 
    .. attribute:: mode
 
       the execution mode for this controller (read-only).
 
-      * Script: 0, Execite the :data:`script` as a python code.
-      * Module: 1, Execite the :data:`script` as a module and function.
+      * Script: 0, Execite the :attr:`script` as a python code.
+      * Module: 1, Execite the :attr:`script` as a module and function.
 
       :type: integer
 
@@ -40,12 +42,13 @@ base class --- :class:`SCA_IController`
 
       Activates an actuator attached to this controller.
 
-      :arg actuator: The actuator to operate on.
-      :type actuator: actuator or the actuator name as a string
+      :arg actuator: The actuator to operate on. Expects either an actuator instance or its name.
+      :type actuator: :class:`~bge.types.SCA_IActuator` or string
 
    .. method:: deactivate(actuator)
 
       Deactivates an actuator attached to this controller.
 
-      :arg actuator: The actuator to operate on.
-      :type actuator: actuator or the actuator name as a string
+      :arg actuator: The actuator to operate on. Expects either an actuator instance or its name.
+      :type actuator: :class:`~bge.types.SCA_IActuator` or string
+

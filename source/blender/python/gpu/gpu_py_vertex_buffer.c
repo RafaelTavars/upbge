@@ -1,24 +1,10 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup bpygpu
  *
- * - Use ``bpygpu_`` for local API.
- * - Use ``BPyGPU`` for public API.
+ * - Use `bpygpu_` for local API.
+ * - Use `BPyGPU` for public API.
  */
 
 #include <Python.h>
@@ -39,7 +25,7 @@
 /** \name Utility Functions
  * \{ */
 
-#define PY_AS_NATIVE_SWITCH(attr) \
+#define PYGPU_AS_NATIVE_SWITCH(attr) \
   switch (attr->comp_type) { \
     case GPU_COMP_I8: { \
       PY_AS_NATIVE(int8_t, PyC_Long_AsI8); \
@@ -70,12 +56,13 @@
       break; \
     } \
     default: \
-      BLI_assert(0); \
+      BLI_assert_unreachable(); \
+      break; \
   } \
   ((void)0)
 
 /* No error checking, callers must run PyErr_Occurred */
-static void fill_format_elem(void *data_dst_void, PyObject *py_src, const GPUVertAttr *attr)
+static void pygpu_fill_format_elem(void *data_dst_void, PyObject *py_src, const GPUVertAttr *attr)
 {
 #define PY_AS_NATIVE(ty_dst, py_as_native) \
   { \
@@ -84,21 +71,21 @@ static void fill_format_elem(void *data_dst_void, PyObject *py_src, const GPUVer
   } \
   ((void)0)
 
-  PY_AS_NATIVE_SWITCH(attr);
+  PYGPU_AS_NATIVE_SWITCH(attr);
 
 #undef PY_AS_NATIVE
 }
 
 /* No error checking, callers must run PyErr_Occurred */
-static void fill_format_sequence(void *data_dst_void,
-                                 PyObject *py_seq_fast,
-                                 const GPUVertAttr *attr)
+static void pygpu_fill_format_sequence(void *data_dst_void,
+                                       PyObject *py_seq_fast,
+                                       const GPUVertAttr *attr)
 {
   const uint len = attr->comp_len;
   PyObject **value_fast_items = PySequence_Fast_ITEMS(py_seq_fast);
 
 /**
- * Args are constants, so range checks will be optimized out if they're nop's.
+ * Args are constants, so range checks will be optimized out if they're no-op's.
  */
 #define PY_AS_NATIVE(ty_dst, py_as_native) \
   ty_dst *data_dst = data_dst_void; \
@@ -107,19 +94,19 @@ static void fill_format_sequence(void *data_dst_void,
   } \
   ((void)0)
 
-  PY_AS_NATIVE_SWITCH(attr);
+  PYGPU_AS_NATIVE_SWITCH(attr);
 
 #undef PY_AS_NATIVE
 }
 
-#undef PY_AS_NATIVE_SWITCH
+#undef PYGPU_AS_NATIVE_SWITCH
 #undef WARN_TYPE_LIMIT_PUSH
 #undef WARN_TYPE_LIMIT_POP
 
-static bool py_vertbuf_fill_impl(GPUVertBuf *vbo,
-                                 uint data_id,
-                                 PyObject *seq,
-                                 const char *error_prefix)
+static bool pygpu_vertbuf_fill_impl(GPUVertBuf *vbo,
+                                    uint data_id,
+                                    PyObject *seq,
+                                    const char *error_prefix)
 {
   const char *exc_str_size_mismatch = "Expected a %s of size %d, got %u";
 
@@ -173,7 +160,7 @@ static bool py_vertbuf_fill_impl(GPUVertBuf *vbo,
       for (uint i = 0; i < seq_len; i++) {
         uchar *data = (uchar *)GPU_vertbuf_raw_step(&data_step);
         PyObject *item = seq_items[i];
-        fill_format_elem(data, item, attr);
+        pygpu_fill_format_elem(data, item, attr);
       }
     }
     else {
@@ -197,7 +184,7 @@ static bool py_vertbuf_fill_impl(GPUVertBuf *vbo,
         }
 
         /* May trigger error, check below */
-        fill_format_sequence(data, seq_fast_item, attr);
+        pygpu_fill_format_sequence(data, seq_fast_item, attr);
         Py_DECREF(seq_fast_item);
       }
     }
@@ -213,7 +200,10 @@ static bool py_vertbuf_fill_impl(GPUVertBuf *vbo,
   return ok;
 }
 
-static int py_attr_fill(GPUVertBuf *buf, int id, PyObject *py_seq_data, const char *error_prefix)
+static int pygpu_vertbuf_fill(GPUVertBuf *buf,
+                              int id,
+                              PyObject *py_seq_data,
+                              const char *error_prefix)
 {
   if (id < 0 || id >= GPU_vertbuf_get_format(buf)->attr_len) {
     PyErr_Format(PyExc_ValueError, "Format id %d out of range", id);
@@ -225,7 +215,7 @@ static int py_attr_fill(GPUVertBuf *buf, int id, PyObject *py_seq_data, const ch
     return 0;
   }
 
-  if (!py_vertbuf_fill_impl(buf, (uint)id, py_seq_data, error_prefix)) {
+  if (!pygpu_vertbuf_fill_impl(buf, (uint)id, py_seq_data, error_prefix)) {
     return 0;
   }
 
@@ -238,7 +228,7 @@ static int py_attr_fill(GPUVertBuf *buf, int id, PyObject *py_seq_data, const ch
 /** \name VertBuf Type
  * \{ */
 
-static PyObject *py_VertBuf_new(PyTypeObject *UNUSED(type), PyObject *args, PyObject *kwds)
+static PyObject *pygpu_vertbuf__tp_new(PyTypeObject *UNUSED(type), PyObject *args, PyObject *kwds)
 {
   struct {
     PyObject *py_fmt;
@@ -246,7 +236,13 @@ static PyObject *py_VertBuf_new(PyTypeObject *UNUSED(type), PyObject *args, PyOb
   } params;
 
   static const char *_keywords[] = {"format", "len", NULL};
-  static _PyArg_Parser _parser = {"O!I:GPUVertBuf.__new__", _keywords, 0};
+  static _PyArg_Parser _parser = {
+      "O!" /* `format` */
+      "I"  /* `len` */
+      ":GPUVertBuf.__new__",
+      _keywords,
+      0,
+  };
   if (!_PyArg_ParseTupleAndKeywordsFast(
           args, kwds, &_parser, &BPyGPUVertFormat_Type, &params.py_fmt, &params.len)) {
     return NULL;
@@ -260,7 +256,7 @@ static PyObject *py_VertBuf_new(PyTypeObject *UNUSED(type), PyObject *args, PyOb
   return BPyGPUVertBuf_CreatePyObject(vbo);
 }
 
-PyDoc_STRVAR(py_VertBuf_attr_fill_doc,
+PyDoc_STRVAR(pygpu_vertbuf_attr_fill_doc,
              ".. method:: attr_fill(id, data)\n"
              "\n"
              "   Insert data into the buffer for a single attribute.\n"
@@ -268,14 +264,20 @@ PyDoc_STRVAR(py_VertBuf_attr_fill_doc,
              "   :param id: Either the name or the id of the attribute.\n"
              "   :type id: int or str\n"
              "   :param data: Sequence of data that should be stored in the buffer\n"
-             "   :type data: sequence of values or tuples\n");
-static PyObject *py_VertBuf_attr_fill(BPyGPUVertBuf *self, PyObject *args, PyObject *kwds)
+             "   :type data: sequence of floats, ints, vectors or matrices\n");
+static PyObject *pygpu_vertbuf_attr_fill(BPyGPUVertBuf *self, PyObject *args, PyObject *kwds)
 {
   PyObject *data;
   PyObject *identifier;
 
   static const char *_keywords[] = {"id", "data", NULL};
-  static _PyArg_Parser _parser = {"OO:attr_fill", _keywords, 0};
+  static _PyArg_Parser _parser = {
+      "O" /* `id` */
+      "O" /* `data` */
+      ":attr_fill",
+      _keywords,
+      0,
+  };
   if (!_PyArg_ParseTupleAndKeywordsFast(args, kwds, &_parser, &identifier, &data)) {
     return NULL;
   }
@@ -290,7 +292,7 @@ static PyObject *py_VertBuf_attr_fill(BPyGPUVertBuf *self, PyObject *args, PyObj
     const char *name = PyUnicode_AsUTF8(identifier);
     id = GPU_vertformat_attr_id_get(format, name);
     if (id == -1) {
-      PyErr_SetString(PyExc_ValueError, "Unknown attribute name");
+      PyErr_Format(PyExc_ValueError, "Unknown attribute '%s'", name);
       return NULL;
     }
   }
@@ -299,44 +301,44 @@ static PyObject *py_VertBuf_attr_fill(BPyGPUVertBuf *self, PyObject *args, PyObj
     return NULL;
   }
 
-  if (!py_attr_fill(self->buf, id, data, "GPUVertBuf.attr_fill")) {
+  if (!pygpu_vertbuf_fill(self->buf, id, data, "GPUVertBuf.attr_fill")) {
     return NULL;
   }
 
   Py_RETURN_NONE;
 }
 
-static struct PyMethodDef py_VertBuf_methods[] = {
+static struct PyMethodDef pygpu_vertbuf__tp_methods[] = {
     {"attr_fill",
-     (PyCFunction)py_VertBuf_attr_fill,
+     (PyCFunction)pygpu_vertbuf_attr_fill,
      METH_VARARGS | METH_KEYWORDS,
-     py_VertBuf_attr_fill_doc},
+     pygpu_vertbuf_attr_fill_doc},
     {NULL, NULL, 0, NULL},
 };
 
-static void py_VertBuf_dealloc(BPyGPUVertBuf *self)
+static void pygpu_vertbuf__tp_dealloc(BPyGPUVertBuf *self)
 {
   GPU_vertbuf_discard(self->buf);
   Py_TYPE(self)->tp_free(self);
 }
 
-PyDoc_STRVAR(py_gpu_vertex_buffer_doc,
-             ".. class:: GPUVertBuf(len, format)\n"
+PyDoc_STRVAR(pygpu_vertbuf__tp_doc,
+             ".. class:: GPUVertBuf(format, len)\n"
              "\n"
              "   Contains a VBO.\n"
              "\n"
-             "   :param len: Amount of vertices that will fit into this buffer.\n"
-             "   :type type: `int`\n"
              "   :param format: Vertex format.\n"
-             "   :type buf: :class:`gpu.types.GPUVertFormat`\n");
+             "   :type buf: :class:`gpu.types.GPUVertFormat`\n"
+             "   :param len: Amount of vertices that will fit into this buffer.\n"
+             "   :type type: `int`\n");
 PyTypeObject BPyGPUVertBuf_Type = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "GPUVertBuf",
     .tp_basicsize = sizeof(BPyGPUVertBuf),
-    .tp_dealloc = (destructor)py_VertBuf_dealloc,
+    .tp_dealloc = (destructor)pygpu_vertbuf__tp_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = py_gpu_vertex_buffer_doc,
-    .tp_methods = py_VertBuf_methods,
-    .tp_new = py_VertBuf_new,
+    .tp_doc = pygpu_vertbuf__tp_doc,
+    .tp_methods = pygpu_vertbuf__tp_methods,
+    .tp_new = pygpu_vertbuf__tp_new,
 };
 
 /** \} */

@@ -33,7 +33,7 @@
 #include "DNA_actuator_types.h"
 #include "DNA_controller_types.h"
 #include "DNA_object_types.h"
-#include "DNA_python_component_types.h"
+#include "DNA_python_proxy_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_sensor_types.h"
 
@@ -45,16 +45,18 @@
 
 #include "BKE_context.h"
 #include "BKE_main.h"
-#include "BKE_python_component.h"
+#include "BKE_python_proxy.h"
 #include "BKE_sca.h"
 
 #include "ED_logic.h"
 #include "ED_object.h"
 #include "ED_screen.h"
+#include "ED_undo.h"
 
 #include "RNA_access.h"
 #include "RNA_define.h"
 #include "RNA_enum_types.h"
+#include "RNA_prototypes.h"
 
 #include "WM_api.h"
 #include "WM_types.h"
@@ -250,6 +252,24 @@ static int logicbricks_move_property_get(wmOperator *op)
     return false;
 }
 
+static bool remove_component_poll(bContext *C)
+{
+  PointerRNA ptr = CTX_data_pointer_get_type(C, "component", &RNA_PythonProxy);
+  Object *ob = (ptr.owner_id) ? (Object *)ptr.owner_id : ED_object_active_context(C);
+
+  if (!ob || ID_IS_LINKED(ob)) {
+    return false;
+  }
+
+  if (ID_IS_OVERRIDE_LIBRARY(ob)) {
+    CTX_wm_operator_poll_msg_set(
+        C, "Cannot remove components coming from linked data in a library override");
+    return false;
+  }
+
+  return true;
+}
+
 /* ************* Add/Remove Sensor Operator ************* */
 
 static int sensor_remove_exec(bContext *C, wmOperator *op)
@@ -262,6 +282,8 @@ static int sensor_remove_exec(bContext *C, wmOperator *op)
 
   BLI_remlink(&(ob->sensors), sens);
   BKE_sca_free_sensor(sens);
+
+  ED_undo_push_old(C, "sensor_remove_exec");
 
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
@@ -287,7 +309,7 @@ static void LOGIC_OT_sensor_remove(wmOperatorType *ot)
   ot->poll = edit_sensor_poll;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  ot->flag = 0;
   edit_sensor_properties(ot);
 }
 
@@ -325,6 +347,8 @@ static int sensor_add_exec(bContext *C, wmOperator *op)
       &ob->sensors, sens, DATA_("Sensor"), '.', offsetof(bSensor, name), sizeof(sens->name));
   ob->scaflag |= OB_SHOWSENS;
 
+  ED_undo_push_old(C, "sensor_add_exec");
+
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
   return OPERATOR_FINISHED;
@@ -345,7 +369,7 @@ static void LOGIC_OT_sensor_add(wmOperatorType *ot)
   ot->poll = ED_operator_object_active_editable;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  ot->flag = 0;
 
   /* properties */
   ot->prop = prop = RNA_def_enum(
@@ -372,6 +396,8 @@ static int controller_remove_exec(bContext *C, wmOperator *op)
   BKE_sca_unlink_controller(cont);
   BKE_sca_free_controller(cont);
 
+  ED_undo_push_old(C, "controller_remove_exec");
+
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
   return OPERATOR_FINISHED;
@@ -396,7 +422,7 @@ static void LOGIC_OT_controller_remove(wmOperatorType *ot)
   ot->poll = edit_controller_poll;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  ot->flag = 0;
   edit_controller_properties(ot);
 }
 
@@ -453,6 +479,8 @@ static int controller_add_exec(bContext *C, wmOperator *op)
 
   ob->scaflag |= OB_SHOWCONT;
 
+  ED_undo_push_old(C, "controller_add_exec");
+
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
   return OPERATOR_FINISHED;
@@ -473,7 +501,7 @@ static void LOGIC_OT_controller_add(wmOperatorType *ot)
   ot->poll = ED_operator_object_active_editable;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  ot->flag = 0;
 
   /* properties */
   ot->prop = RNA_def_enum(ot->srna,
@@ -503,6 +531,8 @@ static int actuator_remove_exec(bContext *C, wmOperator *op)
   BKE_sca_unlink_actuator(act);
   BKE_sca_free_actuator(act);
 
+  ED_undo_push_old(C, "actuator_remove_exec");
+
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
   return OPERATOR_FINISHED;
@@ -527,7 +557,7 @@ static void LOGIC_OT_actuator_remove(wmOperatorType *ot)
   ot->poll = edit_actuator_poll;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  ot->flag = 0;
   edit_actuator_properties(ot);
 }
 
@@ -565,6 +595,8 @@ static int actuator_add_exec(bContext *C, wmOperator *op)
       &ob->actuators, act, DATA_("Actuator"), '.', offsetof(bActuator, name), sizeof(act->name));
   ob->scaflag |= OB_SHOWACT;
 
+  ED_undo_push_old(C, "actuator_add_exec");
+
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
   return OPERATOR_FINISHED;
@@ -585,7 +617,7 @@ static void LOGIC_OT_actuator_add(wmOperatorType *ot)
   ot->poll = ED_operator_object_active_editable;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  ot->flag = 0;
 
   /* properties */
   ot->prop = prop = RNA_def_enum(
@@ -613,6 +645,8 @@ static int sensor_move_exec(bContext *C, wmOperator *op)
 
   BKE_sca_move_sensor(sens, ob, move_up);
 
+  ED_undo_push_old(C, "sensor_move_exec");
+
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
   return OPERATOR_FINISHED;
@@ -639,7 +673,7 @@ static void LOGIC_OT_sensor_move(wmOperatorType *ot)
   ot->poll = edit_sensor_poll;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  ot->flag = 0;
 
   /* properties */
   edit_sensor_properties(ot);
@@ -657,6 +691,8 @@ static int controller_move_exec(bContext *C, wmOperator *op)
     return OPERATOR_CANCELLED;
 
   BKE_sca_move_controller(cont, ob, move_up);
+
+  ED_undo_push_old(C, "controller_move_exec");
 
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
@@ -684,7 +720,7 @@ static void LOGIC_OT_controller_move(wmOperatorType *ot)
   ot->poll = edit_controller_poll;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  ot->flag = 0;
 
   /* properties */
   edit_controller_properties(ot);
@@ -702,6 +738,8 @@ static int actuator_move_exec(bContext *C, wmOperator *op)
     return OPERATOR_CANCELLED;
 
   BKE_sca_move_actuator(act, ob, move_up);
+
+  ED_undo_push_old(C, "actuator_move_exec");
 
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
@@ -729,7 +767,7 @@ static void LOGIC_OT_actuator_move(wmOperatorType *ot)
   ot->poll = edit_actuator_poll;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+  ot->flag = 0;
 
   /* properties */
   edit_actuator_properties(ot);
@@ -771,7 +809,7 @@ static void LOGIC_OT_view_all(wmOperatorType *ot)
 
 /* ********** flip a region alignment ********************* */
 
-static int logic_region_flip_exec(bContext *C, wmOperator *op)
+static int logic_region_flip_exec(bContext *C, wmOperator *UNUSED(op))
 {
   ScrArea *sa = CTX_wm_area(C);
   ARegion *ar = logic_has_buttons_region(sa);
@@ -811,10 +849,194 @@ static void LOGIC_OT_region_flip(wmOperatorType *ot)
   ot->flag = 0;
 }
 
+/* Custom object operators */
+static int python_class_new_invoke(bContext *C, wmOperator *op, const wmEvent *UNUSED(event))
+{
+  /* Better for user feedback. */
+  return WM_operator_props_dialog_popup(C, op, 15 * UI_UNIT_X);
+}
+
+static int custom_object_register_exec(bContext *C, wmOperator *op)
+{
+  PythonProxy *pp;
+  Object *ob = CTX_data_active_object(C);
+  char import[MAX_NAME];
+
+  if (!ob) {
+    return OPERATOR_CANCELLED;
+  }
+
+  RNA_string_get(op->ptr, "class_name", import);
+  pp = BKE_custom_object_new(import, op->reports, C);
+
+  if (!pp) {
+    return OPERATOR_CANCELLED;
+  }
+
+  ob->custom_object = pp;
+
+  ED_undo_push_old(C, "custom_object_register_exec");
+
+  WM_event_add_notifier(C, NC_LOGIC, NULL);
+
+  return OPERATOR_FINISHED;
+}
+
+static int custom_object_create_exec(bContext *C, wmOperator *op)
+{
+  PythonProxy *pp;
+  Object *ob = CTX_data_active_object(C);
+  char import[MAX_NAME];
+
+  if (!ob) {
+    return OPERATOR_CANCELLED;
+  }
+
+  RNA_string_get(op->ptr, "class_name", import);
+  pp = BKE_custom_object_create_file(import, op->reports, C);
+
+  if (!pp) {
+    return OPERATOR_CANCELLED;
+  }
+
+  ob->custom_object = pp;
+
+  ED_undo_push_old(C, "custom_object_create_exec");
+
+  WM_event_add_notifier(C, NC_LOGIC, NULL);
+
+  return OPERATOR_FINISHED;
+}
+
+static void LOGIC_OT_custom_object_register(wmOperatorType *ot)
+{
+  ot->name = "Select Custom Object";
+  ot->idname = "LOGIC_OT_custom_object_register";
+  ot->description = "Use a custom KX_GameObject subclass for the selected object";
+
+  /* api callbacks */
+  ot->exec = custom_object_register_exec;
+  ot->invoke = python_class_new_invoke;
+  ot->poll = ED_operator_object_active_editable;
+
+  /* flags */
+  ot->flag = 0;
+
+  PropertyRNA *parm;
+  parm = RNA_def_string(ot->srna,
+                        "class_name",
+                        "module.MyObject",
+                        64,
+                        "MyObject",
+                        "The class name with module (module.ClassName)");
+  RNA_def_parameter_flags(parm, 0, PARM_REQUIRED);
+}
+
+static void LOGIC_OT_custom_object_create(wmOperatorType *ot)
+{
+  ot->name = "Create Custom Object";
+  ot->idname = "LOGIC_OT_custom_object_create";
+  ot->description = "Create a KX_GameObject subclass and attach it to the selected object";
+
+  /* api callbacks */
+  ot->exec = custom_object_create_exec;
+  ot->invoke = python_class_new_invoke;
+  ot->poll = ED_operator_object_active_editable;
+
+  /* flags */
+  ot->flag = 0;
+
+  PropertyRNA *parm;
+  parm = RNA_def_string(ot->srna,
+                        "class_name",
+                        "module.MyObject",
+                        64,
+                        "MyObject",
+                        "The class name with module (module.ClassName)");
+  RNA_def_parameter_flags(parm, 0, PARM_REQUIRED);
+}
+
+static int custom_object_remove_exec(bContext *C, wmOperator *UNUSED(op))
+{
+  Object *ob = CTX_data_active_object(C);
+
+  if (!ob) {
+    return OPERATOR_CANCELLED;
+  }
+
+  PythonProxy *pp = ob->custom_object;
+
+  if (!pp) {
+    return OPERATOR_CANCELLED;
+  }
+
+  ob->custom_object = NULL;
+
+  BKE_python_proxy_free(pp);
+
+  ED_undo_push_old(C, "custom_object_remove_exec");
+
+  WM_event_add_notifier(C, NC_LOGIC, NULL);
+
+  return OPERATOR_FINISHED;
+}
+
+static void LOGIC_OT_custom_object_remove(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Remove Custom Object";
+  ot->description = "Remove this custom class from the object";
+  ot->idname = "LOGIC_OT_custom_object_remove";
+
+  /* api callbacks */
+  ot->exec = custom_object_remove_exec;
+  ot->poll = remove_component_poll;
+
+  /* flags */
+  ot->flag = 0;
+}
+
+static int custom_object_reload_exec(bContext *C, wmOperator *op)
+{
+  Object *ob = CTX_data_active_object(C);
+
+  if (!ob) {
+    return OPERATOR_CANCELLED;
+  }
+
+  PythonProxy *pp = ob->custom_object;
+
+  if (!pp) {
+    return OPERATOR_CANCELLED;
+  }
+
+  /* Try to create a new object */
+  BKE_custom_object_reload(pp, op->reports, C);
+
+  ED_undo_push_old(C, "custom_object_reload_exec");
+
+  return OPERATOR_FINISHED;
+}
+
+static void LOGIC_OT_custom_object_reload(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Reload Object";
+  ot->description = "Reload custom object from the source script";
+  ot->idname = "LOGIC_OT_custom_object_reload";
+
+  /* api callbacks */
+  ot->exec = custom_object_reload_exec;
+  ot->poll = ED_operator_object_active_editable;
+
+  /* flags */
+  ot->flag = 0;
+}
+
 /* Component operators */
 static int component_register_exec(bContext *C, wmOperator *op)
 {
-  PythonComponent *pycomp;
+  PythonProxy *pp;
   Object *ob = CTX_data_active_object(C);
   char import[MAX_NAME];
 
@@ -823,13 +1045,16 @@ static int component_register_exec(bContext *C, wmOperator *op)
   }
 
   RNA_string_get(op->ptr, "component_name", import);
-  pycomp = BKE_python_component_new(import, op->reports, C);
+  pp = BKE_python_component_new(import, op->reports, C);
 
-  if (!pycomp) {
+  if (!pp) {
     return OPERATOR_CANCELLED;
   }
 
-  BLI_addtail(&ob->components, pycomp);
+  BLI_addtail(&ob->components, pp);
+
+  ED_undo_push_old(C, "component_register_exec");
+
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
   return OPERATOR_FINISHED;
@@ -837,7 +1062,7 @@ static int component_register_exec(bContext *C, wmOperator *op)
 
 static int component_create_exec(bContext *C, wmOperator *op)
 {
-  PythonComponent *pycomp;
+  PythonProxy *pp;
   Object *ob = CTX_data_active_object(C);
   char import[MAX_NAME];
 
@@ -846,37 +1071,34 @@ static int component_create_exec(bContext *C, wmOperator *op)
   }
 
   RNA_string_get(op->ptr, "component_name", import);
-  pycomp = BKE_python_component_create_file(import, op->reports, C);
+  pp = BKE_python_component_create_file(import, op->reports, C);
 
-  if (!pycomp) {
+  if (!pp) {
     return OPERATOR_CANCELLED;
   }
 
-  BLI_addtail(&ob->components, pycomp);
+  BLI_addtail(&ob->components, pp);
+
+  ED_undo_push_old(C, "component_create_exec");
+
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
   return OPERATOR_FINISHED;
-}
-
-static int component_new_invoke(bContext *C, wmOperator *op, const wmEvent *UNUSED(event))
-{
-  /* Better for user feedback. */
-  return WM_operator_props_dialog_popup(C, op, 15 * UI_UNIT_X);
 }
 
 static void LOGIC_OT_python_component_register(wmOperatorType *ot)
 {
   ot->name = "Add Python Component";
   ot->idname = "LOGIC_OT_python_component_register";
-  ot->description = "Add a python component to the selected object";
+  ot->description = "Add a Python component to the selected object";
 
   /* api callbacks */
   ot->exec = component_register_exec;
-  ot->invoke = component_new_invoke;
+  ot->invoke = python_class_new_invoke;
   ot->poll = ED_operator_object_active_editable;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+  ot->flag = 0;
 
   PropertyRNA *parm;
   parm = RNA_def_string(ot->srna,
@@ -892,15 +1114,15 @@ static void LOGIC_OT_python_component_create(wmOperatorType *ot)
 {
   ot->name = "Create Python Component";
   ot->idname = "LOGIC_OT_python_component_create";
-  ot->description = "Create a python component to the selected object";
+  ot->description = "Create a Python component to the selected object";
 
   /* api callbacks */
   ot->exec = component_create_exec;
-  ot->invoke = component_new_invoke;
+  ot->invoke = python_class_new_invoke;
   ot->poll = ED_operator_object_active_editable;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+  ot->flag = 0;
 
   PropertyRNA *parm;
   parm = RNA_def_string(ot->srna,
@@ -915,21 +1137,23 @@ static void LOGIC_OT_python_component_create(wmOperatorType *ot)
 static int component_remove_exec(bContext *C, wmOperator *op)
 {
   Object *ob = CTX_data_active_object(C);
-  PythonComponent *pc = NULL;
+  PythonProxy *pp = NULL;
   int index = RNA_int_get(op->ptr, "index");
 
   if (!ob) {
     return OPERATOR_CANCELLED;
   }
 
-  pc = BLI_findlink(&ob->components, index);
+  pp = BLI_findlink(&ob->components, index);
 
-  if (!pc) {
+  if (!pp) {
     return OPERATOR_CANCELLED;
   }
 
-  BLI_remlink(&ob->components, pc);
-  BKE_python_component_free(pc);
+  BLI_remlink(&ob->components, pp);
+  BKE_python_proxy_free(pp);
+
+  ED_undo_push_old(C, "component_remove_exec");
 
   WM_event_add_notifier(C, NC_LOGIC, NULL);
 
@@ -940,24 +1164,169 @@ static void LOGIC_OT_python_component_remove(wmOperatorType *ot)
 {
   /* identifiers */
   ot->name = "Remove Component";
-  ot->description = "Remove Component";
+  ot->description = "Remove this component from the object";
   ot->idname = "LOGIC_OT_python_component_remove";
 
   /* api callbacks */
   ot->exec = component_remove_exec;
-  ot->poll = ED_operator_object_active_editable;
+  ot->poll = remove_component_poll;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+  ot->flag = 0;
 
   /* properties */
   RNA_def_int(ot->srna, "index", 0, 0, INT_MAX, "Index", "Component index to remove", 0, INT_MAX);
 }
 
+static int component_move_up_exec(bContext *C, wmOperator *op)
+{
+  Object *ob = CTX_data_active_object(C);
+  PythonProxy *p1, *p2 = NULL;
+  int index = RNA_int_get(op->ptr, "index");
+
+  if (!ob) {
+    return OPERATOR_CANCELLED;
+  }
+
+  p1 = BLI_findlink(&ob->components, index);
+
+  if (!p1 || index < 1) {
+    return OPERATOR_CANCELLED;
+  }
+
+  p2 = BLI_findlink(&ob->components, index - 1);
+
+  if (!p2) {
+    return OPERATOR_CANCELLED;
+  }
+
+  BLI_listbase_swaplinks(&ob->components, p1, p2);
+
+  ED_undo_push_old(C, "component_move_up_exec");
+
+  WM_event_add_notifier(C, NC_LOGIC, NULL);
+
+  return OPERATOR_FINISHED;
+}
+
+static bool component_move_up_poll(bContext *C)
+{
+  PointerRNA ptr = CTX_data_pointer_get_type(C, "component", &RNA_PythonProxy);
+  Object *ob = (ptr.owner_id) ? (Object *)ptr.owner_id : ED_object_active_context(C);
+
+  if (!ob || ID_IS_LINKED(ob)) {
+    return false;
+  }
+
+  if (ID_IS_OVERRIDE_LIBRARY(ob)) {
+    CTX_wm_operator_poll_msg_set(
+        C, "Cannot move component coming from linked data in a library override");
+    return false;
+  }
+
+  int index = BLI_findindex(&ob->components, ptr.data);
+
+  return index > 0;
+}
+
+static void LOGIC_OT_python_component_move_up(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Move Component Up";
+  ot->description = "Move this component up in the list";
+  ot->idname = "LOGIC_OT_python_component_move_up";
+
+  /* api callbacks */
+  ot->exec = component_move_up_exec;
+  ot->poll = component_move_up_poll;
+
+  /* flags */
+  ot->flag = 0;
+
+  /* properties */
+  RNA_def_int(ot->srna, "index", 0, 0, INT_MAX, "Index", "Component index to move", 0, INT_MAX);
+}
+
+static bool component_move_down_poll(bContext *C)
+{
+  PointerRNA ptr = CTX_data_pointer_get_type(C, "component", &RNA_PythonProxy);
+  Object *ob = (ptr.owner_id) ? (Object *)ptr.owner_id : ED_object_active_context(C);
+
+  if (!ob || ID_IS_LINKED(ob)) {
+    return false;
+  }
+
+  if (ID_IS_OVERRIDE_LIBRARY(ob)) {
+    CTX_wm_operator_poll_msg_set(
+        C, "Cannot move component coming from linked data in a library override");
+    return false;
+  }
+
+  int count = BLI_listbase_count(&ob->components);
+  int index = BLI_findindex(&ob->components, ptr.data);
+
+  return index < count - 1;
+}
+
+static int component_move_down_exec(bContext *C, wmOperator *op)
+{
+  Object *ob = CTX_data_active_object(C);
+  PythonProxy *p1, *p2 = NULL;
+  int index = RNA_int_get(op->ptr, "index");
+
+  if (!ob) {
+    return OPERATOR_CANCELLED;
+  }
+
+  p1 = BLI_findlink(&ob->components, index);
+
+  if (!p1) {
+    return OPERATOR_CANCELLED;
+  }
+
+  int count = BLI_listbase_count(&ob->components);
+
+  if (index >= count - 1) {
+    return OPERATOR_CANCELLED;
+  }
+
+  p2 = BLI_findlink(&ob->components, index + 1);
+
+  if (!p2) {
+    return OPERATOR_CANCELLED;
+  }
+
+  BLI_listbase_swaplinks(&ob->components, p1, p2);
+
+  ED_undo_push_old(C, "component_move_down_exec");
+
+  WM_event_add_notifier(C, NC_LOGIC, NULL);
+
+  return OPERATOR_FINISHED;
+}
+
+static void LOGIC_OT_python_component_move_down(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Move Component Down";
+  ot->description = "Move this component down in the list";
+  ot->idname = "LOGIC_OT_python_component_move_down";
+
+  /* api callbacks */
+  ot->exec = component_move_down_exec;
+  ot->poll = component_move_down_poll;
+
+  /* flags */
+  ot->flag = 0;
+
+  /* properties */
+  RNA_def_int(ot->srna, "index", 0, 0, INT_MAX, "Index", "Component index to move", 0, INT_MAX);
+}
+
 static int component_reload_exec(bContext *C, wmOperator *op)
 {
   Object *ob = CTX_data_active_object(C);
-  PythonComponent *pc = NULL, *prev_pc = NULL;
+  PythonProxy *pp = NULL, *prev_pp = NULL;
   int index = RNA_int_get(op->ptr, "index");
 
   if (!ob) {
@@ -965,20 +1334,22 @@ static int component_reload_exec(bContext *C, wmOperator *op)
   }
 
   if (index > 0) {
-    prev_pc = BLI_findlink(&ob->components, index - 1);
-    pc = prev_pc->next;
+    prev_pp = BLI_findlink(&ob->components, index - 1);
+    pp = prev_pp->next;
   }
   else {
     /* pc is at the head */
-    pc = BLI_findlink(&ob->components, index);
+    pp = BLI_findlink(&ob->components, index);
   }
 
-  if (!pc) {
+  if (!pp) {
     return OPERATOR_CANCELLED;
   }
 
   /* Try to create a new component */
-  BKE_python_component_reload(pc, op->reports, C);
+  BKE_python_component_reload(pp, op->reports, C);
+
+  ED_undo_push_old(C, "component_reload_exec");
 
   return OPERATOR_FINISHED;
 }
@@ -987,7 +1358,7 @@ static void LOGIC_OT_python_component_reload(wmOperatorType *ot)
 {
   /* identifiers */
   ot->name = "Reload Component";
-  ot->description = "Reload Component";
+  ot->description = "Reload component from the source script";
   ot->idname = "LOGIC_OT_python_component_reload";
 
   /* api callbacks */
@@ -995,7 +1366,7 @@ static void LOGIC_OT_python_component_reload(wmOperatorType *ot)
   ot->poll = ED_operator_object_active_editable;
 
   /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+  ot->flag = 0;
 
   /* properties */
   RNA_def_int(ot->srna, "index", 0, 0, INT_MAX, "Index", "Component index to reload", 0, INT_MAX);
@@ -1016,10 +1387,16 @@ void ED_operatortypes_logic(void)
   WM_operatortype_append(LOGIC_OT_actuator_remove);
   WM_operatortype_append(LOGIC_OT_actuator_add);
   WM_operatortype_append(LOGIC_OT_actuator_move);
+  WM_operatortype_append(LOGIC_OT_custom_object_register);
+  WM_operatortype_append(LOGIC_OT_custom_object_reload);
+  WM_operatortype_append(LOGIC_OT_custom_object_create);
+  WM_operatortype_append(LOGIC_OT_custom_object_remove);
   WM_operatortype_append(LOGIC_OT_python_component_register);
   WM_operatortype_append(LOGIC_OT_python_component_reload);
   WM_operatortype_append(LOGIC_OT_python_component_create);
   WM_operatortype_append(LOGIC_OT_python_component_remove);
+  WM_operatortype_append(LOGIC_OT_python_component_move_up);
+  WM_operatortype_append(LOGIC_OT_python_component_move_down);
   WM_operatortype_append(LOGIC_OT_view_all);
   WM_operatortype_append(LOGIC_OT_region_flip);
 }

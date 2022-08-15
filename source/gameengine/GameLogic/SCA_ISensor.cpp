@@ -34,6 +34,7 @@
 
 #include "SCA_ISensor.h"
 
+#include "CM_List.h"
 #include "CM_Message.h"
 #include "SCA_PythonController.h"
 
@@ -216,12 +217,7 @@ void SCA_ISensor::LinkToController(SCA_IController *controller)
 
 void SCA_ISensor::UnlinkController(SCA_IController *controller)
 {
-  std::vector<SCA_IController *>::iterator it = std::find(
-      m_linkedcontrollers.begin(), m_linkedcontrollers.end(), controller);
-  if (it != m_linkedcontrollers.end()) {
-    m_linkedcontrollers.erase(it);
-  }
-  else {
+  if (!CM_ListRemoveIfFound(m_linkedcontrollers, controller)) {
     CM_LogicBrickWarning(this,
                          "missing link from sensor " << m_gameobj->GetName() << ":" << GetName()
                                                      << " to controller "
@@ -418,13 +414,15 @@ PyObject *SCA_ISensor::pyattr_get_triggered(EXP_PyObjectPlus *self_v,
   return PyBool_FromLong(retval);
 }
 
-PyObject *SCA_ISensor::pyattr_get_positive(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef)
+PyObject *SCA_ISensor::pyattr_get_positive(EXP_PyObjectPlus *self_v,
+                                           const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   SCA_ISensor *self = static_cast<SCA_ISensor *>(self_v);
   return PyBool_FromLong(self->GetState());
 }
 
-PyObject *SCA_ISensor::pyattr_get_status(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef)
+PyObject *SCA_ISensor::pyattr_get_status(EXP_PyObjectPlus *self_v,
+                                         const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   SCA_ISensor *self = static_cast<SCA_ISensor *>(self_v);
   int status = KX_SENSOR_INACTIVE;
@@ -442,13 +440,15 @@ PyObject *SCA_ISensor::pyattr_get_status(EXP_PyObjectPlus *self_v, const EXP_PYA
   return PyLong_FromLong(status);
 }
 
-PyObject *SCA_ISensor::pyattr_get_posTicks(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef)
+PyObject *SCA_ISensor::pyattr_get_posTicks(EXP_PyObjectPlus *self_v,
+                                           const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   SCA_ISensor *self = static_cast<SCA_ISensor *>(self_v);
   return PyLong_FromLong(self->GetPosTicks());
 }
 
-PyObject *SCA_ISensor::pyattr_get_negTicks(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef)
+PyObject *SCA_ISensor::pyattr_get_negTicks(EXP_PyObjectPlus *self_v,
+                                           const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   SCA_ISensor *self = static_cast<SCA_ISensor *>(self_v);
   return PyLong_FromLong(self->GetNegTicks());

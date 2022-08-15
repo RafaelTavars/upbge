@@ -1,20 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Copyright 2016, Blender Foundation.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2016 Blender Foundation. */
 
 /** \file
  * \ingroup draw
@@ -152,11 +137,9 @@ static void drw_text_cache_draw_ex(DRWTextStore *dt, ARegion *region)
 
       BLF_position(
           font_id, (float)(vos->sco[0] + vos->xoffs), (float)(vos->sco[1] + vos->yoffs), 2.0f);
-
-      ((vos->flag & DRW_TEXT_CACHE_ASCII) ? BLF_draw_ascii : BLF_draw)(
-          font_id,
-          (vos->flag & DRW_TEXT_CACHE_STRING_PTR) ? *((const char **)vos->str) : vos->str,
-          vos->str_len);
+      BLF_draw(font_id,
+               (vos->flag & DRW_TEXT_CACHE_STRING_PTR) ? *((const char **)vos->str) : vos->str,
+               vos->str_len);
     }
   }
 
@@ -225,7 +208,6 @@ void DRW_text_cache_draw(DRWTextStore *dt, ARegion *region, struct View3D *v3d)
   }
 }
 
-/* Copied from drawobject.c */
 void DRW_text_edit_mesh_measure_stats(ARegion *region,
                                       View3D *v3d,
                                       Object *ob,
@@ -235,7 +217,7 @@ void DRW_text_edit_mesh_measure_stats(ARegion *region,
    * etc.). See bug T36090.
    */
   struct DRWTextStore *dt = DRW_text_cache_ensure();
-  const short txt_flag = DRW_TEXT_CACHE_GLOBALSPACE | (unit->system ? 0 : DRW_TEXT_CACHE_ASCII);
+  const short txt_flag = DRW_TEXT_CACHE_GLOBALSPACE;
   Mesh *me = ob->data;
   BMEditMesh *em = me->edit_mesh;
   float v1[3], v2[3], v3[3], vmid[3], fvec[3];
@@ -266,7 +248,7 @@ void DRW_text_edit_mesh_measure_stats(ARegion *region,
   }
   const short edge_tex_sep = (short)((edge_tex_count - 1) * 5.0f * U.dpi_fac);
 
-  /* make the precision of the display value proportionate to the gridsize */
+  /* Make the precision of the display value proportionate to the grid-size. */
 
   if (grid <= 0.01f) {
     conv_float = "%.6g";

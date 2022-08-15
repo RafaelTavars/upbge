@@ -1,22 +1,4 @@
-# ##### BEGIN GPL LICENSE BLOCK #####
-#
-#  This program is free software; you can redistribute it and/or
-#  modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2
-#  of the License, or (at your option) any later version.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software Foundation,
-#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# ##### END GPL LICENSE BLOCK #####
-
-# <pep8 compliant>
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 # Dynamically create a keymap which is used by the popup toolbar
 # for accelerator key access.
@@ -26,7 +8,7 @@ __all__ = (
 )
 
 
-def generate(context, space_type, use_fallback_keys=True, use_reset=True):
+def generate(context, space_type, *, use_fallback_keys=True, use_reset=True):
     """
     Keymap for popup toolbar, currently generated each time.
     """
@@ -73,8 +55,6 @@ def generate(context, space_type, use_fallback_keys=True, use_reset=True):
     # Check the tool is available in the current context.
     if tap_reset_tool not in items_all_id:
         use_tap_reset = False
-
-    from bl_operators.wm import use_toolbar_release_hack
 
     # Pie-menu style release to activate.
     use_release_confirm = use_reset
@@ -207,6 +187,7 @@ def generate(context, space_type, use_fallback_keys=True, use_reset=True):
                             'VERTEX_GPENCIL': "gpencil_vertex_tool",
                             'SCULPT_GPENCIL': "gpencil_sculpt_tool",
                             'WEIGHT_GPENCIL': "gpencil_weight_tool",
+                            'SCULPT_CURVES': "curves_sculpt_tool",
                         }.get(mode, None)
                     else:
                         attr = None
@@ -408,7 +389,7 @@ def generate(context, space_type, use_fallback_keys=True, use_reset=True):
                 if key is not None:
                     kmi_args["type"] = key
                     kmi_tuple = dict_as_tuple(kmi_args)
-                    if not kmi_tuple in kmi_unique_args:
+                    if kmi_tuple not in kmi_unique_args:
                         kmi = keymap.keymap_items.new(idname="wm.tool_set_by_id", value='PRESS', **kmi_args)
                         kmi.properties.name = item.idname
                         kmi_unique_args.add(kmi_tuple)
@@ -437,7 +418,7 @@ def generate(context, space_type, use_fallback_keys=True, use_reset=True):
 
         kmi = keymap.keymap_items.new(
             "wm.tool_set_by_id",
-            value='PRESS' if use_toolbar_release_hack else 'DOUBLE_CLICK',
+            value='DOUBLE_CLICK',
             **kmi_toolbar_args_available,
         )
         kmi.properties.name = tap_reset_tool
@@ -450,16 +431,6 @@ def generate(context, space_type, use_fallback_keys=True, use_reset=True):
             any=True,
         )
         kmi.properties.skip_depressed = True
-
-        if use_toolbar_release_hack:
-            # ... or pass through to let the toolbar know we're released.
-            # Let the operator know we're released.
-            kmi = keymap.keymap_items.new(
-                "wm.tool_set_by_id",
-                type=kmi_toolbar_type,
-                value='RELEASE',
-                any=True,
-            )
 
     wm.keyconfigs.update()
     return keymap

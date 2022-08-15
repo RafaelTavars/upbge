@@ -1,11 +1,13 @@
 KX_LibLoadStatus(EXP_PyObjectPlus)
-==============================
+==================================
 
-base class --- :class:`EXP_PyObjectPlus`
+.. currentmodule:: bge.types
 
-.. class:: KX_LibLoadStatus(EXP_PyObjectPlus)
+base class --- :class:`~bge.types.EXP_PyObjectPlus`
 
-   An object providing information about a LibLoad() operation.
+.. class:: KX_LibLoadStatus
+
+   Libload is deprecated since 0.3.0. An object providing information about a LibLoad() operation.
 
    .. code-block:: python
 

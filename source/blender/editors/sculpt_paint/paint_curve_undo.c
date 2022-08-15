@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup edsculpt
@@ -126,7 +112,7 @@ static bool paintcurve_undosys_step_encode(struct bContext *C,
 static void paintcurve_undosys_step_decode(struct bContext *UNUSED(C),
                                            struct Main *UNUSED(bmain),
                                            UndoStep *us_p,
-                                           int UNUSED(dir),
+                                           const eUndoStepDir UNUSED(dir),
                                            bool UNUSED(is_final))
 {
   PaintCurveUndoStep *us = (PaintCurveUndoStep *)us_p;
@@ -147,7 +133,6 @@ static void paintcurve_undosys_foreach_ID_ref(UndoStep *us_p,
   foreach_ID_ref_fn(user_data, ((UndoRefID *)&us->pc_ref));
 }
 
-/* Export for ED_undo_sys. */
 void ED_paintcurve_undosys_type(UndoType *ut)
 {
   ut->name = "Paint Curve";
@@ -177,10 +162,10 @@ void ED_paintcurve_undo_push_begin(const char *name)
   BKE_undosys_step_push_init_with_type(ustack, C, name, BKE_UNDOSYS_TYPE_PAINTCURVE);
 }
 
-void ED_paintcurve_undo_push_end(void)
+void ED_paintcurve_undo_push_end(bContext *C)
 {
   UndoStack *ustack = ED_undo_stack_get();
-  BKE_undosys_step_push(ustack, NULL, NULL);
+  BKE_undosys_step_push(ustack, C, NULL);
   BKE_undosys_stack_limit_steps_and_memory_defaults(ustack);
   WM_file_tag_modified();
 }

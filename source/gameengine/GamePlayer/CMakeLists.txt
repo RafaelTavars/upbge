@@ -57,17 +57,19 @@ set(INC
   ../../blender/render
   ../../blender/sequencer
   ../../blender/windowmanager
+  ../../blender/windowmanager/gizmo
   ../../blender/windowmanager/message_bus
   ../../../intern/clog
   ../../../intern/ghost
   ../../../intern/guardedalloc
   ../../../intern/string
   ../../../intern/memutil
+  # RNA_prototypes.h
+  ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
 
 set(INC_SYS
   ../../../intern/moto/include
-  ${PYTHON_INCLUDE_DIRS}
   ${BOOST_INCLUDE_DIR}
   ${GLEW_INCLUDE_PATH}
 )
@@ -86,6 +88,12 @@ add_definitions(${GL_DEFINITIONS})
 
 if(WIN32)
   blender_include_dirs(../../../intern/utfconv)
+endif()
+
+if(WITH_PYTHON)
+  list(APPEND INC_SYS
+    ${PYTHON_INCLUDE_DIRS}
+  )
 endif()
 
 if(WITH_INPUT_NDOF)
@@ -128,3 +136,6 @@ if(WITH_GAMEENGINE_BPPLAYER)
 endif()
 
 blender_add_lib_nolist(ge_player "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
+
+# RNA_prototypes.h
+add_dependencies(ge_player bf_rna)

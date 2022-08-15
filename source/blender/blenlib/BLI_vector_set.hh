@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 #pragma once
 
@@ -100,6 +86,16 @@ template<
      */
     typename Allocator = GuardedAllocator>
 class VectorSet {
+ public:
+  using value_type = Key;
+  using pointer = Key *;
+  using const_pointer = const Key *;
+  using reference = Key &;
+  using const_reference = const Key &;
+  using iterator = Key *;
+  using const_iterator = const Key *;
+  using size_type = int64_t;
+
  private:
   /**
    * Slots are either empty, occupied or removed. The number of occupied slots can be computed by
@@ -121,10 +117,10 @@ class VectorSet {
   uint64_t slot_mask_;
 
   /** This is called to hash incoming keys. */
-  Hash hash_;
+  BLI_NO_UNIQUE_ADDRESS Hash hash_;
 
   /** This is called to check equality of two keys. */
-  IsEqual is_equal_;
+  BLI_NO_UNIQUE_ADDRESS IsEqual is_equal_;
 
   /** The max load factor is 1/2 = 50% by default. */
 #define LOAD_FACTOR 1, 2
@@ -253,7 +249,7 @@ class VectorSet {
   }
 
   /**
-   * Get an Span referencing the keys vector. The referenced memory buffer is only valid as
+   * Get a Span referencing the keys vector. The referenced memory buffer is only valid as
    * long as the vector set is not changed.
    *
    * The keys must not be changed, because this would change their hash value.
@@ -388,6 +384,55 @@ class VectorSet {
   }
 
   /**
+   * Return the index of the key in the vector. If the key is not in the set, add it and return its
+   * index.
+   */
+  int64_t index_of_or_add(const Key &key)
+  {
+    return this->index_of_or_add_as(key);
+  }
+  int64_t index_of_or_add(Key &&key)
+  {
+    return this->index_of_or_add_as(std::move(key));
+  }
+  template<typename ForwardKey> int64_t index_of_or_add_as(ForwardKey &&key)
+  {
+    return this->index_of_or_add__impl(std::forward<ForwardKey>(key), hash_(key));
+  }
+
+  /**
+   * Returns the key that is stored in the vector set that compares equal to the given key. This
+   * invokes undefined behavior when the key is not in the set.
+   */
+  const Key &lookup_key(const Key &key) const
+  {
+    return this->lookup_key_as(key);
+  }
+  template<typename ForwardKey> const Key &lookup_key_as(const ForwardKey &key) const
+  {
+    const Key *key_ptr = this->lookup_key_ptr_as(key);
+    BLI_assert(key_ptr != nullptr);
+    return *key_ptr;
+  }
+
+  /**
+   * Returns a pointer to the key that is stored in the vector set that compares equal to the given
+   * key. If the key is not in the set, null is returned.
+   */
+  const Key *lookup_key_ptr(const Key &key) const
+  {
+    return this->lookup_key_ptr_as(key);
+  }
+  template<typename ForwardKey> const Key *lookup_key_ptr_as(const ForwardKey &key) const
+  {
+    const int64_t index = this->index_of_try__impl(key, hash_(key));
+    if (index >= 0) {
+      return keys_ + index;
+    }
+    return nullptr;
+  }
+
+  /**
    * Get a pointer to the beginning of the array containing all keys.
    */
   const Key *data() const
@@ -403,6 +448,14 @@ class VectorSet {
   const Key *end() const
   {
     return keys_ + this->size();
+  }
+
+  /**
+   * Get an index range containing all valid indices for this array.
+   */
+  IndexRange index_range() const
+  {
+    return IndexRange(this->size());
   }
 
   /**
@@ -474,6 +527,21 @@ class VectorSet {
   }
 
   /**
+   * Remove all keys from the vector set.
+   */
+  void clear()
+  {
+    destruct_n(keys_, this->size());
+    for (Slot &slot : slots_) {
+      slot.~Slot();
+      new (&slot) Slot();
+    }
+
+    removed_slots_ = 0;
+    occupied_and_removed_slots_ = 0;
+  }
+
+  /**
    * Get the number of collisions that the probing strategy has to go through to find the key or
    * determine that it is not in the set.
    */
@@ -495,6 +563,10 @@ class VectorSet {
     if (this->size() == 0) {
       try {
         slots_.reinitialize(total_slots);
+        if (keys_ != nullptr) {
+          this->deallocate_keys_array(keys_);
+          keys_ = nullptr;
+        }
         keys_ = this->allocate_keys_array(usable_slots);
       }
       catch (...) {
@@ -637,6 +709,26 @@ class VectorSet {
       }
       if (slot.is_empty()) {
         return -1;
+      }
+    }
+    VECTOR_SET_SLOT_PROBING_END();
+  }
+
+  template<typename ForwardKey>
+  int64_t index_of_or_add__impl(ForwardKey &&key, const uint64_t hash)
+  {
+    this->ensure_can_add();
+
+    VECTOR_SET_SLOT_PROBING_BEGIN (hash, slot) {
+      if (slot.contains(key, is_equal_, hash, keys_)) {
+        return slot.index();
+      }
+      if (slot.is_empty()) {
+        const int64_t index = this->size();
+        new (keys_ + index) Key(std::forward<ForwardKey>(key));
+        slot.occupy(index, hash);
+        occupied_and_removed_slots_++;
+        return index;
       }
     }
     VECTOR_SET_SLOT_PROBING_END();

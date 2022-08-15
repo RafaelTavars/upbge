@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 #pragma once
 
@@ -195,11 +181,11 @@ template<typename Key, typename Value> class SimpleMapSlot {
    * Change the state of this slot from empty/removed to occupied. The key/value has to be
    * constructed by calling the constructor with the given key/value as parameter.
    */
-  template<typename ForwardKey, typename ForwardValue>
-  void occupy(ForwardKey &&key, ForwardValue &&value, uint64_t hash)
+  template<typename ForwardKey, typename... ForwardValue>
+  void occupy(ForwardKey &&key, uint64_t hash, ForwardValue &&...value)
   {
     BLI_assert(!this->is_occupied());
-    new (&value_buffer_) Value(std::forward<ForwardValue>(value));
+    new (&value_buffer_) Value(std::forward<ForwardValue>(value)...);
     this->occupy_no_value(std::forward<ForwardKey>(key), hash);
     state_ = Occupied;
   }
@@ -315,12 +301,12 @@ template<typename Key, typename Value, typename KeyInfo> class IntrusiveMapSlot 
     return is_equal(key, key_);
   }
 
-  template<typename ForwardKey, typename ForwardValue>
-  void occupy(ForwardKey &&key, ForwardValue &&value, uint64_t hash)
+  template<typename ForwardKey, typename... ForwardValue>
+  void occupy(ForwardKey &&key, uint64_t hash, ForwardValue &&...value)
   {
     BLI_assert(!this->is_occupied());
     BLI_assert(KeyInfo::is_not_empty_or_removed(key));
-    new (&value_buffer_) Value(std::forward<ForwardValue>(value));
+    new (&value_buffer_) Value(std::forward<ForwardValue>(value)...);
     this->occupy_no_value(std::forward<ForwardKey>(key), hash);
   }
 

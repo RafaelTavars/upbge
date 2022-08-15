@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2016 by Mike Erwin.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2016 by Mike Erwin. All rights reserved. */
 
 /** \file
  * \ingroup gpu
@@ -34,7 +18,6 @@
 #include "gpu_context_private.hh"
 #include "gpu_immediate_private.hh"
 #include "gpu_shader_private.hh"
-#include "gpu_vertex_buffer_private.hh"
 #include "gpu_vertex_format_private.h"
 
 using namespace blender::gpu;
@@ -89,7 +72,6 @@ void immUnbindProgram()
   imm->shader = nullptr;
 }
 
-/* XXX do not use it. Special hack to use OCIO with batch API. */
 GPUShader *immGetShader()
 {
   return imm->shader;
@@ -166,7 +148,7 @@ static void wide_line_workaround_start(GPUPrimType prim_type)
       return;
   }
 
-  imm->prev_shader = imm->shader;
+  imm->prev_builtin_shader = imm->builtin_shader_bound;
 
   immUnbindProgram();
 
@@ -194,15 +176,15 @@ static void wide_line_workaround_start(GPUPrimType prim_type)
 
 static void wide_line_workaround_end()
 {
-  if (imm->prev_shader) {
+  if (imm->prev_builtin_shader) {
     if (GPU_blend_get() == GPU_BLEND_NONE) {
       /* Restore default. */
       immUniform1i("lineSmooth", 1);
     }
     immUnbindProgram();
 
-    immBindShader(imm->prev_shader);
-    imm->prev_shader = nullptr;
+    immBindBuiltinProgram(imm->prev_builtin_shader);
+    imm->prev_builtin_shader = GPU_SHADER_TEXT;
   }
 }
 
@@ -313,7 +295,7 @@ void immAttr1f(uint attr_id, float x)
   setAttrValueBit(attr_id);
 
   float *data = (float *)(imm->vertex_data + attr->offset);
-  /*  printf("%s %td %p\n", __FUNCTION__, (GLubyte*)data - imm->buffer_data, data); */
+  // printf("%s %td %p\n", __FUNCTION__, (GLubyte*)data - imm->buffer_data, data);
 
   data[0] = x;
 }
@@ -329,7 +311,7 @@ void immAttr2f(uint attr_id, float x, float y)
   setAttrValueBit(attr_id);
 
   float *data = (float *)(imm->vertex_data + attr->offset);
-  /*  printf("%s %td %p\n", __FUNCTION__, (GLubyte*)data - imm->buffer_data, data); */
+  // printf("%s %td %p\n", __FUNCTION__, (GLubyte*)data - imm->buffer_data, data);
 
   data[0] = x;
   data[1] = y;
@@ -346,7 +328,7 @@ void immAttr3f(uint attr_id, float x, float y, float z)
   setAttrValueBit(attr_id);
 
   float *data = (float *)(imm->vertex_data + attr->offset);
-  /*  printf("%s %td %p\n", __FUNCTION__, (GLubyte*)data - imm->buffer_data, data); */
+  // printf("%s %td %p\n", __FUNCTION__, (GLubyte*)data - imm->buffer_data, data);
 
   data[0] = x;
   data[1] = y;
@@ -364,7 +346,7 @@ void immAttr4f(uint attr_id, float x, float y, float z, float w)
   setAttrValueBit(attr_id);
 
   float *data = (float *)(imm->vertex_data + attr->offset);
-  /*  printf("%s %td %p\n", __FUNCTION__, (GLubyte*)data - imm->buffer_data, data); */
+  // printf("%s %td %p\n", __FUNCTION__, (GLubyte*)data - imm->buffer_data, data);
 
   data[0] = x;
   data[1] = y;
@@ -445,7 +427,7 @@ void immAttr3ub(uint attr_id, uchar r, uchar g, uchar b)
   setAttrValueBit(attr_id);
 
   uchar *data = imm->vertex_data + attr->offset;
-  /*  printf("%s %td %p\n", __FUNCTION__, data - imm->buffer_data, data); */
+  // printf("%s %td %p\n", __FUNCTION__, data - imm->buffer_data, data);
 
   data[0] = r;
   data[1] = g;
@@ -463,7 +445,7 @@ void immAttr4ub(uint attr_id, uchar r, uchar g, uchar b, uchar a)
   setAttrValueBit(attr_id);
 
   uchar *data = imm->vertex_data + attr->offset;
-  /*  printf("%s %td %p\n", __FUNCTION__, data - imm->buffer_data, data); */
+  // printf("%s %td %p\n", __FUNCTION__, data - imm->buffer_data, data);
 
   data[0] = r;
   data[1] = g;
@@ -507,7 +489,7 @@ static void immEndVertex() /* and move on to the next vertex */
 #endif
 
         uchar *data = imm->vertex_data + a->offset;
-        memcpy(data, data - imm->vertex_format.stride, a->sz);
+        memcpy(data, data - imm->vertex_format.stride, a->size);
         /* TODO: consolidate copy of adjacent attributes */
       }
     }
@@ -603,10 +585,9 @@ void immUniform4fv(const char *name, const float data[4])
   GPU_shader_uniform_4fv(imm->shader, name, data);
 }
 
-/* Note array index is not supported for name (i.e: "array[0]"). */
 void immUniformArray4fv(const char *name, const float *data, int count)
 {
-  GPU_shader_uniform_4fv_array(imm->shader, name, count, (float(*)[4])data);
+  GPU_shader_uniform_4fv_array(imm->shader, name, count, (const float(*)[4])data);
 }
 
 void immUniformMatrix4fv(const char *name, const float data[4][4])
@@ -629,6 +610,12 @@ void immBindTextureSampler(const char *name, GPUTexture *tex, eGPUSamplerState s
 {
   int binding = GPU_shader_get_texture_binding(imm->shader, name);
   GPU_texture_bind_ex(tex, state, binding, true);
+}
+
+void immBindUniformBuf(const char *name, GPUUniformBuf *ubo)
+{
+  int binding = GPU_shader_get_uniform_block_binding(imm->shader, name);
+  GPU_uniformbuf_bind(ubo, binding);
 }
 
 /* --- convenience functions for setting "uniform vec4 color" --- */

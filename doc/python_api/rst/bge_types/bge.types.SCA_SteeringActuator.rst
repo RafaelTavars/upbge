@@ -1,19 +1,19 @@
 SCA_SteeringActuator(SCA_IActuator)
-==================================
+===================================
 
-.. module:: bge.types
+.. currentmodule:: bge.types
 
-base class --- :class:`SCA_IActuator`
+base class --- :class:`~bge.types.SCA_IActuator`
 
-.. class:: SCA_SteeringActuator(SCA_IActuator)
+.. class:: SCA_SteeringActuator
 
    Steering Actuator for navigation.
 
    .. attribute:: behavior
 
-      The steering behavior to use.
+      The steering behavior to use. One of :ref:`these constants <logic-steering-actuator>`.
 
-      :type: one of :ref:`these constants <logic-steering-actuator>`
+      :type: integer
 
    .. attribute:: velocity
 
@@ -43,13 +43,13 @@ base class --- :class:`SCA_IActuator`
 
       Target object
 
-      :type: :class:`KX_GameObject`
+      :type: :class:`~bge.types.KX_GameObject`
 
    .. attribute:: navmesh
 
       Navigation mesh
 
-      :type: :class:`KX_GameObject`
+      :type: :class:`~bge.types.KX_GameObject`
 
    .. attribute:: selfterminated
 

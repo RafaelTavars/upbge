@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2009 Blender Foundation, Joshua Leung
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2009 Blender Foundation, Joshua Leung. All rights reserved. */
 
 /** \file
  * \ingroup spnla
@@ -74,19 +58,18 @@
  * --> Most channels are now selection only.
  */
 
-static int mouse_nla_channels(
-    bContext *C, bAnimContext *ac, float x, int channel_index, short selectmode)
+static int mouse_nla_channels(bContext *C, bAnimContext *ac, int channel_index, short selectmode)
 {
   ListBase anim_data = {NULL, NULL};
   bAnimListElem *ale;
   int filter;
 
-  View2D *v2d = &ac->region->v2d;
   int notifierFlags = 0;
 
   /* get the channel that was clicked on */
   /* filter channels */
-  filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_LIST_CHANNELS);
+  filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_LIST_CHANNELS |
+            ANIMFILTER_FCURVESONLY);
   ANIM_animdata_filter(ac, &anim_data, filter, ac->data, ac->datatype);
 
   /* get channel from index */
@@ -161,7 +144,7 @@ static int mouse_nla_channels(
         }
 
         /* change active object - regardless of whether it is now selected [T37883] */
-        ED_object_base_activate(C, base); /* adds notifier */
+        ED_object_base_activate_with_mode_exit_if_needed(C, base); /* adds notifier */
 
         if ((adt) && (adt->flag & ADT_UI_SELECTED)) {
           adt->flag |= ADT_UI_ACTIVE;
@@ -219,47 +202,8 @@ static int mouse_nla_channels(
     }
     case ANIMTYPE_NLATRACK: {
       NlaTrack *nlt = (NlaTrack *)ale->data;
-      AnimData *adt = ale->adt;
-      short offset;
 
-      /* offset for start of channel (on LHS of channel-list) */
-      if (ale->id) {
-        /* special exception for materials and particles */
-        if (ELEM(GS(ale->id->name), ID_MA, ID_PA)) {
-          offset = 21 + NLACHANNEL_BUTTON_WIDTH;
-        }
-        else {
-          offset = 14;
-        }
-      }
-      else {
-        offset = 0;
-      }
-
-      if (x >= (v2d->cur.xmax - NLACHANNEL_BUTTON_WIDTH)) {
-        /* toggle protection (only if there's a toggle there) */
-        nlt->flag ^= NLATRACK_PROTECTED;
-
-        /* notifier flags - channel was edited */
-        notifierFlags |= (ND_ANIMCHAN | NA_EDITED);
-      }
-      else if (x >= (v2d->cur.xmax - 2 * NLACHANNEL_BUTTON_WIDTH)) {
-        /* toggle mute */
-        nlt->flag ^= NLATRACK_MUTED;
-
-        /* notifier flags - channel was edited */
-        notifierFlags |= (ND_ANIMCHAN | NA_EDITED);
-        ale->update |= ANIM_UPDATE_DEPS;
-      }
-      else if (x <= ((NLACHANNEL_BUTTON_WIDTH * 2) + offset)) {
-        /* toggle 'solo' */
-        BKE_nlatrack_solo_toggle(adt, nlt);
-
-        /* notifier flags - channel was edited */
-        notifierFlags |= (ND_ANIMCHAN | NA_EDITED);
-        ale->update |= ANIM_UPDATE_DEPS;
-      }
-      else if (nlaedit_is_tweakmode_on(ac) == 0) {
+      if (nlaedit_is_tweakmode_on(ac) == 0) {
         /* set selection */
         if (selectmode == SELECT_INVERT) {
           /* inverse selection status of this F-Curve only */
@@ -285,61 +229,40 @@ static int mouse_nla_channels(
     case ANIMTYPE_NLAACTION: {
       AnimData *adt = BKE_animdata_from_id(ale->id);
 
-      /* button region... */
-      if (x >= (v2d->cur.xmax - NLACHANNEL_BUTTON_WIDTH)) {
-        if (nlaedit_is_tweakmode_on(ac) == 0) {
-          /* 'push-down' action - only usable when not in TweakMode */
-          /* TODO: make this use the operator instead of calling the function directly
-           * however, calling the operator requires that we supply the args,
-           * and that works with proper buttons only */
-          BKE_nla_action_pushdown(adt, ID_IS_OVERRIDE_LIBRARY(ale->id));
-        }
-        else {
-          /* when in tweakmode, this button becomes the toggle for mapped editing */
-          adt->flag ^= ADT_NLA_EDIT_NOMAP;
-        }
+      /* NOTE: rest of NLA-Action name doubles for operating on the AnimData block
+       * - this is useful when there's no clear divider, and makes more sense in
+       *   the case of users trying to use this to change actions
+       * - in tweak-mode, clicking here gets us out of tweak-mode, as changing selection
+       *   while in tweak-mode is really evil!
+       * - we disable "solo" flags too, to make it easier to work with stashed actions
+       *   with less trouble
+       */
+      if (nlaedit_is_tweakmode_on(ac)) {
+        /* Exit tweak-mode immediately. */
+        nlaedit_disable_tweakmode(ac, true);
 
         /* changes to NLA-Action occurred */
         notifierFlags |= ND_NLA_ACTCHANGE;
         ale->update |= ANIM_UPDATE_DEPS;
       }
-      /* OR rest of name... */
       else {
-        /* NOTE: rest of NLA-Action name doubles for operating on the AnimData block
-         * - this is useful when there's no clear divider, and makes more sense in
-         *   the case of users trying to use this to change actions
-         * - in tweakmode, clicking here gets us out of tweakmode, as changing selection
-         *   while in tweakmode is really evil!
-         * - we disable "solo" flags too, to make it easier to work with stashed actions
-         *   with less trouble
-         */
-        if (nlaedit_is_tweakmode_on(ac)) {
-          /* exit tweakmode immediately */
-          nlaedit_disable_tweakmode(ac, true);
-
-          /* changes to NLA-Action occurred */
-          notifierFlags |= ND_NLA_ACTCHANGE;
-          ale->update |= ANIM_UPDATE_DEPS;
+        /* select/deselect */
+        if (selectmode == SELECT_INVERT) {
+          /* inverse selection status of this AnimData block only */
+          adt->flag ^= ADT_UI_SELECTED;
         }
         else {
-          /* select/deselect */
-          if (selectmode == SELECT_INVERT) {
-            /* inverse selection status of this AnimData block only */
-            adt->flag ^= ADT_UI_SELECTED;
-          }
-          else {
-            /* select AnimData block by itself */
-            ANIM_anim_channels_select_set(ac, ACHANNEL_SETFLAG_CLEAR);
-            adt->flag |= ADT_UI_SELECTED;
-          }
-
-          /* set active? */
-          if (adt->flag & ADT_UI_SELECTED) {
-            adt->flag |= ADT_UI_ACTIVE;
-          }
-
-          notifierFlags |= (ND_ANIMCHAN | NA_SELECTED);
+          /* select AnimData block by itself */
+          ANIM_anim_channels_select_set(ac, ACHANNEL_SETFLAG_CLEAR);
+          adt->flag |= ADT_UI_SELECTED;
         }
+
+        /* set active? */
+        if (adt->flag & ADT_UI_SELECTED) {
+          adt->flag |= ADT_UI_ACTIVE;
+        }
+
+        notifierFlags |= (ND_ANIMCHAN | NA_SELECTED);
       }
       break;
     }
@@ -402,7 +325,7 @@ static int nlachannels_mouseclick_invoke(bContext *C, wmOperator *op, const wmEv
                                   &channel_index);
 
   /* handle mouse-click in the relevant channel then */
-  notifierFlags = mouse_nla_channels(C, &ac, x, channel_index, selectmode);
+  notifierFlags = mouse_nla_channels(C, &ac, channel_index, selectmode);
 
   /* set notifier that things have changed */
   WM_event_add_notifier(C, NC_ANIMATION | notifierFlags, NULL);
@@ -472,7 +395,8 @@ static int nlachannels_pushdown_exec(bContext *C, wmOperator *op)
     int filter;
 
     /* filter channels */
-    filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_LIST_CHANNELS);
+    filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_LIST_CHANNELS |
+              ANIMFILTER_FCURVESONLY);
     ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
 
     /* get channel from index */
@@ -515,7 +439,7 @@ static int nlachannels_pushdown_exec(bContext *C, wmOperator *op)
     return OPERATOR_CANCELLED;
   }
 
-  /* 'push-down' action - only usable when not in TweakMode */
+  /* 'push-down' action - only usable when not in Tweak-mode. */
   BKE_nla_action_pushdown(adt, ID_IS_OVERRIDE_LIBRARY(id));
 
   struct Main *bmain = CTX_data_main(C);
@@ -562,7 +486,8 @@ void NLA_OT_action_pushdown(wmOperatorType *ot)
 static bool nla_action_unlink_poll(bContext *C)
 {
   if (ED_operator_nla_active(C)) {
-    return nla_panel_context(C, NULL, NULL, NULL);
+    PointerRNA adt_ptr;
+    return (nla_panel_context(C, &adt_ptr, NULL, NULL) && (adt_ptr.data != NULL));
   }
 
   /* something failed... */
@@ -594,11 +519,11 @@ static int nla_action_unlink_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int nla_action_unlink_invoke(bContext *C, wmOperator *op, const wmEvent *evt)
+static int nla_action_unlink_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   /* NOTE: this is hardcoded to match the behavior for the unlink button
    * (in interface_templates.c) */
-  RNA_boolean_set(op->ptr, "force_delete", evt->shift != 0);
+  RNA_boolean_set(op->ptr, "force_delete", event->modifier & KM_SHIFT);
   return nla_action_unlink_exec(C, op);
 }
 
@@ -628,7 +553,6 @@ void NLA_OT_action_unlink(wmOperatorType *ot)
 /* ******************** Add Tracks Operator ***************************** */
 /* Add NLA Tracks to the same AnimData block as a selected track, or above the selected tracks */
 
-/* helper - add NLA Tracks alongside existing ones */
 bool nlaedit_add_tracks_existing(bAnimContext *ac, bool above_sel)
 {
   ListBase anim_data = {NULL, NULL};
@@ -639,7 +563,7 @@ bool nlaedit_add_tracks_existing(bAnimContext *ac, bool above_sel)
 
   /* get a list of the (selected) NLA Tracks being shown in the NLA */
   filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_SEL |
-            ANIMFILTER_NODUPLIS);
+            ANIMFILTER_NODUPLIS | ANIMFILTER_FCURVESONLY);
   ANIM_animdata_filter(ac, &anim_data, filter, ac->data, ac->datatype);
 
   /* add tracks... */
@@ -677,7 +601,6 @@ bool nlaedit_add_tracks_existing(bAnimContext *ac, bool above_sel)
   return added;
 }
 
-/* helper - add NLA Tracks to empty (and selected) AnimData blocks */
 bool nlaedit_add_tracks_empty(bAnimContext *ac)
 {
   ListBase anim_data = {NULL, NULL};
@@ -687,7 +610,7 @@ bool nlaedit_add_tracks_empty(bAnimContext *ac)
 
   /* get a list of the selected AnimData blocks in the NLA */
   filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_ANIMDATA |
-            ANIMFILTER_SEL | ANIMFILTER_NODUPLIS);
+            ANIMFILTER_SEL | ANIMFILTER_NODUPLIS | ANIMFILTER_FCURVESONLY);
   ANIM_animdata_filter(ac, &anim_data, filter, ac->data, ac->datatype);
 
   /* check if selected AnimData blocks are empty, and add tracks if so... */
@@ -735,7 +658,7 @@ static int nlaedit_add_tracks_exec(bContext *C, wmOperator *op)
     DEG_relations_tag_update(CTX_data_main(C));
 
     /* set notifier that things have changed */
-    WM_event_add_notifier(C, NC_ANIMATION | ND_NLA | NA_EDITED, NULL);
+    WM_event_add_notifier(C, NC_ANIMATION | ND_NLA | NA_ADDED, NULL);
 
     /* done */
     return OPERATOR_FINISHED;
@@ -789,7 +712,7 @@ static int nlaedit_delete_tracks_exec(bContext *C, wmOperator *UNUSED(op))
 
   /* get a list of the AnimData blocks being shown in the NLA */
   filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_SEL |
-            ANIMFILTER_NODUPLIS);
+            ANIMFILTER_NODUPLIS | ANIMFILTER_FCURVESONLY);
   ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
 
   /* delete tracks */
@@ -823,7 +746,7 @@ static int nlaedit_delete_tracks_exec(bContext *C, wmOperator *UNUSED(op))
   DEG_relations_tag_update(ac.bmain);
 
   /* set notifier that things have changed */
-  WM_event_add_notifier(C, NC_ANIMATION | ND_NLA | NA_EDITED, NULL);
+  WM_event_add_notifier(C, NC_ANIMATION | ND_NLA | NA_REMOVED, NULL);
 
   /* done */
   return OPERATOR_FINISHED;
@@ -874,7 +797,7 @@ static int nlaedit_objects_add_exec(bContext *C, wmOperator *UNUSED(op))
   /* operate on selected objects... */
   CTX_DATA_BEGIN (C, Object *, ob, selected_objects) {
     /* ensure that object has AnimData... that's all */
-    BKE_animdata_add_id(&ob->id);
+    BKE_animdata_ensure_id(&ob->id);
   }
   CTX_DATA_END;
 

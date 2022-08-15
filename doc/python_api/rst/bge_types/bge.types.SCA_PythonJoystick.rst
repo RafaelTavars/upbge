@@ -1,9 +1,11 @@
 SCA_PythonJoystick(EXP_PyObjectPlus)
-================================
+====================================
 
-base class --- :class:`EXP_PyObjectPlus`
+.. currentmodule:: bge.types
 
-.. class:: SCA_PythonJoystick(EXP_PyObjectPlus)
+base class --- :class:`~bge.types.EXP_PyObjectPlus`
+
+.. class:: SCA_PythonJoystick
 
    A Python interface to a joystick.
 
@@ -21,7 +23,7 @@ base class --- :class:`EXP_PyObjectPlus`
 
    .. attribute:: axisValues
 
-      The state of the joysticks axis as a list of values :data:`numAxis` long. (read-only).
+      The state of the joysticks axis as a list of values :attr:`numAxis` long. (read-only).
 
       :type: list of ints.
 
@@ -35,25 +37,11 @@ base class --- :class:`EXP_PyObjectPlus`
       * up:[0.0, -1.0, ...]
       * down:[0.0, 1.0, ...]
 
-   .. attribute:: hatValues (Deprecated. Use :data:`activeButtons` instead)
+   .. attribute:: hatValues
 
-      The state of the joysticks hats as a list of values :data:`numHats` long. (read-only).
+      .. deprecated:: 0.2.2
 
-      :type: list of ints
-
-      Each specifying the direction of the hat from 1 to 12, 0 when inactive.
-
-      Hat directions are as follows...
-
-      * 0:None
-      * 1:Up
-      * 2:Right
-      * 4:Down
-      * 8:Left
-      * 3:Up - Right
-      * 6:Down - Right
-      * 12:Down - Left
-      * 9:Up - Left
+         Use :attr:`activeButtons` instead.
 
    .. attribute:: numAxis
 
@@ -67,8 +55,50 @@ base class --- :class:`EXP_PyObjectPlus`
 
       :type: integer
 
-   .. attribute:: numHats (Deprecated. Use :data:`numButtons` instead)
+   .. attribute:: numHats
 
-      The number of hats for the joystick at this index. (read-only).
+      .. deprecated:: 0.2.2
 
-      :type: integer
+         Use :attr:`numButtons` instead.
+
+   .. method:: startVibration()
+
+      Starts the vibration.
+
+      :return: None
+
+   .. method:: stopVibration()
+
+      Stops the vibration.
+
+      :return: None
+
+   .. attribute:: strengthLeft
+
+      Strength of the Low frequency joystick's motor (placed at left position usually).
+
+      :type: float (0.0 to 1.0)
+
+   .. attribute:: strengthRight
+
+      Strength of the High frequency joystick's motor (placed at right position usually).
+
+      :type: float (0.0 to 1.0)
+
+   .. attribute:: duration
+
+      Duration of the vibration in milliseconds.
+
+      :type: integer (0 to infinite)
+
+   .. attribute:: isVibrating
+
+      Check status of joystick vibration
+
+      :type: bool (true vibrating and false stopped)
+
+   .. attribute:: hasVibration
+
+      Check if the joystick supports vibration
+
+      :type: bool (true supported and false not supported)

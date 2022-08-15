@@ -71,6 +71,11 @@ KX_Scene *KX_GetActiveScene()
   return g_scene;
 }
 
+PHY_IPhysicsEnvironment *KX_GetPhysicsEnvironment()
+{
+  return g_scene->GetPhysicsEnvironment();
+}
+
 const std::string &KX_GetMainPath()
 {
   return g_mainPath;
@@ -94,6 +99,5 @@ void KX_RasterizerDrawDebugCircle(const MT_Vector3 &center,
                                   const MT_Vector3 &normal,
                                   int nsector)
 {
-  g_engine->GetRasterizer()->GetDebugDraw().DrawCircle(
-      center, radius, color, normal, nsector);
+  g_engine->GetRasterizer()->GetDebugDraw().DrawCircle(center, radius, color, normal, nsector);
 }

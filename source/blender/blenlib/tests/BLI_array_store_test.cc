@@ -1,4 +1,4 @@
-/* Apache License, Version 2.0 */
+/* SPDX-License-Identifier: Apache-2.0 */
 
 #include "testing/testing.h"
 
@@ -187,17 +187,6 @@ static void testbuffer_list_state_from_data__stride_expand(ListBase *lb,
   ((void)0)
 
 /* test in both directions */
-#define TESTBUFFER_STRINGS_EX(bs, ...) \
-  { \
-    ListBase lb; \
-    TESTBUFFER_STRINGS_CREATE(&lb, __VA_ARGS__); \
-\
-    testbuffer_run_tests(bs, &lb); \
-\
-    testbuffer_list_free(&lb); \
-  } \
-  ((void)0)
-
 #define TESTBUFFER_STRINGS(stride, chunk_count, ...) \
   { \
     ListBase lb; \
@@ -655,7 +644,7 @@ static void testbuffer_list_state_random_data(ListBase *lb,
           break;
         }
         default:
-          BLI_assert(0);
+          BLI_assert_unreachable();
       }
     }
   }

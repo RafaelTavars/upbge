@@ -30,18 +30,18 @@
 
 #include "LA_Launcher.h"
 
-#include "BKE_layer.h"
 #include "BKE_main.h"
 #include "BKE_sound.h"
 #include "DNA_scene_types.h"
 #include "wm_event_types.h"
 
-#include "BL_BlenderConverter.h"
-#include "BL_BlenderDataConversion.h"
+#include "BL_Converter.h"
+#include "BL_DataConversion.h"
 #include "CM_Message.h"
 #include "DEV_EventConsumer.h"
 #include "DEV_InputDevice.h"
 #include "DEV_Joystick.h"
+#include "GHOST_C-api.h"
 #include "GHOST_ISystem.h"
 #include "GPG_Canvas.h"
 #include "KX_Globals.h"
@@ -144,18 +144,18 @@ void LA_Launcher::InitEngine()
 
   // Setup python console keys used as shortcut.
   for (unsigned short i = 0; i < 4; ++i) {
-	  if (gm.pythonkeys[i] != EVENT_NONE) {
+    if (gm.pythonkeys[i] != EVENT_NONE) {
       m_pythonConsole.keys.push_back(BL_ConvertKeyCode(gm.pythonkeys[i]));
-	  }
+    }
   }
   m_pythonConsole.use = (gm.flag & GAME_PYTHON_CONSOLE);
 
-  const KX_KetsjiEngine::FlagType flags = (KX_KetsjiEngine::FlagType)(
-      (fixed_framerate ? KX_KetsjiEngine::FIXED_FRAMERATE : 0) |
-      (frameRate ? KX_KetsjiEngine::SHOW_FRAMERATE : 0) |
-      (restrictAnimFPS ? KX_KetsjiEngine::RESTRICT_ANIMATION : 0) |
-      (properties ? KX_KetsjiEngine::SHOW_DEBUG_PROPERTIES : 0) |
-      (profile ? KX_KetsjiEngine::SHOW_PROFILE : 0));
+  const KX_KetsjiEngine::FlagType flags =
+      (KX_KetsjiEngine::FlagType)((fixed_framerate ? KX_KetsjiEngine::FIXED_FRAMERATE : 0) |
+                                  (frameRate ? KX_KetsjiEngine::SHOW_FRAMERATE : 0) |
+                                  (restrictAnimFPS ? KX_KetsjiEngine::RESTRICT_ANIMATION : 0) |
+                                  (properties ? KX_KetsjiEngine::SHOW_DEBUG_PROPERTIES : 0) |
+                                  (profile ? KX_KetsjiEngine::SHOW_PROFILE : 0));
 
   m_rasterizer = new RAS_Rasterizer();
 
@@ -203,7 +203,8 @@ void LA_Launcher::InitEngine()
   m_networkMessageManager = new KX_NetworkMessageManager();
 
   // Create the ketsjiengine.
-  m_ketsjiEngine = new KX_KetsjiEngine(m_kxsystem, m_context, m_useViewportRender, m_shadingTypeRuntime);
+  m_ketsjiEngine = new KX_KetsjiEngine(
+      m_kxsystem, m_context, m_useViewportRender, m_shadingTypeRuntime);
   KX_SetActiveEngine(m_ketsjiEngine);
 
   // Set the devices.
@@ -236,12 +237,19 @@ void LA_Launcher::InitEngine()
   InitCamera();
 
 #ifdef WITH_PYTHON
-  KX_SetMainPath(std::string(m_maggie->name));
-  setupGamePython(m_ketsjiEngine, m_maggie, m_globalDict, &m_gameLogic, m_argc, m_argv, m_context, &m_audioDeviceIsInitialized);
+  KX_SetMainPath(std::string(m_maggie->filepath));
+  setupGamePython(m_ketsjiEngine,
+                  m_maggie,
+                  m_globalDict,
+                  &m_gameLogic,
+                  m_argc,
+                  m_argv,
+                  m_context,
+                  &m_audioDeviceIsInitialized);
 #endif  // WITH_PYTHON
 
   // Create a scene converter, create and convert the stratingscene.
-  m_converter = new BL_BlenderConverter(m_maggie, m_ketsjiEngine);
+  m_converter = new BL_Converter(m_maggie, m_ketsjiEngine);
   m_ketsjiEngine->SetConverter(m_converter);
 
   m_kxStartScene = new KX_Scene(
@@ -381,12 +389,20 @@ void LA_Launcher::HandlePythonConsole()
 #    endif
 
   // Pop the console window for windows.
-  m_system->toggleConsole(1);
+#    if defined(WIN32)
+  GHOST_setConsoleWindowState(GHOST_kConsoleWindowStateShow);
+#    else
+  m_system->setConsoleWindowState(GHOST_kConsoleWindowStateShow);
+#    endif
 
   createPythonConsole();
 
   // Hide the console window for windows.
-  m_system->toggleConsole(0);
+#    if defined(WIN32)
+  GHOST_setConsoleWindowState(GHOST_kConsoleWindowStateHide);
+#    else
+  m_system->setConsoleWindowState(GHOST_kConsoleWindowStateHide);
+#    endif
 
   /* As we show the console, the release events of the shortcut keys can be not handled by the
    * engine. We simulate they them.
@@ -493,7 +509,6 @@ void LA_Launcher::EngineMainLoop()
   if (GetPythonMainLoopCode(pythonCode, pythonFileName)) {
     // Set python environement variable.
     KX_SetActiveScene(m_kxStartScene);
-    PHY_SetActiveEnvironment(m_kxStartScene->GetPhysicsEnvironment());
     m_kxStartScene->SetIsPythonMainLoop(true);
 
     pynextframestate.state = this;

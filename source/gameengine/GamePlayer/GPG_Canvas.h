@@ -31,7 +31,6 @@
 
 #pragma once
 
-
 #ifdef WIN32
 #  pragma warning(disable : 4786)
 #endif  // WIN32
@@ -42,8 +41,6 @@
 #include "RAS_Rect.h"
 
 class RAS_Rasterizer;
-struct ARegion;
-struct Scene;
 
 class GPG_Canvas : public RAS_ICanvas {
  protected:
@@ -59,6 +56,9 @@ class GPG_Canvas : public RAS_ICanvas {
   RAS_Rect m_area;
 
   int m_viewport[4];
+
+  /// Native pixel size (for Retina hidpi displays)
+  int m_nativePixelSize;
 
  public:
   GPG_Canvas(RAS_Rasterizer *rasty, GHOST_IWindow *window);
@@ -96,4 +96,3 @@ class GPG_Canvas : public RAS_ICanvas {
 
   virtual bool IsBlenderPlayer();
 };
-

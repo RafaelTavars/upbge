@@ -1,9 +1,11 @@
 SCA_MouseFocusSensor(SCA_MouseSensor)
-====================================
+=====================================
 
-base class --- :class:`SCA_MouseSensor`
+.. currentmodule:: bge.types
 
-.. class:: SCA_MouseFocusSensor(SCA_MouseSensor)
+base class --- :class:`~bge.types.SCA_MouseSensor`
+
+.. class:: SCA_MouseFocusSensor
 
    The mouse focus sensor detects when the mouse is over the current game object.
 
@@ -24,7 +26,7 @@ base class --- :class:`SCA_MouseSensor`
 
    .. attribute:: rayDirection
 
-      The :data:`rayTarget` - :class:`raySource` normalized.
+      The :attr:`rayTarget` - :attr:`raySource` normalized.
 
       :type: list (normalized vector of 3 floats)
 
@@ -32,7 +34,7 @@ base class --- :class:`SCA_MouseSensor`
 
       the last object the mouse was over.
 
-      :type: :class:`KX_GameObject` or None
+      :type: :class:`~bge.types.KX_GameObject` or None
 
    .. attribute:: hitPosition
 
@@ -73,7 +75,7 @@ base class --- :class:`SCA_MouseSensor`
       The collision mask (16 layers mapped to a 16-bit integer) combined with each object's collision group, to hit only a subset of the
       objects in the scene. Only those objects for which ``collisionGroup & mask`` is true can be hit.
 
-      :type: bitfield
+      :type: integer (bit mask)
 
    .. attribute:: propName
 

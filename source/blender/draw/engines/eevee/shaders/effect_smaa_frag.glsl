@@ -4,8 +4,7 @@ uniform sampler2D areaTex;
 uniform sampler2D searchTex;
 uniform sampler2D blendTex;
 uniform sampler2D colorTex;
-uniform float mixFactor;
-uniform float taaSampleCountInv;
+uniform sampler2D depthTex;
 
 in vec2 uvs;
 in vec2 pixcoord;
@@ -20,8 +19,9 @@ out vec4 fragColor;
 void main()
 {
 #if SMAA_STAGE == 0
-  /* Detect edges in color and revealage buffer. */
-  fragColor = SMAALumaEdgeDetectionPS(uvs, offset, colorTex);
+  /* Detect edges in buffer. */
+  fragColor = SMAALumaEdgeDetectionPS(uvs, offset, colorTex, depthTex);
+
   /* Discard if there is no edge. */
   if (dot(fragColor, float2(1.0, 1.0)) == 0.0) {
     discard;
@@ -33,12 +33,6 @@ void main()
 
 #elif SMAA_STAGE == 2
   fragColor = vec4(0.0);
-  if (mixFactor > 0.0) {
-    fragColor += SMAANeighborhoodBlendingPS(uvs, offset[0], colorTex, blendTex) * mixFactor;
-  }
-  if (mixFactor < 1.0) {
-    fragColor += texture(colorTex, uvs) * (1.0 - mixFactor);
-  }
-  fragColor *= taaSampleCountInv;
+  fragColor += SMAANeighborhoodBlendingPS(uvs, offset[0], colorTex, blendTex);
 #endif
 }

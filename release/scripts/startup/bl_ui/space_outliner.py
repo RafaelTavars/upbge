@@ -1,28 +1,6 @@
-# ##### BEGIN GPL LICENSE BLOCK #####
-#
-#  This program is free software; you can redistribute it and/or
-#  modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2
-#  of the License, or (at your option) any later version.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software Foundation,
-#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# ##### END GPL LICENSE BLOCK #####
-
-# <pep8 compliant>
+# SPDX-License-Identifier: GPL-2.0-or-later
 import bpy
 from bpy.types import Header, Menu, Panel
-from bpy.app.translations import (
-    contexts as i18n_contexts,
-    pgettext_iface as iface_,
-)
 
 
 class OUTLINER_HT_header(Header):
@@ -42,6 +20,8 @@ class OUTLINER_HT_header(Header):
 
         if display_mode == 'DATA_API':
             OUTLINER_MT_editor_menus.draw_collapsible(context, layout)
+        if display_mode == 'LIBRARY_OVERRIDES':
+            layout.prop(space, "lib_override_view_mode", text="")
 
         layout.separator_spacer()
 
@@ -55,13 +35,17 @@ class OUTLINER_HT_header(Header):
             row.prop(space, "use_sync_select", icon='UV_SYNC_SELECT', text="")
 
         row = layout.row(align=True)
-        if display_mode in {'SCENES', 'VIEW_LAYER'}:
+        if display_mode in {'SCENES', 'VIEW_LAYER', 'LIBRARY_OVERRIDES'}:
             row.popover(
                 panel="OUTLINER_PT_filter",
                 text="",
                 icon='FILTER',
             )
-        elif display_mode in {'LIBRARIES', 'ORPHAN_DATA'}:
+        if display_mode == 'LIBRARY_OVERRIDES' and space.lib_override_view_mode == 'HIERARCHIES':
+            # Don't add ID type filter for library overrides hierarchies mode. Point of it is to see a hierarchy that is
+            # usually constructed out of different ID types.
+            pass
+        elif display_mode in {'LIBRARIES', 'LIBRARY_OVERRIDES', 'ORPHAN_DATA'}:
             row.prop(space, "use_filter_id_type", text="", icon='FILTER')
             sub = row.row(align=True)
             sub.active = space.use_filter_id_type
@@ -71,7 +55,7 @@ class OUTLINER_HT_header(Header):
             layout.operator("outliner.collection_new", text="", icon='COLLECTION_NEW').nested = True
 
         elif display_mode == 'ORPHAN_DATA':
-            layout.operator("outliner.orphans_purge", text="Purge")
+            layout.operator("outliner.orphans_purge", text="Purge").do_recursive = True
 
         elif space.display_mode == 'DATA_API':
             layout.separator()
@@ -109,6 +93,14 @@ class OUTLINER_MT_context_menu(Menu):
 
     @staticmethod
     def draw_common_operators(layout):
+        layout.menu_contents("OUTLINER_MT_asset")
+
+        layout.separator()
+
+        layout.menu("OUTLINER_MT_liboverride")
+
+        layout.separator()
+
         layout.menu("OUTLINER_MT_context_menu_view")
 
         layout.separator()
@@ -142,6 +134,17 @@ class OUTLINER_MT_context_menu_view(Menu):
         layout.operator("outliner.show_one_level", text="Hide One Level").open = False
 
 
+class OUTLINER_MT_view_pie(Menu):
+    bl_label = "View"
+
+    def draw(self, _context):
+        layout = self.layout
+
+        pie = layout.menu_pie()
+        pie.operator("outliner.show_hierarchy")
+        pie.operator("outliner.show_active", icon='ZOOM_SELECTED')
+
+
 class OUTLINER_MT_edit_datablocks(Menu):
     bl_label = "Edit"
 
@@ -166,12 +169,12 @@ class OUTLINER_MT_collection_view_layer(Menu):
         layout.operator("outliner.collection_exclude_set")
         layout.operator("outliner.collection_exclude_clear")
 
+        layout.operator("outliner.collection_holdout_set")
+        layout.operator("outliner.collection_holdout_clear")
+
         if context.engine == 'CYCLES':
             layout.operator("outliner.collection_indirect_only_set")
             layout.operator("outliner.collection_indirect_only_clear")
-
-            layout.operator("outliner.collection_holdout_set")
-            layout.operator("outliner.collection_holdout_clear")
 
 
 class OUTLINER_MT_collection_visibility(Menu):
@@ -239,10 +242,10 @@ class OUTLINER_MT_collection(Menu):
         if space.display_mode == 'VIEW_LAYER':
             layout.separator()
             layout.menu("OUTLINER_MT_collection_view_layer", icon='RENDERLAYERS')
-            layout.separator()
 
-            row = layout.row(align=True)
-            row.operator_enum("outliner.collection_color_tag_set", "color", icon_only=True)
+        layout.separator()
+        row = layout.row(align=True)
+        row.operator_enum("outliner.collection_color_tag_set", "color", icon_only=True)
 
         layout.separator()
 
@@ -257,7 +260,7 @@ class OUTLINER_MT_collection_new(Menu):
     bl_label = "Collection"
 
     @staticmethod
-    def draw_without_context_menu(context, layout):
+    def draw_without_context_menu(_context, layout):
         layout.operator("outliner.collection_new", text="New Collection").nested = True
         layout.operator("outliner.id_paste", text="Paste Data-Blocks", icon='PASTEDOWN')
 
@@ -278,7 +281,6 @@ class OUTLINER_MT_object(Menu):
         layout = self.layout
 
         space = context.space_data
-        obj = context.active_object
 
         layout.operator("outliner.id_copy", text="Copy", icon='COPYDOWN')
         layout.operator("outliner.id_paste", text="Paste", icon='PASTEDOWN')
@@ -311,6 +313,30 @@ class OUTLINER_MT_object(Menu):
         OUTLINER_MT_context_menu.draw_common_operators(layout)
 
 
+class OUTLINER_MT_asset(Menu):
+    bl_label = "Assets"
+
+    def draw(self, _context):
+        layout = self.layout
+
+        layout.operator("asset.mark")
+        layout.operator("asset.clear", text="Clear Asset").set_fake_user = False
+        layout.operator("asset.clear", text="Clear Asset (Set Fake User)").set_fake_user = True
+
+
+class OUTLINER_MT_liboverride(Menu):
+    bl_label = "Library Override"
+
+    def draw(self, _context):
+        layout = self.layout
+
+        layout.operator_menu_enum("outliner.liboverride_operation", "selection_set", text="Create").type = 'OVERRIDE_LIBRARY_CREATE_HIERARCHY'
+        layout.operator_menu_enum("outliner.liboverride_operation", "selection_set", text="Reset").type = 'OVERRIDE_LIBRARY_RESET'
+        layout.operator_menu_enum("outliner.liboverride_operation", "selection_set", text="Clear").type = 'OVERRIDE_LIBRARY_CLEAR_SINGLE'
+
+        layout.operator_menu_enum("outliner.liboverride_troubleshoot_operation", "type", text="Troubleshoot Hierarchy").selection_set = 'SELECTED'
+
+
 class OUTLINER_PT_filter(Panel):
     bl_space_type = 'OUTLINER'
     bl_region_type = 'HEADER'
@@ -323,7 +349,7 @@ class OUTLINER_PT_filter(Panel):
         display_mode = space.display_mode
 
         if display_mode == 'VIEW_LAYER':
-            layout.label(text="Restriction Toggles:")
+            layout.label(text="Restriction Toggles")
             row = layout.row(align=True)
             row.prop(space, "show_restrict_column_enable", text="")
             row.prop(space, "show_restrict_column_select", text="")
@@ -334,7 +360,7 @@ class OUTLINER_PT_filter(Panel):
             row.prop(space, "show_restrict_column_indirect_only", text="")
             layout.separator()
         elif display_mode == 'SCENES':
-            layout.label(text="Restriction Toggles:")
+            layout.label(text="Restriction Toggles")
             row = layout.row(align=True)
             row.prop(space, "show_restrict_column_select", text="")
             row.prop(space, "show_restrict_column_hide", text="")
@@ -346,26 +372,37 @@ class OUTLINER_PT_filter(Panel):
             col = layout.column(align=True)
             col.prop(space, "use_sort_alpha")
 
-        row = layout.row(align=True)
-        row.prop(space, "use_sync_select", text="Sync Selection")
+        if display_mode != 'LIBRARY_OVERRIDES':
+            row = layout.row(align=True)
+            row.prop(space, "use_sync_select", text="Sync Selection")
 
-        row = layout.row(align=True)
-        row.prop(space, "show_mode_column", text="Show Mode Column")
-        layout.separator()
+            row = layout.row(align=True)
+            row.prop(space, "show_mode_column", text="Show Mode Column")
+            layout.separator()
 
         col = layout.column(align=True)
-        col.label(text="Search:")
+        col.label(text="Search")
         col.prop(space, "use_filter_complete", text="Exact Match")
         col.prop(space, "use_filter_case_sensitive", text="Case Sensitive")
+
+        if display_mode == 'LIBRARY_OVERRIDES' and space.lib_override_view_mode == 'PROPERTIES' and bpy.data.libraries:
+            col.separator()
+            row = col.row()
+            row.label(icon='LIBRARY_DATA_OVERRIDE')
+            row.prop(space, "use_filter_lib_override_system", text="System Overrides")
 
         if display_mode != 'VIEW_LAYER':
             return
 
         layout.separator()
 
-        layout.label(text="Filter:")
+        layout.label(text="Filter")
 
         col = layout.column(align=True)
+
+        row = col.row()
+        row.label(icon='RENDERLAYERS')
+        row.prop(space, "use_filter_view_layers", text="All View Layers")
 
         row = col.row()
         row.label(icon='OUTLINER_COLLECTION')
@@ -410,15 +447,11 @@ class OUTLINER_PT_filter(Panel):
         row = sub.row()
         row.label(icon='EMPTY_DATA')
         row.prop(space, "use_filter_object_empty", text="Empties")
-        row = sub.row()
-        if bpy.data.libraries:
-            row.label(icon='LIBRARY_DATA_OVERRIDE')
-            row.prop(space, "use_filter_lib_override", text="Library Overrides")
 
         if (
                 bpy.data.curves or
                 bpy.data.metaballs or
-                (hasattr(bpy.data, "hairs") and bpy.data.hairs) or
+                (hasattr(bpy.data, "hair_curves") and bpy.data.hair_curves) or
                 (hasattr(bpy.data, "pointclouds") and bpy.data.pointclouds) or
                 bpy.data.volumes or
                 bpy.data.lightprobes or
@@ -440,8 +473,11 @@ classes = (
     OUTLINER_MT_collection_visibility,
     OUTLINER_MT_collection_view_layer,
     OUTLINER_MT_object,
+    OUTLINER_MT_asset,
+    OUTLINER_MT_liboverride,
     OUTLINER_MT_context_menu,
     OUTLINER_MT_context_menu_view,
+    OUTLINER_MT_view_pie,
     OUTLINER_PT_filter,
 )
 

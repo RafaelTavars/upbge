@@ -2,6 +2,8 @@
 Video Texture (bge.texture)
 ===========================
 
+.. module:: bge.texture
+
 ************
 Introduction
 ************
@@ -30,7 +32,7 @@ How it works
 ------------
 
 The principle is simple: first you identify a texture on an existing object using the
-:class:`~bge.texture.materialID` function, then you create a new texture with dynamic content
+:func:`~bge.texture.materialID` function, then you create a new texture with dynamic content
 and swap the two textures in the GPU.
 
 The game engine is not aware of the substitution and continues to display the object as always,
@@ -65,29 +67,26 @@ the Blender Game Engine's fancy texturing features: GLSL, multi-texture, custom 
 Examples
 ********
 
-.. include:: __/examples/bge.texture.py
+.. include:: ../examples/bge.texture.py
    :start-line: 1
-   :end-line: 5
+   :end-line: 8
 
-.. literalinclude:: __/examples/bge.texture.py
-   :lines: 7-
+.. literalinclude:: ../examples/bge.texture.py
+   :lines: 10-
 
-.. include:: __/examples/bge.texture.1.py
+.. include:: ../examples/bge.texture.1.py
    :start-line: 1
-   :end-line: 6
+   :end-line: 7
 
-.. literalinclude:: __/examples/bge.texture.1.py
-   :lines: 8-
+.. literalinclude:: ../examples/bge.texture.1.py
+   :lines: 9-
 
-.. include:: __/examples/bge.texture.2.py
+.. include:: ../examples/bge.texture.2.py
    :start-line: 1
-   :end-line: 6
+   :end-line: 30
 
-.. literalinclude:: __/examples/bge.texture.2.py
-   :lines: 8-
-
-
-.. module:: bge.texture
+.. literalinclude:: ../examples/bge.texture.2.py
+   :lines: 32-
 
 *************
 Video classes
@@ -175,14 +174,14 @@ Video classes
 
       :type: one of:
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
    .. attribute:: preseek
 
@@ -288,14 +287,14 @@ Image classes
 
       :type: one of...
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
    .. method:: refresh(buffer=None, format="RGBA")
 
@@ -338,14 +337,14 @@ Image classes
 
       :type: one of...
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
    .. attribute:: flip
 
@@ -407,7 +406,7 @@ Image classes
 
       :type: bool
 
-.. class:: ImageMirror(scene, observer, mirror, material=0, width, height, samples)
+.. class:: ImageMirror(scene, observer, mirror, material=0, width=None, height=None, samples=1)
 
    Image source from mirror.
 
@@ -420,14 +419,16 @@ Image classes
    :type mirror: :class:`~bge.types.KX_GameObject`
    :arg material: ID of the mirror's material to be used for mirroring. (optional)
    :type material: int
-   :arg width: Off-screen render buffer width (optional).
+   :arg width: Off-screen render buffer width (optional) (unused since 0.3.0).
    :type width: integer
-   :arg height: Off-screen render buffer height (optional).
+   :arg height: Off-screen render buffer height (optional) (unused since 0.3.0).
    :type height: integer
-   :arg samples: Off-screen render buffer samples (optional).
+   :arg samples: Number of times eevee render loop is called to have a fully antialiased pass or soft shadows support (optional).
    :type samples: integer
 
    .. attribute:: alpha
+
+      .. deprecated:: 0.3.0
 
       Use alpha in texture.
 
@@ -435,23 +436,33 @@ Image classes
 
    .. attribute:: horizon
 
+      .. deprecated:: 0.3.0
+
       Horizon color.
 
       :type: float list [r, g, b, a] in [0.0, 1.0]
 
    .. attribute:: zenith
 
+      .. deprecated:: 0.3.0
+
       Zenith color.
-      
+
       :type: float list [r, g, b, a] in [0.0, 1.0]
 
    .. attribute:: background
 
+      .. deprecated:: 0.3.0
+
       :type: float list [r, g, b, a] in [0.0, 1.0]
 
-      Deprecated use :py:meth:`bge.texture.ImageMirror.horizon` or :py:meth:`bge.texture.ImageMirror.zenith` instead.
+         .. deprecated:: 0.2.2
+
+         Use :py:attr:`bge.texture.ImageMirror.horizon` or :py:attr:`bge.texture.ImageMirror.zenith` instead.
 
    .. attribute:: updateShadow
+
+      .. deprecated:: 0.3.0
 
       Choose to force shadow buffer update if there is a gap beetween image rendered and shadows.
 
@@ -481,14 +492,14 @@ Image classes
 
       :type: one of...
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
    .. attribute:: flip
 
@@ -549,14 +560,14 @@ Image classes
 
       :type: one of...
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
    .. attribute:: flip
 
@@ -574,13 +585,13 @@ Image classes
       :return: Image source.
       :rtype: one of...
 
-         * :class:`VideoFFmpeg`
-         * :class:`ImageFFmpeg`
-         * :class:`ImageBuff`
-         * :class:`ImageMirror`
-         * :class:`ImageMix`
-         * :class:`ImageRender`
-         * :class:`ImageViewport`
+         * :class:`~bge.texture.VideoFFmpeg`
+         * :class:`~bge.texture.ImageFFmpeg`
+         * :class:`~bge.texture.ImageBuff`
+         * :class:`~bge.texture.ImageMirror`
+         * :class:`~bge.texture.ImageMix`
+         * :class:`~bge.texture.ImageRender`
+         * :class:`~bge.texture.ImageViewport`
 
    .. method:: getWeight(id)
 
@@ -631,13 +642,13 @@ Image classes
       :type id: str
       :arg image: Image source of type...
 
-         * :class:`VideoFFmpeg`
-         * :class:`ImageFFmpeg`
-         * :class:`ImageBuff`
-         * :class:`ImageMirror`
-         * :class:`ImageMix`
-         * :class:`ImageRender`
-         * :class:`ImageViewport`
+         * :class:`~bge.texture.VideoFFmpeg`
+         * :class:`~bge.texture.ImageFFmpeg`
+         * :class:`~bge.texture.ImageBuff`
+         * :class:`~bge.texture.ImageMirror`
+         * :class:`~bge.texture.ImageMix`
+         * :class:`~bge.texture.ImageRender`
+         * :class:`~bge.texture.ImageViewport`
 
    .. method:: setWeight(id, weight)
 
@@ -654,7 +665,7 @@ Image classes
 
       :type: bool
 
-.. class:: ImageRender(scene, camera, width, height, samples)
+.. class:: ImageRender(scene, camera, width=None, height=None, samples=1)
 
    Image source from a render of a non active camera.
    The render is done on a custom framebuffer object if fbo is specified,
@@ -664,14 +675,16 @@ Image classes
    :type scene: :class:`~bge.types.KX_Scene`
    :arg camera: Camera from which the image has to be taken.
    :type camera: :class:`~bge.types.KX_Camera`
-   :arg width: Off-screen render buffer width (optional).
+   :arg width: Off-screen render buffer width (optional) (unused since 0.3.0).
    :type width: integer
-   :arg height: Off-screen render buffer height (optional).
+   :arg height: Off-screen render buffer height (optional) (unused since 0.3.0).
    :type height: integer
-   :arg samples: Off-screen render buffer samples (optional).
+   :arg samples: Number of times eevee render loop is called to have a fully antialiased pass or soft shadows support (optional).
    :type samples: integer
 
    .. attribute:: alpha
+
+      .. deprecated:: 0.3.0
 
       Use alpha in texture.
 
@@ -679,25 +692,35 @@ Image classes
 
    .. attribute:: horizon
 
+      .. deprecated:: 0.3.0
+
       Horizon color.
-      
+
       :type: float list [r, g, b, a] in [0.0, 1.0]
 
    .. attribute:: zenith
 
+      .. deprecated:: 0.3.0
+
       Zenith color.
-      
+
       :type: float list [r, g, b, a] in [0.0, 1.0]
 
    .. attribute:: background
+
+      .. deprecated:: 0.3.0
 
       Background color.
 
       :type: float list [r, g, b, a] in [0.0, 1.0]
 
-      Deprecated use :py:meth:`bge.texture.ImageRender.horizon` or :py:meth:`bge.texture.ImageRender.zenith` instead.
+         .. deprecated:: 0.2.2
+
+         Use :py:attr:`bge.texture.ImageRender.horizon` or :py:attr:`bge.texture.ImageRender.zenith` instead.
 
    .. attribute:: updateShadow
+
+      .. deprecated:: 0.3.0
 
       Choose to force shadow buffer update if there is a gap beetween image rendered and shadows.
 
@@ -721,14 +744,14 @@ Image classes
 
       :type: one of...
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
    .. attribute:: flip
 
@@ -779,6 +802,65 @@ Image classes
 
       :type: bool
 
+   .. attribute:: pre_draw
+
+      A list of callables to be run before the render step.
+      These callbacks can be used to make background transparent
+      or disable post processing effects of evaluated scene.
+      Evaluated scene has to be used for performance reasons.
+
+      :type: list
+
+   .. code-block:: python
+
+      import bpy, bge
+      from bge import texture
+
+      cont = bge.logic.getCurrentController() # on main camera
+      scene = bge.logic.getCurrentScene()
+      rendercam = scene.objects["rendercam"]
+      renderplane = scene.objects["renderplane"]
+
+      bge.overlayTex = texture.Texture(renderplane, 0, 0)
+      bge.overlayTex.source = texture.ImageRender(scene, rendercam)
+      bge.overlayTex.source.capsize = [512, 512]
+
+      filter = scene.filterManager.addFilter(0, bge.logic.RAS_2DFILTER_CUSTOMFILTER, cont.actuators["overlay"].shaderText)
+
+      def preDraw():
+
+          depsgraph = bpy.context.evaluated_depsgraph_get()
+          scene_eval = bpy.context.scene.evaluated_get(depsgraph)
+
+          # Make background transparent before rendering overlay texture
+          scene_eval.render.film_transparent = True
+
+          # Disable not wanted effects before rendering overlay texture
+          scene_eval.eevee.bloom_intensity = 0
+
+      def renderOverlay():
+
+          # Append preDraw to bge.overlayTex.source pre-draw callbacks
+          bge.overlayTex.source.pre_draw.append(preDraw)
+
+          # Render Overlay Camera to renderplane texture
+          bge.overlayTex.refresh(True)
+
+      def sendUniformsTo2DFilters():
+
+          # Render overlay texture
+          renderOverlay()
+
+          # send uniforms to 2D filter to do the compositing between main render and overlay
+          if filter is not None:
+              filter.setTexture(0, bge.overlayTex.bindId, "overlayTex")
+
+   .. attribute:: post_draw
+
+      A list of callables to be run after the render step.
+
+      :type: list
+
    .. method:: render()
 
       Render the scene but do not extract the pixels yet.
@@ -794,7 +876,9 @@ Image classes
       :rtype: bool
 
    .. method:: refresh()
+
    .. method:: refresh(buffer, format="RGBA")
+      :noindex:
 
       Refresh video - render and optionally copy the image to an external buffer then invalidate its current content.
       The render may have been started earlier with the :func:`render` method,
@@ -818,9 +902,11 @@ Image classes
 .. class:: ImageViewport
 
    Image source from viewport rendered by the active camera.
-   To render from a non active camera see :class:`ImageRender`.
+   To render from a non active camera see :class:`~bge.texture.ImageRender`.
 
    .. attribute:: alpha
+
+      .. deprecated:: 0.3.0
 
       Use alpha in texture.
 
@@ -838,14 +924,14 @@ Image classes
 
       :type: one of...
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
    .. attribute:: flip
 
@@ -1113,7 +1199,7 @@ Texture classes
       If this argument is used, you should not create any source on this texture
       and there is no need to refresh it either: the other ``Texture`` object will
       provide the texture for both materials/textures.(optional)
-   :type textureObj: :class:`Texture`
+   :type textureObj: :class:`~bge.texture.Texture`
 
    .. attribute:: bindId
 
@@ -1148,14 +1234,14 @@ Texture classes
 
       :type: one of...
 
-         * :class:`VideoFFmpeg`
-         * :class:`VideoDeckLink`
-         * :class:`ImageFFmpeg`
-         * :class:`ImageBuff`
-         * :class:`ImageMirror`
-         * :class:`ImageMix`
-         * :class:`ImageRender`
-         * :class:`ImageViewport`
+         * :class:`~bge.texture.VideoFFmpeg`
+         * :class:`~bge.texture.VideoDeckLink`
+         * :class:`~bge.texture.ImageFFmpeg`
+         * :class:`~bge.texture.ImageBuff`
+         * :class:`~bge.texture.ImageMirror`
+         * :class:`~bge.texture.ImageMix`
+         * :class:`~bge.texture.ImageRender`
+         * :class:`~bge.texture.ImageViewport`
 
 .. class:: DeckLink(cardIdx=0, format="")
 
@@ -1181,7 +1267,7 @@ Texture classes
    runtime error if not).
    The format of the string is ``<displayMode>[/3D]``.
 
-   Refer to :class:`VideoDeckLink` to get the list of acceptable ``<displayMode>``.
+   Refer to :class:`~bge.texture.VideoDeckLink` to get the list of acceptable ``<displayMode>``.
    The optional ``/3D`` suffix is used to create a stereo 3D feed.
    In that case the 'right' attribute must also be set to specify the image source for the right eye.
 
@@ -1202,14 +1288,14 @@ Texture classes
       copy inside VideoTexture).
 
       :type: one of...
-         - :class:`VideoFFmpeg`
-         - :class:`VideoDeckLink`
-         - :class:`ImageFFmpeg`
-         - :class:`ImageBuff`
-         - :class:`ImageMirror`
-         - :class:`ImageMix`
-         - :class:`ImageRender`
-         - :class:`ImageViewport`
+         - :class:`~bge.texture.VideoFFmpeg`
+         - :class:`~bge.texture.VideoDeckLink`
+         - :class:`~bge.texture.ImageFFmpeg`
+         - :class:`~bge.texture.ImageBuff`
+         - :class:`~bge.texture.ImageMirror`
+         - :class:`~bge.texture.ImageMix`
+         - :class:`~bge.texture.ImageRender`
+         - :class:`~bge.texture.ImageViewport`
 
    .. attribute:: right
 
@@ -1219,14 +1305,14 @@ Texture classes
       render buffer that is just the size of the video frame.
 
       :type: one of...
-         - :class:`VideoFFmpeg`
-         - :class:`VideoDeckLink`
-         - :class:`ImageFFmpeg`
-         - :class:`ImageBuff`
-         - :class:`ImageMirror`
-         - :class:`ImageMix`
-         - :class:`ImageRender`
-         - :class:`ImageViewport`
+         - :class:`~bge.texture.VideoFFmpeg`
+         - :class:`~bge.texture.VideoDeckLink`
+         - :class:`~bge.texture.ImageFFmpeg`
+         - :class:`~bge.texture.ImageBuff`
+         - :class:`~bge.texture.ImageMirror`
+         - :class:`~bge.texture.ImageMix`
+         - :class:`~bge.texture.ImageRender`
+         - :class:`~bge.texture.ImageViewport`
 
    .. attribute:: keying
 
@@ -1319,14 +1405,14 @@ Filter classes
 
       :type: one of...
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
 .. class:: FilterColor
 
@@ -1347,14 +1433,14 @@ Filter classes
 
       :type: one of...
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
 .. class:: FilterGray
 
@@ -1367,14 +1453,14 @@ Filter classes
 
       :type: one of...
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
 .. class:: FilterLevel
 
@@ -1399,14 +1485,14 @@ Filter classes
 
       :type: one of...
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
 .. class:: FilterNormal
 
@@ -1432,19 +1518,19 @@ Filter classes
 
       :type: one of...
 
-         * :class:`FilterBGR24`
-         * :class:`FilterBlueScreen`
-         * :class:`FilterColor`
-         * :class:`FilterGray`
-         * :class:`FilterLevel`
-         * :class:`FilterNormal`
-         * :class:`FilterRGB24`
-         * :class:`FilterRGBA32`
+         * :class:`~bge.texture.FilterBGR24`
+         * :class:`~bge.texture.FilterBlueScreen`
+         * :class:`~bge.texture.FilterColor`
+         * :class:`~bge.texture.FilterGray`
+         * :class:`~bge.texture.FilterLevel`
+         * :class:`~bge.texture.FilterNormal`
+         * :class:`~bge.texture.FilterRGB24`
+         * :class:`~bge.texture.FilterRGBA32`
 
 .. class:: FilterRGB24
 
-   Returns a new input filter object to be used with :class:`ImageBuff` object when the image passed
-   to the :meth:`ImageBuff.load` function has the 3-bytes pixel format BGR.
+   Returns a new input filter object to be used with :class:`~bge.texture.ImageBuff` object when the image passed
+   to the :meth:`~bge.texture.ImageBuff.load` function has the 3-bytes pixel format BGR.
 
 .. class:: FilterRGBA32
 
@@ -1468,13 +1554,13 @@ Functions
 
    :arg image: Image source object of type:
 
-      * :class:`VideoFFmpeg`
-      * :class:`ImageFFmpeg`
-      * :class:`ImageBuff`
-      * :class:`ImageMirror`
-      * :class:`ImageMix`
-      * :class:`ImageRender`
-      * :class:`ImageViewport`
+      * :class:`~bge.texture.VideoFFmpeg`
+      * :class:`~bge.texture.ImageFFmpeg`
+      * :class:`~bge.texture.ImageBuff`
+      * :class:`~bge.texture.ImageMirror`
+      * :class:`~bge.texture.ImageMix`
+      * :class:`~bge.texture.ImageRender`
+      * :class:`~bge.texture.ImageViewport`
 
    :arg mode: Optional argument representing the pixel format.
 
@@ -1490,7 +1576,7 @@ Functions
 
       - A special mode "F" allows to return the image as an array of float.
         This mode should only be used to retrieve the depth buffer of the
-        class:`ImageViewport` and :class:`ImageRender` objects.
+        class:`ImageViewport` and :class:`~bge.texture.ImageRender` objects.
         The default mode is "RGBA".
 
    :type mode: str
@@ -1502,7 +1588,7 @@ Functions
 
 .. function:: materialID(object, name)
 
-   Returns a numeric value that can be used in :class:`Texture` to create a dynamic texture.
+   Returns a numeric value that can be used in :class:`~bge.texture.Texture` to create a dynamic texture.
 
    The value corresponds to an internal material number that uses the texture identified
    by name. name is a string representing a texture name with ``IM`` prefix if you want to
@@ -1544,7 +1630,7 @@ Constants
 *********
 
 FFmpeg Video and Image Status
-+++++++++++++++++++++++++++++
+=============================
 
 
 .. data:: SOURCE_ERROR
@@ -1559,7 +1645,7 @@ FFmpeg Video and Image Status
 
 
 Image Blending Modes
-++++++++++++++++++++
+====================
 
 See Wikipedia's `Blend Modes <https://en.wikipedia.org/wiki/Blend_modes>`_ for reference.
 

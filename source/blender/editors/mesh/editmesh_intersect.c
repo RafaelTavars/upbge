@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup edmesh
@@ -57,7 +43,7 @@
 #define USE_NET_ISLAND_CONNECT
 
 /**
- * Compare selected with its self.
+ * Compare selected with itself.
  */
 static int bm_face_isect_self(BMFace *f, void *UNUSED(user_data))
 {
@@ -113,11 +99,16 @@ static void edbm_intersect_select(BMEditMesh *em, struct Mesh *me, bool do_selec
           BM_edge_select_set(em->bm, e, true);
         }
       }
+      EDBM_selectmode_flush(em);
     }
   }
 
-  EDBM_mesh_normals_update(em);
-  EDBM_update_generic(me, true, true);
+  EDBM_update(me,
+              &(const struct EDBMUpdate_Params){
+                  .calc_looptri = true,
+                  .calc_normals = true,
+                  .is_destructive = true,
+              });
 }
 
 /* -------------------------------------------------------------------- */
@@ -212,6 +203,7 @@ static int edbm_intersect_exec(bContext *C, wmOperator *op)
                                         nshapes,
                                         use_self,
                                         use_separate_all,
+                                        false,
                                         true);
     }
     else {
@@ -254,27 +246,24 @@ static void edbm_intersect_ui(bContext *UNUSED(C), wmOperator *op)
 {
   uiLayout *layout = op->layout;
   uiLayout *row;
-  PointerRNA ptr;
 
-  RNA_pointer_create(NULL, op->type->srna, op->properties, &ptr);
-
-  bool use_exact = RNA_enum_get(&ptr, "solver") == ISECT_SOLVER_EXACT;
+  bool use_exact = RNA_enum_get(op->ptr, "solver") == ISECT_SOLVER_EXACT;
 
   uiLayoutSetPropSep(layout, true);
   uiLayoutSetPropDecorate(layout, false);
   row = uiLayoutRow(layout, false);
-  uiItemR(row, &ptr, "mode", UI_ITEM_R_EXPAND, NULL, ICON_NONE);
+  uiItemR(row, op->ptr, "mode", UI_ITEM_R_EXPAND, NULL, ICON_NONE);
   uiItemS(layout);
   row = uiLayoutRow(layout, false);
-  uiItemR(row, &ptr, "separate_mode", UI_ITEM_R_EXPAND, NULL, ICON_NONE);
+  uiItemR(row, op->ptr, "separate_mode", UI_ITEM_R_EXPAND, NULL, ICON_NONE);
   uiItemS(layout);
 
   row = uiLayoutRow(layout, false);
-  uiItemR(row, &ptr, "solver", UI_ITEM_R_EXPAND, NULL, ICON_NONE);
+  uiItemR(row, op->ptr, "solver", UI_ITEM_R_EXPAND, NULL, ICON_NONE);
   uiItemS(layout);
 
   if (!use_exact) {
-    uiItemR(layout, &ptr, "threshold", 0, NULL, ICON_NONE);
+    uiItemR(layout, op->ptr, "threshold", 0, NULL, ICON_NONE);
   }
 }
 
@@ -375,8 +364,16 @@ static int edbm_intersect_boolean_exec(bContext *C, wmOperator *op)
     }
 
     if (use_exact) {
-      has_isect = BM_mesh_boolean(
-          em->bm, em->looptris, em->tottri, test_fn, NULL, 2, use_self, true, boolean_operation);
+      has_isect = BM_mesh_boolean(em->bm,
+                                  em->looptris,
+                                  em->tottri,
+                                  test_fn,
+                                  NULL,
+                                  2,
+                                  use_self,
+                                  true,
+                                  false,
+                                  boolean_operation);
     }
     else {
       has_isect = BM_mesh_intersect(em->bm,
@@ -412,27 +409,24 @@ static void edbm_intersect_boolean_ui(bContext *UNUSED(C), wmOperator *op)
 {
   uiLayout *layout = op->layout;
   uiLayout *row;
-  PointerRNA ptr;
 
-  RNA_pointer_create(NULL, op->type->srna, op->properties, &ptr);
-
-  bool use_exact = RNA_enum_get(&ptr, "solver") == ISECT_SOLVER_EXACT;
+  bool use_exact = RNA_enum_get(op->ptr, "solver") == ISECT_SOLVER_EXACT;
 
   uiLayoutSetPropSep(layout, true);
   uiLayoutSetPropDecorate(layout, false);
 
   row = uiLayoutRow(layout, false);
-  uiItemR(row, &ptr, "operation", UI_ITEM_R_EXPAND, NULL, ICON_NONE);
+  uiItemR(row, op->ptr, "operation", UI_ITEM_R_EXPAND, NULL, ICON_NONE);
   uiItemS(layout);
 
   row = uiLayoutRow(layout, false);
-  uiItemR(row, &ptr, "solver", UI_ITEM_R_EXPAND, NULL, ICON_NONE);
+  uiItemR(row, op->ptr, "solver", UI_ITEM_R_EXPAND, NULL, ICON_NONE);
   uiItemS(layout);
 
-  uiItemR(layout, &ptr, "use_swap", 0, NULL, ICON_NONE);
-  uiItemR(layout, &ptr, "use_self", 0, NULL, ICON_NONE);
+  uiItemR(layout, op->ptr, "use_swap", 0, NULL, ICON_NONE);
+  uiItemR(layout, op->ptr, "use_self", 0, NULL, ICON_NONE);
   if (!use_exact) {
-    uiItemR(layout, &ptr, "threshold", 0, NULL, ICON_NONE);
+    uiItemR(layout, op->ptr, "threshold", 0, NULL, ICON_NONE);
   }
 }
 
@@ -473,7 +467,8 @@ void MESH_OT_intersect_boolean(struct wmOperatorType *ot)
                   false,
                   "Swap",
                   "Use with difference intersection to swap which side is kept");
-  RNA_def_boolean(ot->srna, "use_self", false, "Self", "Do self-union or self-intersection");
+  RNA_def_boolean(
+      ot->srna, "use_self", false, "Self Intersection", "Do self-union or self-intersection");
   RNA_def_float_distance(
       ot->srna, "threshold", 0.000001f, 0.0, 0.01, "Merge Threshold", "", 0.0, 0.001);
   RNA_def_enum(ot->srna,
@@ -960,8 +955,12 @@ static int edbm_face_split_by_edges_exec(bContext *C, wmOperator *UNUSED(op))
     }
 #endif
 
-    EDBM_mesh_normals_update(em);
-    EDBM_update_generic(obedit->data, true, true);
+    EDBM_update(obedit->data,
+                &(const struct EDBMUpdate_Params){
+                    .calc_looptri = true,
+                    .calc_normals = true,
+                    .is_destructive = true,
+                });
 
 #ifdef USE_NET_ISLAND_CONNECT
     /* we may have remaining isolated regions remaining,
@@ -1065,8 +1064,12 @@ static int edbm_face_split_by_edges_exec(bContext *C, wmOperator *UNUSED(op))
 
       BLI_ghash_free(face_edge_map, NULL, NULL);
 
-      EDBM_mesh_normals_update(em);
-      EDBM_update_generic(obedit->data, true, true);
+      EDBM_update(obedit->data,
+                  &(const struct EDBMUpdate_Params){
+                      .calc_looptri = true,
+                      .calc_normals = true,
+                      .is_destructive = true,
+                  });
     }
 
     BLI_stack_free(edges_loose);

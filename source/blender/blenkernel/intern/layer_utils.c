@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup bke
@@ -23,6 +9,7 @@
 #include "BLI_array.h"
 
 #include "BKE_collection.h"
+#include "BKE_customdata.h"
 #include "BKE_editmesh.h"
 #include "BKE_layer.h"
 
@@ -80,9 +67,11 @@ Object **BKE_view_layer_array_selected_objects_params(
   }
   FOREACH_SELECTED_OBJECT_END;
 
-  object_array = MEM_reallocN(object_array, sizeof(*object_array) * BLI_array_len(object_array));
-  /* We always need a valid allocation (prevent crash on free). */
-  if (object_array == NULL) {
+  if (object_array != NULL) {
+    BLI_array_trim(object_array);
+  }
+  else {
+    /* We always need a valid allocation (prevent crash on free). */
     object_array = MEM_mallocN(0, __func__);
   }
   *r_len = BLI_array_len(object_array);
@@ -134,9 +123,11 @@ Base **BKE_view_layer_array_from_bases_in_mode_params(ViewLayer *view_layer,
   }
   FOREACH_BASE_IN_MODE_END;
 
-  base_array = MEM_reallocN(base_array, sizeof(*base_array) * BLI_array_len(base_array));
   /* We always need a valid allocation (prevent crash on free). */
-  if (base_array == NULL) {
+  if (base_array != NULL) {
+    BLI_array_trim(base_array);
+  }
+  else {
     base_array = MEM_mallocN(0, __func__);
   }
   *r_len = BLI_array_len(base_array);
@@ -164,11 +155,11 @@ Object **BKE_view_layer_array_from_objects_in_mode_params(ViewLayer *view_layer,
 /** \name Filter Functions
  * \{ */
 
-bool BKE_view_layer_filter_edit_mesh_has_uvs(Object *ob, void *UNUSED(user_data))
+bool BKE_view_layer_filter_edit_mesh_has_uvs(const Object *ob, void *UNUSED(user_data))
 {
   if (ob->type == OB_MESH) {
-    Mesh *me = ob->data;
-    BMEditMesh *em = me->edit_mesh;
+    const Mesh *me = ob->data;
+    const BMEditMesh *em = me->edit_mesh;
     if (em != NULL) {
       if (CustomData_get_offset(&em->bm->ldata, CD_MLOOPUV) != -1) {
         return true;
@@ -178,11 +169,11 @@ bool BKE_view_layer_filter_edit_mesh_has_uvs(Object *ob, void *UNUSED(user_data)
   return false;
 }
 
-bool BKE_view_layer_filter_edit_mesh_has_edges(Object *ob, void *UNUSED(user_data))
+bool BKE_view_layer_filter_edit_mesh_has_edges(const Object *ob, void *UNUSED(user_data))
 {
   if (ob->type == OB_MESH) {
-    Mesh *me = ob->data;
-    BMEditMesh *em = me->edit_mesh;
+    const Mesh *me = ob->data;
+    const BMEditMesh *em = me->edit_mesh;
     if (em != NULL) {
       if (em->bm->totedge != 0) {
         return true;
@@ -192,13 +183,6 @@ bool BKE_view_layer_filter_edit_mesh_has_edges(Object *ob, void *UNUSED(user_dat
   return false;
 }
 
-/**
- * Use this in rare cases we need to detect a pair of objects (active, selected).
- * This returns the other non-active selected object.
- *
- * Returns NULL with it finds multiple other selected objects
- * as behavior in this case would be random from the user perspective.
- */
 Object *BKE_view_layer_non_active_selected_object(struct ViewLayer *view_layer,
                                                   const struct View3D *v3d)
 {
@@ -220,4 +204,5 @@ Object *BKE_view_layer_non_active_selected_object(struct ViewLayer *view_layer,
   FOREACH_SELECTED_OBJECT_END;
   return ob_result;
 }
+
 /** \} */

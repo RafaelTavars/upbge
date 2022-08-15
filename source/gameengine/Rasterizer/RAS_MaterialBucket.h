@@ -31,13 +31,11 @@
 
 #pragma once
 
-
 #include "MT_Transform.h"
 #include "RAS_DisplayArrayBucket.h"
 
 class RAS_IPolyMaterial;
 class RAS_MaterialShader;
-class RAS_Rasterizer;
 
 /* Contains a list of display arrays with the same material,
  * and a mesh slot for each mesh that uses display arrays in
@@ -69,4 +67,3 @@ class RAS_MaterialBucket {
   RAS_MaterialShader *m_shader;
   RAS_DisplayArrayBucketList m_displayArrayBucketList;
 };
-

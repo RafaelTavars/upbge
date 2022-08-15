@@ -26,11 +26,11 @@
 # since this includes bullet we get errors from the headers too
 remove_strict_flags()
 
-# UPBGE - to recover double precision uncomment this definition, intern/rigidbody/CMakeLists.txt one
+# UPBGE - to recover single precision comment this definition, intern/rigidbody/CMakeLists.txt one
 # and source/gameengine/Physics/Bullet/CMakeLists.txt one.
 # Double precision is slower than float one but it will increase the precision in
 # open worlds games bigger than 10Km.
-#add_definitions(-DBT_USE_DOUBLE_PRECISION)
+add_definitions(-DBT_USE_DOUBLE_PRECISION)
 
 set(INC
   .
@@ -44,8 +44,7 @@ set(INC
   ../../SceneGraph
   ../../../blender/blenkernel
   ../../../blender/blenlib
-  ../../../blender/draw/engines/eevee/
-  ../../../blender/gpu
+  ../../../blender/depsgraph
   ../../../blender/makesdna
   ../../../blender/makesrna
   ../../../../intern/guardedalloc
@@ -53,7 +52,6 @@ set(INC
 
 set(INC_SYS
   ../../../../intern/moto/include
-  ${PYTHON_INCLUDE_DIRS}
   ${BOOST_INCLUDE_DIR}
 )
 
@@ -72,6 +70,12 @@ set(SRC
 
 set(LIB
 )
+
+if(WITH_PYTHON)
+  list(APPEND INC_SYS
+    ${PYTHON_INCLUDE_DIRS}
+  )
+endif()
 
 if(WITH_BULLET)
   list(APPEND INC_SYS

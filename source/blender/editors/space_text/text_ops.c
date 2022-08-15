@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2001-2002 by NaN Holding BV.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2001-2002 NaN Holding BV. All rights reserved. */
 
 /** \file
  * \ingroup sptext
@@ -29,6 +13,7 @@
 #include "DNA_text_types.h"
 
 #include "BLI_blenlib.h"
+#include "BLI_math.h"
 #include "BLI_math_base.h"
 
 #include "BLT_translation.h"
@@ -85,11 +70,36 @@ static void test_line_start(char c, bool *r_last_state)
 }
 
 /**
+ * This function receives a character and returns its closing pair if it exists.
+ * \param character: Character to find the closing pair.
+ * \return The closing pair of the character if it exists.
+ */
+static char text_closing_character_pair_get(const char character)
+{
+
+  switch (character) {
+    case '(':
+      return ')';
+    case '[':
+      return ']';
+    case '{':
+      return '}';
+    case '"':
+      return '"';
+    case '\'':
+      return '\'';
+    default:
+      return 0;
+  }
+}
+
+/**
  * This function converts the indentation tabs from a buffer to spaces.
  * \param in_buf: A pointer to a cstring.
  * \param tab_size: The size, in spaces, of the tab character.
+ * \param r_out_buf_len: The #strlen of the returned buffer.
  */
-static char *buf_tabs_to_spaces(const char *in_buf, const int tab_size)
+static char *buf_tabs_to_spaces(const char *in_buf, const int tab_size, int *r_out_buf_len)
 {
   /* Get the number of tab characters in buffer. */
   bool line_start = true;
@@ -139,6 +149,7 @@ static char *buf_tabs_to_spaces(const char *in_buf, const int tab_size)
   }
 
   out_buf[out_offset] = '\0';
+  *r_out_buf_len = out_offset;
   return out_buf;
 }
 
@@ -156,7 +167,7 @@ BLI_INLINE int text_pixel_x_to_column(SpaceText *st, const int x)
 
 static bool text_new_poll(bContext *UNUSED(C))
 {
-  return 1;
+  return true;
 }
 
 static bool text_data_poll(bContext *C)
@@ -173,15 +184,15 @@ static bool text_edit_poll(bContext *C)
   Text *text = CTX_data_edit_text(C);
 
   if (!text) {
-    return 0;
+    return false;
   }
 
-  if (ID_IS_LINKED(text)) {
+  if (!BKE_id_is_editable(CTX_data_main(C), &text->id)) {
     // BKE_report(op->reports, RPT_ERROR, "Cannot edit external library data");
-    return 0;
+    return false;
   }
 
-  return 1;
+  return true;
 }
 
 bool text_space_edit_poll(bContext *C)
@@ -190,15 +201,15 @@ bool text_space_edit_poll(bContext *C)
   Text *text = CTX_data_edit_text(C);
 
   if (!st || !text) {
-    return 0;
+    return false;
   }
 
-  if (ID_IS_LINKED(text)) {
+  if (!BKE_id_is_editable(CTX_data_main(C), &text->id)) {
     // BKE_report(op->reports, RPT_ERROR, "Cannot edit external library data");
-    return 0;
+    return false;
   }
 
-  return 1;
+  return true;
 }
 
 static bool text_region_edit_poll(bContext *C)
@@ -208,19 +219,19 @@ static bool text_region_edit_poll(bContext *C)
   ARegion *region = CTX_wm_region(C);
 
   if (!st || !text) {
-    return 0;
+    return false;
   }
 
   if (!region || region->regiontype != RGN_TYPE_WINDOW) {
-    return 0;
+    return false;
   }
 
-  if (ID_IS_LINKED(text)) {
+  if (!BKE_id_is_editable(CTX_data_main(C), &text->id)) {
     // BKE_report(op->reports, RPT_ERROR, "Cannot edit external library data");
-    return 0;
+    return false;
   }
 
-  return 1;
+  return true;
 }
 
 /** \} */
@@ -236,10 +247,7 @@ void text_update_line_edited(TextLine *line)
   }
 
   /* we just free format here, and let it rebuild during draw */
-  if (line->format) {
-    MEM_freeN(line->format);
-    line->format = NULL;
-  }
+  MEM_SAFE_FREE(line->format);
 }
 
 void text_update_edited(Text *text)
@@ -265,9 +273,7 @@ static int text_new_exec(bContext *C, wmOperator *UNUSED(op))
   PointerRNA ptr, idptr;
   PropertyRNA *prop;
 
-  text = BKE_text_add(bmain, "Text");
-  /* Texts have no user by default... Only the 'real' user flag. */
-  id_us_min(&text->id);
+  text = BKE_text_add(bmain, DATA_("Text"));
 
   /* hook into UI */
   UI_context_active_but_prop_get_templateID(C, &ptr, &prop);
@@ -506,12 +512,10 @@ static int text_unlink_exec(bContext *C, wmOperator *UNUSED(op))
     if (text->id.prev) {
       st->text = text->id.prev;
       text_update_cursor_moved(C);
-      WM_event_add_notifier(C, NC_TEXT | ND_CURSOR, st->text);
     }
     else if (text->id.next) {
       st->text = text->id.next;
       text_update_cursor_moved(C);
-      WM_event_add_notifier(C, NC_TEXT | ND_CURSOR, st->text);
     }
   }
 
@@ -647,13 +651,13 @@ static int text_save_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int text_save_invoke(bContext *C, wmOperator *op, const wmEvent *UNUSED(event))
+static int text_save_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   Text *text = CTX_data_edit_text(C);
 
   /* Internal and texts without a filepath will go to "Save As". */
   if (text->filepath == NULL || (text->flags & TXT_ISMEM)) {
-    WM_operator_name_call(C, "TEXT_OT_save_as", WM_OP_INVOKE_DEFAULT, NULL);
+    WM_operator_name_call(C, "TEXT_OT_save_as", WM_OP_INVOKE_DEFAULT, NULL, event);
     return OPERATOR_CANCELLED;
   }
   return text_save_exec(C, op);
@@ -749,7 +753,7 @@ void TEXT_OT_save_as(wmOperatorType *ot)
                                  FILE_SAVE,
                                  WM_FILESEL_FILEPATH,
                                  FILE_DEFAULTDISPLAY,
-                                 FILE_SORT_DEFAULT); /* XXX TODO, relative_path. */
+                                 FILE_SORT_DEFAULT); /* XXX TODO: relative_path. */
 }
 
 /** \} */
@@ -778,7 +782,7 @@ static int text_run_script(bContext *C, ReportList *reports)
 
   /* Don't report error messages while live editing */
   if (!is_live) {
-    /* text may have freed its self */
+    /* text may have freed itself */
     if (CTX_data_edit_text(C) == text) {
       if (text->curl != curl_prev || curc_prev != text->curc) {
         text_update_cursor_moved(C);
@@ -786,9 +790,7 @@ static int text_run_script(bContext *C, ReportList *reports)
       }
     }
 
-    BKE_report(
-        reports, RPT_ERROR, "Python script failed, check the message in the system console");
-
+    /* No need to report the error, this has already been handled by #BPY_run_text. */
     return OPERATOR_FINISHED;
   }
 #else
@@ -916,12 +918,12 @@ static int text_paste_exec(bContext *C, wmOperator *op)
 
   /* Convert clipboard content indentation to spaces if specified */
   if (text->flags & TXT_TABSTOSPACES) {
-    char *new_buf = buf_tabs_to_spaces(buf, TXT_TABSIZE);
+    char *new_buf = buf_tabs_to_spaces(buf, TXT_TABSIZE, &buf_len);
     MEM_freeN(buf);
     buf = new_buf;
   }
 
-  txt_insert_buf(text, buf);
+  txt_insert_buf(text, buf, buf_len);
   text_update_edited(text);
 
   MEM_freeN(buf);
@@ -1096,10 +1098,10 @@ static int text_indent_or_autocomplete_exec(bContext *C, wmOperator *UNUSED(op))
   TextLine *line = text->curl;
   bool text_before_cursor = text->curc != 0 && !ELEM(line->line[text->curc - 1], ' ', '\t');
   if (text_before_cursor && (txt_has_sel(text) == false)) {
-    WM_operator_name_call(C, "TEXT_OT_autocomplete", WM_OP_INVOKE_DEFAULT, NULL);
+    WM_operator_name_call(C, "TEXT_OT_autocomplete", WM_OP_INVOKE_DEFAULT, NULL, NULL);
   }
   else {
-    WM_operator_name_call(C, "TEXT_OT_indent", WM_OP_EXEC_DEFAULT, NULL);
+    WM_operator_name_call(C, "TEXT_OT_indent", WM_OP_EXEC_DEFAULT, NULL, NULL);
   }
   return OPERATOR_FINISHED;
 }
@@ -1962,7 +1964,7 @@ static void txt_wrap_move_eol(SpaceText *st, ARegion *region, const bool sel)
         end = MIN2(end, i);
 
         if (chop) {
-          endj = BLI_str_prev_char_utf8((*linep)->line + j) - (*linep)->line;
+          endj = BLI_str_find_prev_char_utf8((*linep)->line + j, (*linep)->line) - (*linep)->line;
         }
 
         if (endj >= oldc) {
@@ -2409,7 +2411,17 @@ static int text_delete_exec(bContext *C, wmOperator *op)
         }
       }
     }
-
+    if (U.text_flag & USER_TEXT_EDIT_AUTO_CLOSE) {
+      const char *curr = text->curl->line + text->curc;
+      if (*curr != '\0') {
+        const char *prev = BLI_str_find_prev_char_utf8(curr, text->curl->line);
+        if ((curr != prev) && /* When back-spacing from the start of the line. */
+            (*curr == text_closing_character_pair_get(*prev))) {
+          txt_move_right(text, false);
+          txt_backspace_char(text);
+        }
+      }
+    }
     txt_backspace_char(text);
   }
   else if (type == DEL_NEXT_WORD) {
@@ -2599,20 +2611,18 @@ static void text_scroll_apply(bContext *C, wmOperator *op, const wmEvent *event)
 {
   SpaceText *st = CTX_wm_space_text(C);
   TextScroll *tsc = op->customdata;
-  const int mval[2] = {event->x, event->y};
+  const int mval[2] = {event->xy[0], event->xy[1]};
 
   text_update_character_width(st);
 
   /* compute mouse move distance */
   if (tsc->is_first) {
-    tsc->mval_prev[0] = mval[0];
-    tsc->mval_prev[1] = mval[1];
+    copy_v2_v2_int(tsc->mval_prev, mval);
     tsc->is_first = false;
   }
 
   if (event->type != MOUSEPAN) {
-    tsc->mval_delta[0] = mval[0] - tsc->mval_prev[0];
-    tsc->mval_delta[1] = mval[1] - tsc->mval_prev[1];
+    sub_v2_v2v2_int(tsc->mval_delta, mval, tsc->mval_prev);
   }
 
   /* accumulate scroll, in float values for events that give less than one
@@ -2764,11 +2774,10 @@ static int text_scroll_invoke(bContext *C, wmOperator *op, const wmEvent *event)
   if (event->type == MOUSEPAN) {
     text_update_character_width(st);
 
-    tsc->mval_prev[0] = event->x;
-    tsc->mval_prev[1] = event->y;
+    copy_v2_v2_int(tsc->mval_prev, event->xy);
     /* Sensitivity of scroll set to 4pix per line/char */
-    tsc->mval_delta[0] = (event->x - event->prevx) * st->runtime.cwidth_px / 4;
-    tsc->mval_delta[1] = (event->y - event->prevy) * st->runtime.lheight_px / 4;
+    tsc->mval_delta[0] = (event->xy[0] - event->prev_xy[0]) * st->runtime.cwidth_px / 4;
+    tsc->mval_delta[1] = (event->xy[1] - event->prev_xy[1]) * st->runtime.lheight_px / 4;
     tsc->is_first = false;
     tsc->is_scrollbar = false;
     text_scroll_apply(C, op, event);
@@ -2786,8 +2795,7 @@ void TEXT_OT_scroll(wmOperatorType *ot)
   /* identifiers */
   ot->name = "Scroll";
   /* don't really see the difference between this and
-   * scroll_bar. Both do basically the same thing (aside
-   * from keymaps).*/
+   * scroll_bar. Both do basically the same thing (aside from key-maps). */
   ot->idname = "TEXT_OT_scroll";
 
   /* api callbacks */
@@ -2893,8 +2901,7 @@ void TEXT_OT_scroll_bar(wmOperatorType *ot)
   /* identifiers */
   ot->name = "Scrollbar";
   /* don't really see the difference between this and
-   * scroll. Both do basically the same thing (aside
-   * from keymaps).*/
+   * scroll. Both do basically the same thing (aside from key-maps). */
   ot->idname = "TEXT_OT_scroll_bar";
 
   /* api callbacks */
@@ -3200,7 +3207,7 @@ static void text_cursor_set_apply(bContext *C, wmOperator *op, const wmEvent *ev
 
     if (event->type == TIMER) {
       text_cursor_set_to_pos(st, region, event->mval[0], event->mval[1], 1);
-      text_scroll_to_cursor(st, region, false);
+      ED_text_scroll_to_cursor(st, region, false);
       WM_event_add_notifier(C, NC_TEXT | ND_CURSOR, st->text);
     }
   }
@@ -3210,7 +3217,7 @@ static void text_cursor_set_apply(bContext *C, wmOperator *op, const wmEvent *ev
     if (event->type == TIMER) {
       text_cursor_set_to_pos(
           st, region, CLAMPIS(event->mval[0], 0, region->winx), event->mval[1], 1);
-      text_scroll_to_cursor(st, region, false);
+      ED_text_scroll_to_cursor(st, region, false);
       WM_event_add_notifier(C, NC_TEXT | ND_CURSOR, st->text);
     }
   }
@@ -3219,7 +3226,7 @@ static void text_cursor_set_apply(bContext *C, wmOperator *op, const wmEvent *ev
 
     if (event->type != TIMER) {
       text_cursor_set_to_pos(st, region, event->mval[0], event->mval[1], 1);
-      text_scroll_to_cursor(st, region, false);
+      ED_text_scroll_to_cursor(st, region, false);
       WM_event_add_notifier(C, NC_TEXT | ND_CURSOR, st->text);
 
       ssel->mval_prev[0] = event->mval[0];
@@ -3389,7 +3396,8 @@ static int text_line_number_invoke(bContext *C, wmOperator *UNUSED(op), const wm
     return OPERATOR_PASS_THROUGH;
   }
 
-  if (!(event->ascii >= '0' && event->ascii <= '9')) {
+  const char event_ascii = WM_event_utf8_to_ascii(event);
+  if (!(event_ascii >= '0' && event_ascii <= '9')) {
     return OPERATOR_PASS_THROUGH;
   }
 
@@ -3399,7 +3407,7 @@ static int text_line_number_invoke(bContext *C, wmOperator *UNUSED(op), const wm
   }
 
   jump_to *= 10;
-  jump_to += (int)(event->ascii - '0');
+  jump_to += (int)(event_ascii - '0');
 
   txt_move_toline(text, jump_to - 1, 0);
   last_jump = time;
@@ -3433,25 +3441,26 @@ static int text_insert_exec(bContext *C, wmOperator *op)
   SpaceText *st = CTX_wm_space_text(C);
   Text *text = CTX_data_edit_text(C);
   char *str;
+  int str_len;
   bool done = false;
   size_t i = 0;
   uint code;
 
   text_drawcache_tag_update(st, 0);
 
-  str = RNA_string_get_alloc(op->ptr, "text", NULL, 0);
+  str = RNA_string_get_alloc(op->ptr, "text", NULL, 0, &str_len);
 
   ED_text_undo_push_init(C);
 
   if (st && st->overwrite) {
     while (str[i]) {
-      code = BLI_str_utf8_as_unicode_step(str, &i);
+      code = BLI_str_utf8_as_unicode_step(str, str_len, &i);
       done |= txt_replace_char(text, code);
     }
   }
   else {
     while (str[i]) {
-      code = BLI_str_utf8_as_unicode_step(str, &i);
+      code = BLI_str_utf8_as_unicode_step(str, str_len, &i);
       done |= txt_add_char(text, code);
     }
   }
@@ -3472,35 +3481,41 @@ static int text_insert_exec(bContext *C, wmOperator *op)
 
 static int text_insert_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
+  uint auto_close_char = 0;
   int ret;
 
-  /* Note, the "text" property is always set from key-map,
+  /* NOTE: the "text" property is always set from key-map,
    * so we can't use #RNA_struct_property_is_set, check the length instead. */
   if (!RNA_string_length(op->ptr, "text")) {
     /* if alt/ctrl/super are pressed pass through except for utf8 character event
      * (when input method are used for utf8 inputs, the user may assign key event
      * including alt/ctrl/super like ctrl+m to commit utf8 string.  in such case,
      * the modifiers in the utf8 character event make no sense.) */
-    if ((event->ctrl || event->oskey) && !event->utf8_buf[0]) {
+    if ((event->modifier & (KM_CTRL | KM_OSKEY)) && !event->utf8_buf[0]) {
       return OPERATOR_PASS_THROUGH;
     }
 
     char str[BLI_UTF8_MAX + 1];
-    size_t len;
-
-    if (event->utf8_buf[0]) {
-      len = BLI_str_utf8_size_safe(event->utf8_buf);
-      memcpy(str, event->utf8_buf, len);
-    }
-    else {
-      /* in theory, ghost can set value to extended ascii here */
-      len = BLI_str_utf8_from_unicode(event->ascii, str);
-    }
+    const size_t len = BLI_str_utf8_size_safe(event->utf8_buf);
+    memcpy(str, event->utf8_buf, len);
     str[len] = '\0';
     RNA_string_set(op->ptr, "text", str);
+
+    if (U.text_flag & USER_TEXT_EDIT_AUTO_CLOSE) {
+      auto_close_char = BLI_str_utf8_as_unicode(str);
+    }
   }
 
   ret = text_insert_exec(C, op);
+
+  if ((ret == OPERATOR_FINISHED) && (auto_close_char != 0)) {
+    const uint auto_close_match = text_closing_character_pair_get(auto_close_char);
+    if (auto_close_match != 0) {
+      Text *text = CTX_data_edit_text(C);
+      txt_add_char(text, auto_close_match);
+      txt_move_left(text, false);
+    }
+  }
 
   /* run the script while editing, evil but useful */
   if (ret == OPERATOR_FINISHED && CTX_wm_space_text(C)->live_edit) {
@@ -3575,7 +3590,7 @@ static int text_find_and_replace(bContext *C, wmOperator *op, short mode)
     if (found) {
       if (mode == TEXT_REPLACE) {
         ED_text_undo_push_init(C);
-        txt_insert_buf(text, st->replacestr);
+        txt_insert_buf(text, st->replacestr, strlen(st->replacestr));
         if (text->curl && text->curl->format) {
           MEM_freeN(text->curl->format);
           text->curl->format = NULL;
@@ -3659,7 +3674,7 @@ static int text_replace_all(bContext *C)
     ED_text_undo_push_init(C);
 
     do {
-      txt_insert_buf(text, st->replacestr);
+      txt_insert_buf(text, st->replacestr, strlen(st->replacestr));
       if (text->curl && text->curl->format) {
         MEM_freeN(text->curl->format);
         text->curl->format = NULL;
@@ -3832,7 +3847,7 @@ static int text_resolve_conflict_invoke(bContext *C, wmOperator *op, const wmEve
   switch (BKE_text_file_modified_check(text)) {
     case 1:
       if (text->flags & TXT_ISDIRTY) {
-        /* modified locally and externally, ahhh. offer more possibilities. */
+        /* Modified locally and externally, ah. offer more possibilities. */
         pup = UI_popup_menu_begin(
             C, IFACE_("File Modified Outside and Inside Blender"), ICON_NONE);
         layout = UI_popup_menu_layout(pup);

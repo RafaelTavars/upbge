@@ -1,28 +1,5 @@
-/*
- * ***** BEGIN GPL LICENSE BLOCK *****
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software  Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Copyright (c) 2007 The Zdeno Ash Miklas
- *
- * This source file is part of VideoTexture library
- *
- * Contributor(s):
- *
- * ***** END GPL LICENSE BLOCK *****
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2007 The Zdeno Ash Miklas. */
 
 /** \file VideoFFmpeg.h
  *  \ingroup bgevideotex
@@ -30,37 +7,22 @@
 
 #pragma once
 
-
 #ifdef WITH_FFMPEG
 /* this needs to be parsed with __cplusplus defined before included through ffmpeg_compat.h */
 #  if defined(__FreeBSD__)
 #    include <inttypes.h>
 #  endif
-extern "C" {
+
+#  include <pthread.h>
+
 #  include "BLI_blenlib.h"
 #  include "BLI_threads.h"
 #  include "DNA_listBase.h"
+
+extern "C" {
 #  include "ffmpeg_compat.h"
 #  include <pthread.h>
 }
-
-#  if LIBAVFORMAT_VERSION_INT < (49 << 16)
-#    define FFMPEG_OLD_FRAME_RATE 1
-#  else
-#    define FFMPEG_CODEC_IS_POINTER 1
-#  endif
-
-#  ifdef FFMPEG_CODEC_IS_POINTER
-static inline AVCodecContext *get_codec_from_stream(AVStream *stream)
-{
-  return stream->codec;
-}
-#  else
-static inline AVCodecContext *get_codec_from_stream(AVStream *stream)
-{
-  return &stream->codec;
-}
-#  endif
 
 #  include "VideoBase.h"
 
@@ -120,8 +82,6 @@ class VideoFFmpeg : public VideoBase {
   }
 
  protected:
-  // format and codec information
-  AVCodec *m_codec;
   AVFormatContext *m_formatCtx;
   AVCodecContext *m_codecCtx;
   // raw frame extracted from video file
@@ -191,7 +151,7 @@ class VideoFFmpeg : public VideoBase {
   }
 
   /// common function to video file and capture
-  int openStream(const char *filename, AVInputFormat *inputFormat, AVDictionary **formatParams);
+  int openStream(const char *filename, const AVInputFormat *inputFormat, AVDictionary **formatParams);
 
   /// check if a frame is available and load it in pFrame, return true if a frame could be
   /// retrieved
@@ -234,4 +194,3 @@ inline VideoFFmpeg *getFFmpeg(PyImage *self)
 }
 
 #endif /* WITH_FFMPEG */
-

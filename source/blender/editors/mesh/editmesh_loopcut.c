@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2007 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2007 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup edmesh
@@ -187,10 +171,11 @@ static void ringsel_finish(bContext *C, wmOperator *op)
       const bool is_edge_wire = BM_edge_is_wire(lcd->eed);
       const bool is_single = is_edge_wire || !BM_edge_is_any_face_len_test(lcd->eed, 4);
       const int seltype = is_edge_wire ? SUBDIV_SELECT_INNER :
-                                         is_single ? SUBDIV_SELECT_NONE : SUBDIV_SELECT_LOOPCUT;
+                          is_single    ? SUBDIV_SELECT_NONE :
+                                         SUBDIV_SELECT_LOOPCUT;
 
-      /* Enable gridfill, so that intersecting loopcut works as one would expect.
-       * Note though that it will break edgeslide in this specific case.
+      /* Enable grid-fill, so that intersecting loop-cut works as one would expect.
+       * Note though that it will break edge-slide in this specific case.
        * See T31939. */
       BM_mesh_esubdivide(em->bm,
                          BM_ELEM_SELECT,
@@ -209,7 +194,12 @@ static void ringsel_finish(bContext *C, wmOperator *op)
 
       /* when used in a macro the tessfaces will be recalculated anyway,
        * this is needed here because modifiers depend on updated tessellation, see T45920 */
-      EDBM_update_generic(lcd->ob->data, true, true);
+      EDBM_update(lcd->ob->data,
+                  &(const struct EDBMUpdate_Params){
+                      .calc_looptri = true,
+                      .calc_normals = false,
+                      .is_destructive = true,
+                  });
 
       if (is_single) {
         /* de-select endpoints */
@@ -218,12 +208,15 @@ static void ringsel_finish(bContext *C, wmOperator *op)
 
         EDBM_selectmode_flush_ex(lcd->em, SCE_SELECT_VERTEX);
       }
-      /* we cant slide multiple edges in vertex select mode */
+      /* We can't slide multiple edges in vertex select mode, force edge select mode. Do this for
+       * all meshes in multi-object editmode so their selectmode is in sync for following
+       * operators. */
       else if (is_macro && (cuts > 1) && (em->selectmode & SCE_SELECT_VERTEX)) {
-        EDBM_selectmode_disable(lcd->vc.scene, em, SCE_SELECT_VERTEX, SCE_SELECT_EDGE);
+        EDBM_selectmode_disable_multi(C, SCE_SELECT_VERTEX, SCE_SELECT_EDGE);
       }
-      /* Force edge slide to edge select mode in face select mode. */
-      else if (EDBM_selectmode_disable(lcd->vc.scene, em, SCE_SELECT_FACE, SCE_SELECT_EDGE)) {
+      /* Force edge slide to edge select mode in face select mode. Do this for all meshes in
+       * multi-object editmode so their selectmode is in sync for following operators. */
+      else if (EDBM_selectmode_disable_multi(C, SCE_SELECT_FACE, SCE_SELECT_EDGE)) {
         /* pass, the change will flush selection */
       }
       else {
@@ -236,7 +229,7 @@ static void ringsel_finish(bContext *C, wmOperator *op)
        *     in editmesh_select.c (around line 1000)... */
       /* sets as active, useful for other tools */
       if (em->selectmode & SCE_SELECT_VERTEX) {
-        /* low priority TODO, get vertrex close to mouse */
+        /* low priority TODO: get vertrex close to mouse. */
         BM_select_history_store(em->bm, lcd->eed->v1);
       }
       if (em->selectmode & SCE_SELECT_EDGE) {
@@ -591,14 +584,14 @@ static int loopcut_modal(bContext *C, wmOperator *op, const wmEvent *event)
         handled = true;
         break;
       case MOUSEPAN:
-        if (event->alt == 0) {
-          cuts += 0.02f * (event->y - event->prevy);
+        if ((event->modifier & KM_ALT) == 0) {
+          cuts += 0.02f * (event->xy[1] - event->prev_xy[1]);
           if (cuts < 1 && lcd->cuts >= 1) {
             cuts = 1;
           }
         }
         else {
-          smoothness += 0.002f * (event->y - event->prevy);
+          smoothness += 0.002f * (event->xy[1] - event->prev_xy[1]);
         }
         handled = true;
         break;
@@ -608,7 +601,7 @@ static int loopcut_modal(bContext *C, wmOperator *op, const wmEvent *event)
         if (event->val == KM_RELEASE) {
           break;
         }
-        if (event->alt == 0) {
+        if ((event->modifier & KM_ALT) == 0) {
           cuts += 1;
         }
         else {
@@ -622,7 +615,7 @@ static int loopcut_modal(bContext *C, wmOperator *op, const wmEvent *event)
         if (event->val == KM_RELEASE) {
           break;
         }
-        if (event->alt == 0) {
+        if ((event->modifier & KM_ALT) == 0) {
           cuts = max_ff(cuts - 1, 1);
         }
         else {
@@ -765,7 +758,8 @@ void MESH_OT_loopcut(wmOperatorType *ot)
   RNA_def_property_enum_items(prop, rna_enum_proportional_falloff_curve_only_items);
   RNA_def_property_enum_default(prop, PROP_INVSQUARE);
   RNA_def_property_ui_text(prop, "Falloff", "Falloff type the feather");
-  RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_ID_CURVE); /* Abusing id_curve :/ */
+  RNA_def_property_translation_context(prop,
+                                       BLT_I18NCONTEXT_ID_CURVE_LEGACY); /* Abusing id_curve :/ */
 
   /* For redo only. */
   prop = RNA_def_int(ot->srna, "object_index", -1, -1, INT_MAX, "Object Index", "", 0, INT_MAX);

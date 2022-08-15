@@ -1,12 +1,7 @@
-#=============================================================================
+# SPDX-License-Identifier: BSD-3-Clause
 # Copyright 2014 Blender Foundation.
-#
-# Distributed under the OSI-approved BSD 3-Clause License,
-# see accompanying file BSD-3-Clause-license.txt for details.
-#
+
 # Inspired on the Testing.cmake from Libmv
-#
-#=============================================================================
 
 function(GET_BLENDER_TEST_INSTALL_DIR VARIABLE_NAME)
   get_property(GENERATOR_IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
@@ -99,7 +94,9 @@ macro(BLENDER_SRC_GTEST_EX)
 
       # Don't fail tests on leaks since these often happen in external libraries
       # that we can't fix.
-      set_tests_properties(${TARGET_NAME} PROPERTIES ENVIRONMENT LSAN_OPTIONS=exitcode=0)
+      set_tests_properties(${TARGET_NAME} PROPERTIES
+        ENVIRONMENT LSAN_OPTIONS=exitcode=0:$ENV{LSAN_OPTIONS}
+      )
     endif()
     if(WIN32)
       set_target_properties(${TARGET_NAME} PROPERTIES VS_GLOBAL_VcpkgEnabled "false")

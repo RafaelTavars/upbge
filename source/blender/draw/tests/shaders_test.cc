@@ -1,36 +1,32 @@
-/* Apache License, Version 2.0 */
+/* SPDX-License-Identifier: Apache-2.0 */
 
 #include "testing/testing.h"
 
-#include "intern/draw_manager_testing.h"
+#include "draw_testing.hh"
 
 #include "GPU_context.h"
+#include "GPU_index_buffer.h"
 #include "GPU_init_exit.h"
 #include "GPU_shader.h"
-#include "gpu_testing.hh"
+#include "GPU_texture.h"
+#include "GPU_vertex_buffer.h"
 
+#include "intern/draw_manager_testing.h"
+
+#include "engines/basic/basic_private.h"
 #include "engines/eevee/eevee_private.h"
 #include "engines/gpencil/gpencil_engine.h"
-#include "engines/image/image_private.h"
+#include "engines/image/image_private.hh"
 #include "engines/overlay/overlay_private.h"
 #include "engines/workbench/workbench_private.h"
+#include "intern/draw_shader.h"
 
 namespace blender::draw {
 
-/* Base class for draw test cases. It will setup and tear down the GPU part around each test. */
-class DrawTest : public blender::gpu::GPUTest {
-  void SetUp() override
-  {
-    GPUTest::SetUp();
-    DRW_draw_state_init_gtests(GPU_SHADER_CFG_DEFAULT);
-  }
-};
+using namespace blender::draw::image_engine;
 
-TEST_F(DrawTest, workbench_glsl_shaders)
+static void test_workbench_glsl_shaders()
 {
-  workbench_shader_library_ensure();
-  DRW_draw_state_init_gtests(GPU_SHADER_CFG_DEFAULT);
-
   const int MAX_WPD = 6;
   WORKBENCH_PrivateData wpds[MAX_WPD];
 
@@ -160,8 +156,9 @@ TEST_F(DrawTest, workbench_glsl_shaders)
 
   workbench_shader_free();
 }
+DRAW_TEST(workbench_glsl_shaders)
 
-TEST_F(DrawTest, gpencil_glsl_shaders)
+static void test_gpencil_glsl_shaders()
 {
   EXPECT_NE(GPENCIL_shader_antialiasing(0), nullptr);
   EXPECT_NE(GPENCIL_shader_antialiasing(1), nullptr);
@@ -182,21 +179,19 @@ TEST_F(DrawTest, gpencil_glsl_shaders)
 
   GPENCIL_shader_free();
 }
+DRAW_TEST(gpencil_glsl_shaders)
 
-TEST_F(DrawTest, image_glsl_shaders)
+static void test_image_glsl_shaders()
 {
-  IMAGE_shader_library_ensure();
-
-  EXPECT_NE(IMAGE_shader_image_get(false), nullptr);
-  EXPECT_NE(IMAGE_shader_image_get(true), nullptr);
+  EXPECT_NE(IMAGE_shader_image_get(), nullptr);
+  EXPECT_NE(IMAGE_shader_depth_get(), nullptr);
 
   IMAGE_shader_free();
 }
+DRAW_TEST(image_glsl_shaders)
 
-TEST_F(DrawTest, overlay_glsl_shaders)
+static void test_overlay_glsl_shaders()
 {
-  OVERLAY_shader_library_ensure();
-
   for (int i = 0; i < 2; i++) {
     eGPUShaderConfig sh_cfg = i == 0 ? GPU_SHADER_CFG_DEFAULT : GPU_SHADER_CFG_CLIPPED;
     DRW_draw_state_init_gtests(sh_cfg);
@@ -261,6 +256,7 @@ TEST_F(DrawTest, overlay_glsl_shaders)
     EXPECT_NE(OVERLAY_shader_uniform_color(), nullptr);
     EXPECT_NE(OVERLAY_shader_outline_prepass(false), nullptr);
     EXPECT_NE(OVERLAY_shader_outline_prepass(true), nullptr);
+    EXPECT_NE(OVERLAY_shader_outline_prepass_curves(), nullptr);
     EXPECT_NE(OVERLAY_shader_outline_prepass_gpencil(), nullptr);
     EXPECT_NE(OVERLAY_shader_outline_prepass_pointcloud(), nullptr);
     EXPECT_NE(OVERLAY_shader_extra_grid(), nullptr);
@@ -269,11 +265,13 @@ TEST_F(DrawTest, overlay_glsl_shaders)
     EXPECT_NE(OVERLAY_shader_paint_point(), nullptr);
     EXPECT_NE(OVERLAY_shader_paint_texture(), nullptr);
     EXPECT_NE(OVERLAY_shader_paint_vertcol(), nullptr);
-    EXPECT_NE(OVERLAY_shader_paint_weight(), nullptr);
+    EXPECT_NE(OVERLAY_shader_paint_weight(false), nullptr);
+    EXPECT_NE(OVERLAY_shader_paint_weight(true), nullptr);
     EXPECT_NE(OVERLAY_shader_paint_wire(), nullptr);
     EXPECT_NE(OVERLAY_shader_particle_dot(), nullptr);
     EXPECT_NE(OVERLAY_shader_particle_shape(), nullptr);
     EXPECT_NE(OVERLAY_shader_sculpt_mask(), nullptr);
+    EXPECT_NE(OVERLAY_shader_sculpt_curves_selection(), nullptr);
     EXPECT_NE(OVERLAY_shader_volume_velocity(false, false), nullptr);
     EXPECT_NE(OVERLAY_shader_volume_velocity(false, true), nullptr);
     EXPECT_NE(OVERLAY_shader_volume_velocity(true, false), nullptr);
@@ -285,10 +283,10 @@ TEST_F(DrawTest, overlay_glsl_shaders)
 
   OVERLAY_shader_free();
 }
+DRAW_TEST(overlay_glsl_shaders)
 
-TEST_F(DrawTest, eevee_glsl_shaders_static)
+static void test_eevee_glsl_shaders_static()
 {
-  EEVEE_shaders_lightprobe_shaders_init();
   EEVEE_shaders_material_shaders_init();
 
   EXPECT_NE(EEVEE_shaders_bloom_blit_get(false), nullptr);
@@ -299,12 +297,29 @@ TEST_F(DrawTest, eevee_glsl_shaders_static)
   EXPECT_NE(EEVEE_shaders_bloom_upsample_get(true), nullptr);
   EXPECT_NE(EEVEE_shaders_bloom_resolve_get(false), nullptr);
   EXPECT_NE(EEVEE_shaders_bloom_resolve_get(true), nullptr);
-  EXPECT_NE(EEVEE_shaders_depth_of_field_downsample_get(false), nullptr);
-  EXPECT_NE(EEVEE_shaders_depth_of_field_downsample_get(true), nullptr);
-  EXPECT_NE(EEVEE_shaders_depth_of_field_scatter_get(false), nullptr);
-  EXPECT_NE(EEVEE_shaders_depth_of_field_scatter_get(true), nullptr);
-  EXPECT_NE(EEVEE_shaders_depth_of_field_resolve_get(false), nullptr);
-  EXPECT_NE(EEVEE_shaders_depth_of_field_resolve_get(true), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_bokeh_get(), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_setup_get(), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_flatten_tiles_get(), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_dilate_tiles_get(false), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_dilate_tiles_get(true), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_downsample_get(), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_reduce_get(true), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_reduce_get(false), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_gather_get(DOF_GATHER_FOREGROUND, false), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_gather_get(DOF_GATHER_FOREGROUND, true), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_gather_get(DOF_GATHER_BACKGROUND, false), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_gather_get(DOF_GATHER_BACKGROUND, true), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_gather_get(DOF_GATHER_HOLEFILL, false), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_gather_get(DOF_GATHER_HOLEFILL, true), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_filter_get(), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_scatter_get(false, false), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_scatter_get(false, true), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_scatter_get(true, false), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_scatter_get(true, true), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_resolve_get(false, true), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_resolve_get(false, false), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_resolve_get(true, true), nullptr);
+  EXPECT_NE(EEVEE_shaders_depth_of_field_resolve_get(true, false), nullptr);
   EXPECT_NE(EEVEE_shaders_effect_downsample_sh_get(), nullptr);
   EXPECT_NE(EEVEE_shaders_effect_downsample_cube_sh_get(), nullptr);
   EXPECT_NE(EEVEE_shaders_effect_minz_downlevel_sh_get(), nullptr);
@@ -323,7 +338,6 @@ TEST_F(DrawTest, eevee_glsl_shaders_static)
   EXPECT_NE(EEVEE_shaders_effect_motion_blur_velocity_tiles_sh_get(), nullptr);
   EXPECT_NE(EEVEE_shaders_effect_motion_blur_velocity_tiles_expand_sh_get(), nullptr);
   EXPECT_NE(EEVEE_shaders_effect_ambient_occlusion_sh_get(), nullptr);
-  EXPECT_NE(EEVEE_shaders_effect_ambient_occlusion_layer_sh_get(), nullptr);
   EXPECT_NE(EEVEE_shaders_effect_ambient_occlusion_debug_sh_get(), nullptr);
   EXPECT_NE(EEVEE_shaders_ggx_lut_sh_get(), nullptr);
   EXPECT_NE(EEVEE_shaders_ggx_refraction_lut_sh_get(), nullptr);
@@ -356,11 +370,41 @@ TEST_F(DrawTest, eevee_glsl_shaders_static)
   EXPECT_NE(EEVEE_shaders_velocity_resolve_sh_get(), nullptr);
   EXPECT_NE(EEVEE_shaders_taa_resolve_sh_get(EFFECT_TAA), nullptr);
   EXPECT_NE(EEVEE_shaders_taa_resolve_sh_get(EFFECT_TAA_REPROJECT), nullptr);
-  for (int index = 0; index < SSR_MAX_SHADER; index++) {
-    EEVEE_SSRShaderOptions ssr_option = (EEVEE_SSRShaderOptions)index;
-    EXPECT_NE(EEVEE_shaders_effect_screen_raytrace_sh_get(ssr_option), nullptr);
-  }
+  EXPECT_NE(EEVEE_shaders_effect_reflection_trace_sh_get(), nullptr);
+  EXPECT_NE(EEVEE_shaders_effect_reflection_resolve_sh_get(), nullptr);
   EEVEE_shaders_free();
 }
+DRAW_TEST(eevee_glsl_shaders_static)
+
+static void test_draw_shaders(eParticleRefineShaderType sh_type)
+{
+  DRW_shaders_free();
+  EXPECT_NE(DRW_shader_hair_refine_get(PART_REFINE_CATMULL_ROM, sh_type), nullptr);
+  DRW_shaders_free();
+}
+
+static void test_draw_glsl_shaders()
+{
+#ifndef __APPLE__
+  test_draw_shaders(PART_REFINE_SHADER_TRANSFORM_FEEDBACK);
+  test_draw_shaders(PART_REFINE_SHADER_COMPUTE);
+#endif
+  test_draw_shaders(PART_REFINE_SHADER_TRANSFORM_FEEDBACK_WORKAROUND);
+}
+DRAW_TEST(draw_glsl_shaders)
+
+static void test_basic_glsl_shaders()
+{
+  for (int i = 0; i < GPU_SHADER_CFG_LEN; i++) {
+    eGPUShaderConfig sh_cfg = static_cast<eGPUShaderConfig>(i);
+    BASIC_shaders_depth_sh_get(sh_cfg);
+    BASIC_shaders_pointcloud_depth_sh_get(sh_cfg);
+    BASIC_shaders_curves_depth_sh_get(sh_cfg);
+    BASIC_shaders_depth_conservative_sh_get(sh_cfg);
+    BASIC_shaders_pointcloud_depth_conservative_sh_get(sh_cfg);
+  }
+  BASIC_shaders_free();
+}
+DRAW_TEST(basic_glsl_shaders)
 
 }  // namespace blender::draw

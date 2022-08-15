@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 #pragma once
 
@@ -73,8 +59,7 @@ class SphericalGrid {
     // Cell(const Cell& other);
     // Cell& operator=(const Cell& other);
 
-    explicit Cell();
-    ~Cell();
+    explicit Cell() = default;
 
     static bool compareOccludersByShallowestPoint(const OccluderData *a, const OccluderData *b);
 
@@ -88,7 +73,7 @@ class SphericalGrid {
   };
 
  public:
-  /*! Iterator needs to allow the user to avoid full 3D comparison in two cases:
+  /** Iterator needs to allow the user to avoid full 3D comparison in two cases:
    *
    *  (1) Where (*current)->deepest < target[2], where the occluder is unambiguously in front of
    * the target point.
@@ -106,7 +91,6 @@ class SphericalGrid {
     // epsilon is not used in this class, but other grids with the same interface may need an
     // epsilon
     explicit Iterator(SphericalGrid &grid, Vec3r &center, real epsilon = 1.0e-06);
-    ~Iterator();
     void initBeforeTarget();
     void initAfterTarget();
     void nextOccluder();
@@ -135,7 +119,7 @@ class SphericalGrid {
 
   class Transform : public GridHelpers::Transform {
    public:
-    explicit Transform();
+    explicit Transform() = default;
     explicit Transform(Transform &other);
     Vec3r operator()(const Vec3r &point) const;
     static Vec3r sphericalProjection(const Vec3r &M);

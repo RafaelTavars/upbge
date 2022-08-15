@@ -32,7 +32,6 @@
 
 #pragma once
 
-
 #include "KX_GameObject.h"
 #include "RAS_CameraData.h"
 #include "SG_Frustum.h"
@@ -47,7 +46,9 @@ bool ConvertPythonToCamera(KX_Scene *scene,
 #endif
 
 class KX_Camera : public KX_GameObject {
-  Py_Header protected : friend class KX_Scene;
+  Py_Header
+
+      protected : friend class KX_Scene;
   /** Camera parameters (clips distances, focal length). These
    * params are closely tied to Blender. In the gameengine, only the
    * projection and modelview matrices are relevant. There's a
@@ -97,12 +98,6 @@ class KX_Camera : public KX_GameObject {
   MT_Vector4 m_planes[6];
 
   /**
-   * This camera is frustum culling.
-   * Some cameras (ie if the game was started from a non camera view should not cull.)
-   */
-  bool m_frustum_culling;
-
-  /**
    * true if this camera has a valid projection matrix.
    */
   bool m_set_projection_matrix;
@@ -111,6 +106,9 @@ class KX_Camera : public KX_GameObject {
    * whether the camera should delete the node itself (only for shadow camera)
    */
   bool m_delete_node;
+
+  /** Enable object activity culling for this camera. */
+  bool m_activityCulling;
 
   /** Distance factor for level of detail*/
   float m_lodDistanceFactor;
@@ -127,22 +125,13 @@ class KX_Camera : public KX_GameObject {
  public:
   enum { INSIDE, INTERSECT, OUTSIDE };
 
-  KX_Camera(void *sgReplicationInfo,
-            SG_Callbacks callbacks,
-            const RAS_CameraData &camdata,
-            bool frustum_culling = true,
-            bool delete_node = false);
+  KX_Camera();
   virtual ~KX_Camera();
 
   struct GPUViewport *GetGPUViewport();
   void RemoveGPUViewport();
 
-  /**
-   * Inherited from EXP_Value -- return a new copy of this
-   * instance allocated on the heap. Ownership of the new
-   * object belongs with the caller.
-   */
-  virtual EXP_Value *GetReplica();
+  virtual KX_PythonProxy *NewInstance();
   virtual void ProcessReplica();
 
   MT_Transform GetWorldToCamera() const;
@@ -195,6 +184,8 @@ class KX_Camera : public KX_GameObject {
   /** Gets all camera data. */
   RAS_CameraData *GetCameraData();
 
+  void SetCameraData(const RAS_CameraData &camdata);
+
   /** Get/Set show camera frustum */
   void SetShowCameraFrustum(bool show);
   bool GetShowCameraFrustum() const;
@@ -204,12 +195,10 @@ class KX_Camera : public KX_GameObject {
   /** Set level of detail distance factor */
   void SetLodDistanceFactor(float lodfactor);
 
-  const SG_Frustum &GetFrustum();
+  bool GetActivityCulling() const;
+  void SetActivityCulling(bool enable);
 
-  /**
-   * Gets this camera's culling status.
-   */
-  bool GetFrustumCulling() const;
+  const SG_Frustum &GetFrustum();
 
   /**
    * Sets this camera's viewport status.
@@ -251,7 +240,13 @@ class KX_Camera : public KX_GameObject {
     return OBJ_CAMERA;
   }
 
+  virtual void SetBlenderObject(Object *obj);
+
+  void MarkForDeletion();
+
 #ifdef WITH_PYTHON
+  static PyObject *game_object_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
+
   EXP_PYMETHOD_DOC_VARARGS(KX_Camera, sphereInsideFrustum);
   EXP_PYMETHOD_DOC_O(KX_Camera, boxInsideFrustum);
   EXP_PYMETHOD_DOC_O(KX_Camera, pointInsideFrustum);
@@ -266,7 +261,8 @@ class KX_Camera : public KX_GameObject {
   EXP_PYMETHOD_DOC_VARARGS(KX_Camera, getScreenVect);
   EXP_PYMETHOD_DOC_VARARGS(KX_Camera, getScreenRay);
 
-  static PyObject *pyattr_get_perspective(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *pyattr_get_perspective(EXP_PyObjectPlus *self_v,
+                                          const EXP_PYATTRIBUTE_DEF *attrdef);
   static int pyattr_set_perspective(EXP_PyObjectPlus *self_v,
                                     const EXP_PYATTRIBUTE_DEF *attrdef,
                                     PyObject *value);
@@ -279,7 +275,8 @@ class KX_Camera : public KX_GameObject {
   static int pyattr_set_fov(EXP_PyObjectPlus *self_v,
                             const EXP_PYATTRIBUTE_DEF *attrdef,
                             PyObject *value);
-  static PyObject *pyattr_get_ortho_scale(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *pyattr_get_ortho_scale(EXP_PyObjectPlus *self_v,
+                                          const EXP_PYATTRIBUTE_DEF *attrdef);
   static int pyattr_set_ortho_scale(EXP_PyObjectPlus *self_v,
                                     const EXP_PYATTRIBUTE_DEF *attrdef,
                                     PyObject *value);
@@ -291,11 +288,13 @@ class KX_Camera : public KX_GameObject {
   static int pyattr_set_far(EXP_PyObjectPlus *self_v,
                             const EXP_PYATTRIBUTE_DEF *attrdef,
                             PyObject *value);
-  static PyObject *pyattr_get_shift_x(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *pyattr_get_shift_x(EXP_PyObjectPlus *self_v,
+                                      const EXP_PYATTRIBUTE_DEF *attrdef);
   static int pyattr_set_shift_x(EXP_PyObjectPlus *self_v,
                                 const EXP_PYATTRIBUTE_DEF *attrdef,
                                 PyObject *value);
-  static PyObject *pyattr_get_shift_y(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *pyattr_get_shift_y(EXP_PyObjectPlus *self_v,
+                                      const EXP_PYATTRIBUTE_DEF *attrdef);
   static int pyattr_set_shift_y(EXP_PyObjectPlus *self_v,
                                 const EXP_PYATTRIBUTE_DEF *attrdef,
                                 PyObject *value);
@@ -320,8 +319,9 @@ class KX_Camera : public KX_GameObject {
                                               const EXP_PYATTRIBUTE_DEF *attrdef);
 
   static PyObject *pyattr_get_INSIDE(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
-  static PyObject *pyattr_get_OUTSIDE(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
-  static PyObject *pyattr_get_INTERSECT(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *pyattr_get_OUTSIDE(EXP_PyObjectPlus *self_v,
+                                      const EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *pyattr_get_INTERSECT(EXP_PyObjectPlus *self_v,
+                                        const EXP_PYATTRIBUTE_DEF *attrdef);
 #endif
 };
-

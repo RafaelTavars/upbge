@@ -25,6 +25,7 @@
 #include "KX_BlenderMaterial.h"
 
 #include "GPU_material.h"
+#include "draw_manager.h"
 #include "eevee_private.h"
 
 #include "BL_Shader.h"
@@ -33,7 +34,10 @@
 #include "KX_KetsjiEngine.h"
 #include "KX_MaterialShader.h"
 #include "RAS_BucketManager.h"
-#include "RAS_ICanvas.h"
+
+#ifdef WITH_PYTHON
+#  include "bpy_rna.h"
+#endif
 
 KX_BlenderMaterial::KX_BlenderMaterial(RAS_Rasterizer *rasty,
                                        KX_Scene *scene,
@@ -58,7 +62,8 @@ KX_BlenderMaterial::KX_BlenderMaterial(RAS_Rasterizer *rasty,
    * because it is causing a crash
    * (m_textures list won't be available for these object)
    */
-  if (m_material->use_nodes && m_material->nodetree && !converting_during_runtime) {
+  bool using_eevee_next = is_eevee_next(scene->GetBlenderScene());
+  if (m_material->use_nodes && m_material->nodetree && !converting_during_runtime && !using_eevee_next) {
     if (!KX_GetActiveEngine()->UseViewportRender()) {
       EEVEE_Data *vedata = EEVEE_engine_data_get();
       EEVEE_EffectsInfo *effects = vedata->stl->effects;
@@ -104,18 +109,6 @@ RAS_MaterialShader *KX_BlenderMaterial::GetShader() const
   BLI_assert(false);
 
   return nullptr;
-}
-
-void KX_BlenderMaterial::GetRGBAColor(unsigned char *rgba) const
-{
-  if (m_material) {
-    *rgba++ = (unsigned char)(m_material->r * 255.0f);
-    *rgba++ = (unsigned char)(m_material->g * 255.0f);
-    *rgba++ = (unsigned char)(m_material->b * 255.0f);
-    *rgba++ = (unsigned char)(m_material->alpha * 255.0f);
-  }
-  else
-    RAS_IPolyMaterial::GetRGBAColor(rgba);
 }
 
 const std::string KX_BlenderMaterial::GetTextureName() const
@@ -259,28 +252,6 @@ bool KX_BlenderMaterial::UsesLighting() const
   }
 }
 
-void KX_BlenderMaterial::UpdateIPO(MT_Vector4 rgba,
-                                   MT_Vector3 specrgb,
-                                   MT_Scalar hard,
-                                   MT_Scalar spec,
-                                   MT_Scalar ref,
-                                   MT_Scalar emit,
-                                   MT_Scalar ambient,
-                                   MT_Scalar alpha,
-                                   MT_Scalar specalpha)
-{
-  // only works one deep now
-
-  // GLSL								Input
-  m_material->specr = (float)(specrgb)[0];
-  m_material->specg = (float)(specrgb)[1];
-  m_material->specb = (float)(specrgb)[2];
-  m_material->r = (float)(rgba[0]);
-  m_material->g = (float)(rgba[1]);
-  m_material->b = (float)(rgba[2]);
-  m_material->alpha = (float)(rgba[3]);
-}
-
 void KX_BlenderMaterial::ReplaceScene(KX_Scene *scene)
 {
   m_scene = scene;
@@ -303,6 +274,8 @@ PyMethodDef KX_BlenderMaterial::Methods[] = {
 
 PyAttributeDef KX_BlenderMaterial::Attributes[] = {
     EXP_PYATTRIBUTE_RO_FUNCTION("textures", KX_BlenderMaterial, pyattr_get_textures),
+    EXP_PYATTRIBUTE_RO_FUNCTION(
+        "blenderMaterial", KX_BlenderMaterial, pyattr_get_blender_material),
     EXP_PYATTRIBUTE_NULL  // Sentinel
 };
 
@@ -373,13 +346,25 @@ PyObject *KX_BlenderMaterial::pyattr_get_textures(EXP_PyObjectPlus *self_v,
                                                   const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   return (new EXP_ListWrapper(self_v,
-                           ((KX_BlenderMaterial *)self_v)->GetProxy(),
-                           nullptr,
-                           kx_blender_material_get_textures_size_cb,
-                           kx_blender_material_get_textures_item_cb,
-                           kx_blender_material_get_textures_item_name_cb,
-                           nullptr))
+                              ((KX_BlenderMaterial *)self_v)->GetProxy(),
+                              nullptr,
+                              kx_blender_material_get_textures_size_cb,
+                              kx_blender_material_get_textures_item_cb,
+                              kx_blender_material_get_textures_item_name_cb,
+                              nullptr))
       ->NewProxy(true);
+}
+
+PyObject *KX_BlenderMaterial::pyattr_get_blender_material(EXP_PyObjectPlus *self_v,
+                                                          const EXP_PYATTRIBUTE_DEF *attrdef)
+{
+  KX_BlenderMaterial *self = static_cast<KX_BlenderMaterial *>(self_v);
+  Material *ma = self->GetBlenderMaterial();
+  if (ma) {
+    PyObject *py_blender_mat = pyrna_id_CreatePyObject(&ma->id);
+    return py_blender_mat;
+  }
+  Py_RETURN_NONE;
 }
 
 EXP_PYMETHODDEF_DOC(KX_BlenderMaterial, getShader, "getShader()")
@@ -388,7 +373,6 @@ EXP_PYMETHODDEF_DOC(KX_BlenderMaterial, getShader, "getShader()")
   if (!m_shader) {
     m_shader.reset(new KX_MaterialShader());
     // Set the material to use custom shader.
-    m_flag &= ~RAS_BLENDERGLSL;
     m_scene->GetBucketManager()->UpdateShaders(this);
   }
 

@@ -31,7 +31,6 @@
 
 #pragma once
 
-
 #include "PHY_IMotionState.h"
 #include "PHY_IPhysicsEnvironment.h"
 
@@ -74,7 +73,8 @@ class DummyPhysicsEnvironment : public PHY_IPhysicsEnvironment {
                                             float axis2X = 0,
                                             float axis2Y = 0,
                                             float axis2Z = 0,
-                                            int flag = 0);
+                                            int flag = 0,
+                                            bool replicate_dupli = false);
   virtual PHY_IVehicle *CreateVehicle(PHY_IPhysicsController *ctrl);
 
   virtual void RemoveConstraintById(int constraintid, bool free);
@@ -126,6 +126,10 @@ class DummyPhysicsEnvironment : public PHY_IPhysicsEnvironment {
   {
     return false;
   }
+  virtual PHY_CollisionTestResult CheckCollision(PHY_IPhysicsController *ctrl0, PHY_IPhysicsController *ctrl1)
+  {
+    return {false, false, nullptr};
+  }
   virtual PHY_IPhysicsController *CreateSphereController(float radius,
                                                          const class MT_Vector3 &position)
   {
@@ -141,7 +145,7 @@ class DummyPhysicsEnvironment : public PHY_IPhysicsEnvironment {
     // Dummy, nothing to do here
   }
 
-  virtual void ConvertObject(BL_BlenderSceneConverter *converter,
+  virtual void ConvertObject(BL_SceneConverter *converter,
                              KX_GameObject *gameobj,
                              RAS_MeshObject *meshobj,
                              DerivedMesh *dm,
@@ -155,4 +159,3 @@ class DummyPhysicsEnvironment : public PHY_IPhysicsEnvironment {
     delete motionstate;
   }
 };
-

@@ -32,19 +32,14 @@
 #include "BL_ArmatureObject.h"
 
 #include "BKE_action.h"
-#include "BKE_animsys.h"
 #include "BKE_armature.h"
 #include "BKE_constraint.h"
 #include "BKE_context.h"
-#include "BKE_layer.h"
-#include "BKE_lib_id.h"
-#include "BKE_scene.h"
 #include "DNA_armature_types.h"
-#include "MEM_guardedalloc.h"
 #include "RNA_access.h"
 
 #include "BL_Action.h"
-#include "BL_BlenderSceneConverter.h"
+#include "BL_SceneConverter.h"
 #include "KX_Globals.h"
 
 /**
@@ -58,72 +53,72 @@
  * When it is about to evaluate the pose, set the KX object position in the obmat of the
  * corresponding Blender objects and restore after the evaluation.
  */
-static void game_copy_pose(bPose **dst, bPose *src, int copy_constraint)
-{
-  /* The game engine copies the current armature pose and then swaps
-   * the object pose pointer. this makes it possible to change poses
-   * without affecting the original blender data. */
+// static void game_copy_pose(bPose **dst, bPose *src, int copy_constraint)
+//{
+//  /* The game engine copies the current armature pose and then swaps
+//   * the object pose pointer. this makes it possible to change poses
+//   * without affecting the original blender data. */
 
-  if (!src) {
-    *dst = nullptr;
-    return;
-  }
-  else if (*dst == src) {
-    CM_Warning("game_copy_pose source and target are the same");
-    *dst = nullptr;
-    return;
-  }
+//  if (!src) {
+//    *dst = nullptr;
+//    return;
+//  }
+//  else if (*dst == src) {
+//    CM_Warning("game_copy_pose source and target are the same");
+//    *dst = nullptr;
+//    return;
+//  }
 
-  bPose *out = (bPose *)MEM_dupallocN(src);
-  out->chanhash = nullptr;
-  out->agroups.first = out->agroups.last = nullptr;
-  out->ikdata = nullptr;
-  out->ikparam = MEM_dupallocN(src->ikparam);
-  // out->flag |= POSE_GAME_ENGINE;
-  BLI_duplicatelist(&out->chanbase, &src->chanbase);
+//  bPose *out = (bPose *)MEM_dupallocN(src);
+//  out->chanhash = nullptr;
+//  out->agroups.first = out->agroups.last = nullptr;
+//  out->ikdata = nullptr;
+//  out->ikparam = MEM_dupallocN(src->ikparam);
+//  // out->flag |= POSE_GAME_ENGINE;
+//  BLI_duplicatelist(&out->chanbase, &src->chanbase);
 
-  /* remap pointers */
-  GHash *ghash = BLI_ghash_new(BLI_ghashutil_ptrhash, BLI_ghashutil_ptrcmp, "game_copy_pose gh");
+//  /* remap pointers */
+//  GHash *ghash = BLI_ghash_new(BLI_ghashutil_ptrhash, BLI_ghashutil_ptrcmp, "game_copy_pose gh");
 
-  bPoseChannel *pchan = (bPoseChannel *)src->chanbase.first;
-  bPoseChannel *outpchan = (bPoseChannel *)out->chanbase.first;
-  for (; pchan; pchan = pchan->next, outpchan = outpchan->next) {
-    BLI_ghash_insert(ghash, pchan, outpchan);
-  }
+//  bPoseChannel *pchan = (bPoseChannel *)src->chanbase.first;
+//  bPoseChannel *outpchan = (bPoseChannel *)out->chanbase.first;
+//  for (; pchan; pchan = pchan->next, outpchan = outpchan->next) {
+//    BLI_ghash_insert(ghash, pchan, outpchan);
+//  }
 
-  for (pchan = (bPoseChannel *)out->chanbase.first; pchan; pchan = pchan->next) {
-    pchan->parent = (bPoseChannel *)BLI_ghash_lookup(ghash, pchan->parent);
-    pchan->child = (bPoseChannel *)BLI_ghash_lookup(ghash, pchan->child);
+//  for (pchan = (bPoseChannel *)out->chanbase.first; pchan; pchan = pchan->next) {
+//    pchan->parent = (bPoseChannel *)BLI_ghash_lookup(ghash, pchan->parent);
+//    pchan->child = (bPoseChannel *)BLI_ghash_lookup(ghash, pchan->child);
 
-    if (copy_constraint) {
-      ListBase listb;
-      // copy all constraint for backward compatibility
-      // BKE_constraints_copy nullptrs listb, no need to make extern for this operation.
-      BKE_constraints_copy(&listb, &pchan->constraints, false);
-      pchan->constraints = listb;
-    }
-    else {
-      BLI_listbase_clear(&pchan->constraints);
-    }
+//    if (copy_constraint) {
+//      ListBase listb;
+//      // copy all constraint for backward compatibility
+//      // BKE_constraints_copy nullptrs listb, no need to make extern for this operation.
+//      BKE_constraints_copy(&listb, &pchan->constraints, false);
+//      pchan->constraints = listb;
+//    }
+//    else {
+//      BLI_listbase_clear(&pchan->constraints);
+//    }
 
-    if (pchan->custom) {
-      id_us_plus(&pchan->custom->id);
-    }
+//    if (pchan->custom) {
+//      id_us_plus(&pchan->custom->id);
+//    }
 
-    // fails to link, props are not used in the BGE yet.
-#if 0
-		if (pchan->prop) {
-			pchan->prop = IDP_CopyProperty(pchan->prop);
-		}
-#endif
-    pchan->prop = nullptr;
-  }
+//    // fails to link, props are not used in the BGE yet.
+//#if 0
+//		if (pchan->prop) {
+//			pchan->prop = IDP_CopyProperty(pchan->prop);
+//		}
+//#endif
+//    pchan->prop = nullptr;
+//  }
 
-  BLI_ghash_free(ghash, nullptr, nullptr);
-  // set acceleration structure for channel lookup
-  BKE_pose_channels_hash_make(out);
-  *dst = out;
-}
+//  BLI_ghash_free(ghash, nullptr, nullptr);
+//  // set acceleration structure for channel lookup
+//  BKE_pose_channels_hash_ensure(out);
+//  *dst = out;
+//}
 
 // Only allowed for Poses with identical channels.
 static void game_blend_poses(bPose *dst, bPose *src, float srcweight, short mode)
@@ -190,28 +185,10 @@ static void game_blend_poses(bPose *dst, bPose *src, float srcweight, short mode
   dst->ctime = src->ctime;
 }
 
-BL_ArmatureObject::BL_ArmatureObject(void *sgReplicationInfo,
-                                     SG_Callbacks callbacks,
-                                     Object *armature,
-                                     Scene *scene)
-    : KX_GameObject(sgReplicationInfo, callbacks),
-      m_scene(scene),
-      m_lastframe(0.0),
-      m_drawDebug(false),
-      m_lastapplyframe(0.0)
+BL_ArmatureObject::BL_ArmatureObject()
+    : KX_GameObject(), m_lastframe(0.0), m_drawDebug(false), m_lastapplyframe(0.0)
 {
   m_controlledConstraints = new EXP_ListValue<BL_ArmatureConstraint>();
-  m_poseChannels = new EXP_ListValue<BL_ArmatureChannel>();
-
-  // Keep a copy of the original armature so we can fix drivers later
-  m_origObjArma = armature;
-  m_objArma = m_origObjArma;  // BKE_object_copy(bmain, armature);
-  // m_objArma->data = BKE_armature_copy(bmain, (bArmature *)armature->data);
-  // During object replication ob->data is increase, we decrease it now because we get a copy.
-  // id_us_min(&((bArmature *)m_origObjArma->data)->id);
-  // need this to get iTaSC working ok in the BGE
-  // m_objArma->pose->flag |= POSE_GAME_ENGINE;
-  memcpy(m_obmat, m_objArma->obmat, sizeof(m_obmat));
 }
 
 BL_ArmatureObject::~BL_ArmatureObject()
@@ -228,7 +205,36 @@ BL_ArmatureObject::~BL_ArmatureObject()
   //}
 }
 
-void BL_ArmatureObject::LoadConstraints(BL_BlenderSceneConverter *converter)
+void BL_ArmatureObject::SetBlenderObject(Object *obj)
+{
+  KX_GameObject::SetBlenderObject(obj);
+
+  // XXX: I copied below from the destructor verbatim. But why we shouldn't free it?
+  //
+  // if (m_objArma) {
+  //	BKE_id_free(bmain, m_objArma->data);
+  //	/* avoid BKE_libblock_free(bmain, m_objArma)
+  //	   try to access m_objArma->data */
+  //	m_objArma->data = nullptr;
+  //	BKE_id_free(bmain, m_objArma);
+  //}
+
+  // Keep a copy of the original armature so we can fix drivers later
+  m_origObjArma = obj;
+  m_objArma = m_origObjArma;  // BKE_object_copy(bmain, armature);
+  // m_objArma->data = BKE_armature_copy(bmain, (bArmature *)armature->data);
+  // During object replication ob->data is increase, we decrease it now because we get a copy.
+  // id_us_min(&((bArmature *)m_origObjArma->data)->id);
+  // need this to get iTaSC working ok in the BGE
+  // m_objArma->pose->flag |= POSE_GAME_ENGINE;
+
+  if (m_objArma) {
+    memcpy(m_obmat, m_objArma->obmat, sizeof(m_obmat));
+    LoadChannels();
+  }
+}
+
+void BL_ArmatureObject::LoadConstraints(BL_SceneConverter *converter)
 {
   // first delete any existing constraint (should not have any)
   m_controlledConstraints->ReleaseAndRemoveAll();
@@ -237,7 +243,8 @@ void BL_ArmatureObject::LoadConstraints(BL_BlenderSceneConverter *converter)
   // get the persistent pose structure
 
   // and locate the constraint
-  for (bPoseChannel *pchan = (bPoseChannel *)m_objArma->pose->chanbase.first; pchan; pchan = pchan->next) {
+  for (bPoseChannel *pchan = (bPoseChannel *)m_objArma->pose->chanbase.first; pchan;
+       pchan = pchan->next) {
     for (bConstraint *pcon = (bConstraint *)pchan->constraints.first; pcon; pcon = pcon->next) {
       if (pcon->flag & CONSTRAINT_DISABLE) {
         continue;
@@ -324,12 +331,10 @@ BL_ArmatureConstraint *BL_ArmatureObject::GetConstraint(int index)
 /* this function is called to populate the m_poseChannels list */
 void BL_ArmatureObject::LoadChannels()
 {
-  if (m_poseChannels->GetCount() == 0) {
-    for (bPoseChannel *pchan = (bPoseChannel *)m_objArma->pose->chanbase.first; pchan;
-         pchan = (bPoseChannel *)pchan->next) {
-      BL_ArmatureChannel *proxy = new BL_ArmatureChannel(this, pchan);
-      m_poseChannels->Add(proxy);
-    }
+  m_poseChannels = new EXP_ListValue<BL_ArmatureChannel>();
+  for (bPoseChannel *pchan = (bPoseChannel *)m_objArma->pose->chanbase.first; pchan; pchan = (bPoseChannel *)pchan->next) {
+    BL_ArmatureChannel *channel = new BL_ArmatureChannel(this, pchan);
+    m_poseChannels->Add(channel);
   }
 }
 
@@ -340,31 +345,26 @@ size_t BL_ArmatureObject::GetChannelNumber() const
 
 BL_ArmatureChannel *BL_ArmatureObject::GetChannel(bPoseChannel *pchan)
 {
-  LoadChannels();
   return m_poseChannels->FindIf(
       [&pchan](BL_ArmatureChannel *channel) { return channel->m_posechannel == pchan; });
 }
 
 BL_ArmatureChannel *BL_ArmatureObject::GetChannel(const std::string &str)
 {
-  LoadChannels();
   return static_cast<BL_ArmatureChannel *>(m_poseChannels->FindValue(str));
 }
 
 BL_ArmatureChannel *BL_ArmatureObject::GetChannel(int index)
 {
-  LoadChannels();
   if (index < 0 || index >= m_poseChannels->GetCount()) {
     return nullptr;
   }
   return static_cast<BL_ArmatureChannel *>(m_poseChannels->GetValue(index));
 }
 
-EXP_Value *BL_ArmatureObject::GetReplica()
+KX_PythonProxy *BL_ArmatureObject::NewInstance()
 {
-  BL_ArmatureObject *replica = new BL_ArmatureObject(*this);
-  replica->ProcessReplica();
-  return replica;
+  return new BL_ArmatureObject(*this);
 }
 
 void BL_ArmatureObject::ProcessReplica()
@@ -374,10 +374,10 @@ void BL_ArmatureObject::ProcessReplica()
   // Replicate each constraints.
   m_controlledConstraints = static_cast<EXP_ListValue<BL_ArmatureConstraint> *>(
       m_controlledConstraints->GetReplica());
-  // Share pose channels.
-  m_poseChannels->AddRef();
 
   m_objArma = m_pBlenderObject;
+
+  LoadChannels();
 }
 
 int BL_ArmatureObject::GetGameObjectType() const
@@ -423,7 +423,7 @@ void BL_ArmatureObject::ApplyPose()
     UpdateBlenderObjectMatrix(m_objArma);
     bContext *C = KX_GetActiveEngine()->GetContext();
     Depsgraph *depsgraph = CTX_data_depsgraph_on_load(C);
-    BKE_pose_where_is(depsgraph, m_scene, m_objArma);
+    BKE_pose_where_is(depsgraph, GetScene()->GetBlenderScene(), m_objArma);
     // restore ourself
     memcpy(m_objArma->obmat, m_obmat, sizeof(m_obmat));
     m_lastapplyframe = m_lastframe;
@@ -474,7 +474,7 @@ void BL_ArmatureObject::GetPose(bPose **pose) const
     /* probably not to good of an idea to
      * duplicate everything, but it clears up
      * a crash and memory leakage when
-     * &BL_ActionActuator::m_pose is freed
+     * &SCA_ActionActuator::m_pose is freed
      */
     BKE_pose_copy_data(pose, m_objArma->pose, 1);
   }
@@ -520,7 +520,8 @@ void BL_ArmatureObject::DrawDebug(RAS_DebugDraw &debugDraw)
   const MT_Matrix3x3 &rot = NodeGetWorldOrientation();
   const MT_Vector3 &pos = NodeGetWorldPosition();
 
-  for (bPoseChannel *pchan = (bPoseChannel *)m_objArma->pose->chanbase.first; pchan; pchan = pchan->next) {
+  for (bPoseChannel *pchan = (bPoseChannel *)m_objArma->pose->chanbase.first; pchan;
+       pchan = pchan->next) {
     MT_Vector3 head = rot * (MT_Vector3(pchan->pose_head) * scale) + pos;
     MT_Vector3 tail = rot * (MT_Vector3(pchan->pose_tail) * scale) + pos;
     debugDraw.DrawLine(tail, head, MT_Vector4(1.0f, 0.0f, 0.0f, 1.0f));
@@ -536,6 +537,18 @@ float BL_ArmatureObject::GetBoneLength(Bone *bone) const
 #ifdef WITH_PYTHON
 
 // PYTHON
+PyObject *BL_ArmatureObject::game_object_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+  BL_ArmatureObject *obj = new BL_ArmatureObject();
+
+  PyObject *proxy = py_base_new(type, PyTuple_Pack(1, obj->GetProxy()), kwds);
+  if (!proxy) {
+    delete obj;
+    return nullptr;
+  }
+
+  return proxy;
+}
 
 PyTypeObject BL_ArmatureObject::Type = {PyVarObject_HEAD_INIT(nullptr, 0) "BL_ArmatureObject",
                                         sizeof(EXP_PyObjectPlus_Proxy),
@@ -573,7 +586,7 @@ PyTypeObject BL_ArmatureObject::Type = {PyVarObject_HEAD_INIT(nullptr, 0) "BL_Ar
                                         0,
                                         0,
                                         0,
-                                        py_base_new};
+                                        game_object_new};
 
 PyMethodDef BL_ArmatureObject::Methods[] = {
     EXP_PYMETHODTABLE_NOARGS(BL_ArmatureObject, update),
@@ -599,7 +612,6 @@ PyObject *BL_ArmatureObject::pyattr_get_channels(EXP_PyObjectPlus *self_v,
                                                  const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   BL_ArmatureObject *self = static_cast<BL_ArmatureObject *>(self_v);
-  self->LoadChannels();  // make sure we have the channels
   return self->m_poseChannels->GetProxy();
 }
 

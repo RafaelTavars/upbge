@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup pythonintern
@@ -27,12 +13,12 @@
 static PyTypeObject BlenderAppBuildOptionsType;
 
 static PyStructSequence_Field app_builtopts_info_fields[] = {
-    /* names mostly follow CMake options, lowercase, after WITH_ */
+    /* names mostly follow CMake options, lowercase, after `WITH_` */
     {"bullet", NULL},
     {"codec_avi", NULL},
     {"codec_ffmpeg", NULL},
     {"codec_sndfile", NULL},
-    {"compositor", NULL},
+    {"compositor_cpu", NULL},
     {"cycles", NULL},
     {"gameengine", NULL},
     {"cycles_osl", NULL},
@@ -50,12 +36,18 @@ static PyStructSequence_Field app_builtopts_info_fields[] = {
     {"opensubdiv", NULL},
     {"sdl", NULL},
     {"sdl_dynload", NULL},
+    {"coreaudio", NULL},
     {"jack", NULL},
+    {"pulseaudio", NULL},
+    {"wasapi", NULL},
     {"libmv", NULL},
     {"mod_oceansim", NULL},
     {"mod_remesh", NULL},
     {"player", NULL},
     {"collada", NULL},
+    {"io_wavefront_obj", NULL},
+    {"io_stl", NULL},
+    {"io_gpencil", NULL},
     {"opencolorio", NULL},
     {"openmp", NULL},
     {"openvdb", NULL},
@@ -64,6 +56,9 @@ static PyStructSequence_Field app_builtopts_info_fields[] = {
     {"fluid", NULL},
     {"xr_openxr", NULL},
     {"potrace", NULL},
+    {"pugixml", NULL},
+    {"haru", NULL},
+    /* Sentinel (this line prevents `clang-format` wrapping into columns). */
     {NULL},
 };
 
@@ -111,7 +106,7 @@ static PyObject *make_builtopts_info(void)
   SetObjIncref(Py_False);
 #endif
 
-#ifdef WITH_COMPOSITOR
+#ifdef WITH_COMPOSITOR_CPU
   SetObjIncref(Py_True);
 #else
   SetObjIncref(Py_False);
@@ -219,7 +214,25 @@ static PyObject *make_builtopts_info(void)
   SetObjIncref(Py_False);
 #endif
 
+#ifdef WITH_COREAUDIO
+  SetObjIncref(Py_True);
+#else
+  SetObjIncref(Py_False);
+#endif
+
 #ifdef WITH_JACK
+  SetObjIncref(Py_True);
+#else
+  SetObjIncref(Py_False);
+#endif
+
+#ifdef WITH_PULSEAUDIO
+  SetObjIncref(Py_True);
+#else
+  SetObjIncref(Py_False);
+#endif
+
+#ifdef WITH_WASAPI
   SetObjIncref(Py_True);
 #else
   SetObjIncref(Py_False);
@@ -244,6 +257,24 @@ static PyObject *make_builtopts_info(void)
 #endif
 
 #ifdef WITH_COLLADA
+  SetObjIncref(Py_True);
+#else
+  SetObjIncref(Py_False);
+#endif
+
+#ifdef WITH_IO_WAVEFRONT_OBJ
+  SetObjIncref(Py_True);
+#else
+  SetObjIncref(Py_False);
+#endif
+
+#ifdef WITH_IO_STL
+  SetObjIncref(Py_True);
+#else
+  SetObjIncref(Py_False);
+#endif
+
+#ifdef WITH_IO_GPENCIL
   SetObjIncref(Py_True);
 #else
   SetObjIncref(Py_False);
@@ -298,6 +329,18 @@ static PyObject *make_builtopts_info(void)
 #endif
 
 #ifdef WITH_POTRACE
+  SetObjIncref(Py_True);
+#else
+  SetObjIncref(Py_False);
+#endif
+
+#ifdef WITH_PUGIXML
+  SetObjIncref(Py_True);
+#else
+  SetObjIncref(Py_False);
+#endif
+
+#ifdef WITH_HARU
   SetObjIncref(Py_True);
 #else
   SetObjIncref(Py_False);

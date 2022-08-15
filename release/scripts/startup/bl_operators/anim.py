@@ -1,22 +1,5 @@
-# ##### BEGIN GPL LICENSE BLOCK #####
-#
-#  This program is free software; you can redistribute it and/or
-#  modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2
-#  of the License, or (at your option) any later version.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software Foundation,
-#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# ##### END GPL LICENSE BLOCK #####
-
-# <pep8-80 compliant>
+# SPDX-License-Identifier: GPL-2.0-or-later
+from __future__ import annotations
 
 if "bpy" in locals():
     from importlib import reload
@@ -354,7 +337,8 @@ class UpdateAnimatedTransformConstraint(Operator):
 
     use_convert_to_radians: BoolProperty(
         name="Convert to Radians",
-        description="Convert fcurves/drivers affecting rotations to radians (Warning: use this only once!)",
+        description="Convert f-curves/drivers affecting rotations to radians.\n"
+                    "Warning: Use this only once",
         default=True,
     )
 
@@ -429,22 +413,9 @@ class UpdateAnimatedTransformConstraint(Operator):
         return {'FINISHED'}
 
 
-class ANIM_OT_show_group_colors_deprecated(Operator):
-    """This option moved to Preferences > Animation"""
-
-    bl_idname = "anim.show_group_colors_deprecated"
-    bl_label = "Show Group Colors"
-    bl_options = {'REGISTER'}
-
-    @classmethod
-    def poll(cls, context) -> bool:
-        return False
-
-
 classes = (
     ANIM_OT_keying_set_export,
     NLA_OT_bake,
     ClearUselessActions,
     UpdateAnimatedTransformConstraint,
-    ANIM_OT_show_group_colors_deprecated,
 )

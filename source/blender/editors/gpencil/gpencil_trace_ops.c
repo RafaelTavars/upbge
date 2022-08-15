@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2020 Blender Foundation
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2020 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup edgpencil
@@ -23,7 +7,6 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
 #include "BLI_math.h"
 
 #include "BLT_translation.h"
@@ -31,34 +14,26 @@
 #include "DNA_gpencil_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
-#include "DNA_space_types.h"
 
 #include "BKE_context.h"
-#include "BKE_duplilist.h"
 #include "BKE_global.h"
 #include "BKE_gpencil.h"
 #include "BKE_image.h"
 #include "BKE_layer.h"
 #include "BKE_lib_id.h"
 #include "BKE_main.h"
-#include "BKE_material.h"
 #include "BKE_object.h"
 #include "BKE_report.h"
 
 #include "DEG_depsgraph.h"
 #include "DEG_depsgraph_query.h"
 
-#include "UI_interface.h"
-#include "UI_resources.h"
-
 #include "WM_api.h"
 #include "WM_types.h"
 
 #include "RNA_access.h"
 #include "RNA_define.h"
-#include "RNA_enum_types.h"
 
-#include "IMB_imbuf.h"
 #include "IMB_imbuf_types.h"
 
 #include "ED_gpencil.h"
@@ -66,7 +41,6 @@
 
 #include "gpencil_intern.h"
 #include "gpencil_trace.h"
-#include "potracelib.h"
 
 typedef struct TraceJob {
   /* from wmJob */
@@ -87,6 +61,7 @@ typedef struct TraceJob {
   bGPDlayer *gpl;
 
   bool was_ob_created;
+  bool use_current_frame;
 
   int32_t frame_target;
   float threshold;
@@ -216,7 +191,7 @@ static void trace_initialize_job_data(TraceJob *trace_job)
   trace_job->gpd = (bGPdata *)trace_job->ob_gpencil->data;
   trace_job->gpl = BKE_gpencil_layer_active_get(trace_job->gpd);
   if (trace_job->gpl == NULL) {
-    trace_job->gpl = BKE_gpencil_layer_addnew(trace_job->gpd, DATA_("Trace"), true);
+    trace_job->gpl = BKE_gpencil_layer_addnew(trace_job->gpd, DATA_("Trace"), true, false);
   }
 }
 
@@ -228,15 +203,17 @@ static void trace_start_job(void *customdata, short *stop, short *do_update, flo
   trace_job->do_update = do_update;
   trace_job->progress = progress;
   trace_job->was_canceled = false;
+  const int init_frame = max_ii((trace_job->use_current_frame) ? trace_job->frame_target : 0, 0);
 
   G.is_break = false;
 
   /* Single Image. */
-
   if ((trace_job->image->source == IMA_SRC_FILE) ||
       (trace_job->mode == GPENCIL_TRACE_MODE_SINGLE)) {
     void *lock;
-    ImBuf *ibuf = BKE_image_acquire_ibuf(trace_job->image, NULL, &lock);
+    ImageUser *iuser = trace_job->ob_active->iuser;
+    iuser->framenr = init_frame;
+    ImBuf *ibuf = BKE_image_acquire_ibuf(trace_job->image, iuser, &lock);
     if (ibuf) {
       /* Create frame. */
       bGPDframe *gpf = BKE_gpencil_layer_frame_get(
@@ -249,7 +226,7 @@ static void trace_start_job(void *customdata, short *stop, short *do_update, flo
   /* Image sequence. */
   else if (trace_job->image->type == IMA_TYPE_IMAGE) {
     ImageUser *iuser = trace_job->ob_active->iuser;
-    for (int i = 0; i < iuser->frames; i++) {
+    for (int i = init_frame; i < iuser->frames; i++) {
       if (G.is_break) {
         trace_job->was_canceled = true;
         break;
@@ -264,8 +241,7 @@ static void trace_start_job(void *customdata, short *stop, short *do_update, flo
       ImBuf *ibuf = BKE_image_acquire_ibuf(trace_job->image, iuser, &lock);
       if (ibuf) {
         /* Create frame. */
-        bGPDframe *gpf = BKE_gpencil_layer_frame_get(
-            trace_job->gpl, trace_job->frame_target + i, GP_GETFRAME_ADD_NEW);
+        bGPDframe *gpf = BKE_gpencil_layer_frame_get(trace_job->gpl, i, GP_GETFRAME_ADD_NEW);
         gpencil_trace_image(trace_job, ibuf, gpf);
 
         BKE_image_release_ibuf(trace_job->image, ibuf, lock);
@@ -319,7 +295,8 @@ static int gpencil_trace_image_exec(bContext *C, wmOperator *op)
   job->base_active = CTX_data_active_base(C);
   job->ob_active = job->base_active->object;
   job->image = (Image *)job->ob_active->data;
-  job->frame_target = CFRA;
+  job->frame_target = scene->r.cfra;
+  job->use_current_frame = RNA_boolean_get(op->ptr, "use_current_frame");
 
   /* Create a new grease pencil object or reuse selected. */
   eGP_TargetObjectMode target = RNA_enum_get(op->ptr, "target");
@@ -493,4 +470,9 @@ void GPENCIL_OT_trace_image(wmOperatorType *ot)
                GPENCIL_TRACE_MODE_SINGLE,
                "Mode",
                "Determines if trace simple image or full sequence");
+  RNA_def_boolean(ot->srna,
+                  "use_current_frame",
+                  true,
+                  "Start At Current Frame",
+                  "Trace Image starting in current image frame");
 }

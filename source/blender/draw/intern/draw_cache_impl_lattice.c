@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2017 by Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2017 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup draw
@@ -84,7 +68,7 @@ static int lattice_render_verts_len_get(Lattice *lt)
     return vert_len_calc(u, v, w);
   }
 
-  /* TODO remove internal coords */
+  /* TODO: remove internal coords. */
   return vert_len_calc(u, v, w);
 }
 
@@ -102,7 +86,7 @@ static int lattice_render_edges_len_get(Lattice *lt)
     return edge_len_calc(u, v, w);
   }
 
-  /* TODO remove internal coords */
+  /* TODO: remove internal coords. */
   return edge_len_calc(u, v, w);
 }
 
@@ -165,7 +149,7 @@ static LatticeRenderData *lattice_render_data_create(Lattice *lt, const int type
     }
     if (types & (LR_DATATYPE_EDGE)) {
       rdata->edge_len = lattice_render_edges_len_get(lt);
-      /*no edge data */
+      /* No edge data. */
     }
   }
 
@@ -305,7 +289,7 @@ void DRW_lattice_batch_cache_dirty_tag(Lattice *lt, int mode)
       cache->is_dirty = true;
       break;
     case BKE_LATTICE_BATCH_DIRTY_SELECT:
-      /* TODO Separate Flag vbo */
+      /* TODO: Separate Flag VBO. */
       GPU_BATCH_DISCARD_SAFE(cache->overlay_verts);
       break;
     default:

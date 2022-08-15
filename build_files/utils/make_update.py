@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-#
-# "make update" for all platforms, updating svn libraries and tests and Blender
-# git repository and submodules.
-#
-# For release branches, this will check out the appropriate branches of
-# submodules and libraries.
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+"""
+"make update" for all platforms, updating svn libraries and tests and Blender
+git repository and sub-modules.
+
+For release branches, this will check out the appropriate branches of
+sub-modules and libraries.
+"""
 
 import argparse
 import os
+import platform
 import shutil
 import sys
 
@@ -30,6 +34,7 @@ def parse_arguments():
     parser.add_argument("--no-submodules", action="store_true")
     parser.add_argument("--use-tests", action="store_true")
     parser.add_argument("--svn-command", default="svn")
+    parser.add_argument("--svn-branch", default=None)
     parser.add_argument("--git-command", default="git")
     parser.add_argument("--use-centos-libraries", action="store_true")
     return parser.parse_args()
@@ -45,11 +50,16 @@ def svn_update(args, release_version):
     svn_non_interactive = [args.svn_command, '--non-interactive']
 
     lib_dirpath = os.path.join(get_blender_git_root(), '..', 'lib')
-    svn_url = make_utils.svn_libraries_base_url(release_version)
+    svn_url = make_utils.svn_libraries_base_url(release_version, args.svn_branch)
 
     # Checkout precompiled libraries
     if sys.platform == 'darwin':
-        lib_platform = "darwin"
+        if platform.machine() == 'x86_64':
+            lib_platform = "darwin"
+        elif platform.machine() == 'arm64':
+            lib_platform = "darwin_arm64"
+        else:
+            lib_platform = None
     elif sys.platform == 'win32':
         # Windows checkout is usually handled by bat scripts since python3 to run
         # this script is bundled as part of the precompiled libraries. However it
@@ -100,6 +110,9 @@ def svn_update(args, release_version):
                 if not make_utils.command_missing(args.svn_command):
                     call(svn_non_interactive + ["cleanup", lib_dirpath])
                 continue
+            elif dirname.startswith("."):
+                # Temporary paths such as ".mypy_cache" will report a warning, skip hidden directories.
+                continue
 
             svn_dirpath = os.path.join(dirpath, ".svn")
             svn_root_dirpath = os.path.join(lib_dirpath, ".svn")
@@ -118,6 +131,7 @@ def svn_update(args, release_version):
                 # Switch to appropriate branch and update.
                 call(svn_non_interactive + ["switch", svn_url + dirname, dirpath], exit_on_error=False)
                 call(svn_non_interactive + ["update", dirpath])
+
 
 # Test if git repo can be updated.
 def git_update_skip(args, check_remote_exists=True):
@@ -164,26 +178,28 @@ def submodules_update(args, release_version, branch):
         sys.stderr.write("git not found, can't update code\n")
         sys.exit(1)
 
-    # Update submodules to latest master or appropriate release branch.
-    if not release_version:
-        branch = "master"
+    # Update submodules to appropriate given branch,
+    # falling back to master if none is given and/or found in a sub-repository.
+    branch_fallback = "master"
+    if not branch:
+        branch = branch_fallback
 
     submodules = [
-        ("release/scripts/addons", branch),
-        ("release/scripts/addons_contrib", branch),
-        ("release/datafiles/locale", branch),
-        ("source/tools", branch),
+        ("release/scripts/addons", branch, branch_fallback),
+        ("release/scripts/addons_contrib", branch, branch_fallback),
+        ("release/datafiles/locale", branch, branch_fallback),
+        ("source/tools", branch, branch_fallback),
     ]
 
     # Initialize submodules only if needed.
-    for submodule_path, submodule_branch in submodules:
+    for submodule_path, submodule_branch, submodule_branch_fallback in submodules:
         if not os.path.exists(os.path.join(submodule_path, ".git")):
             call([args.git_command, "submodule", "update", "--init", "--recursive"])
             break
 
     # Checkout appropriate branch and pull changes.
     skip_msg = ""
-    for submodule_path, submodule_branch in submodules:
+    for submodule_path, submodule_branch, submodule_branch_fallback in submodules:
         cwd = os.getcwd()
         try:
             os.chdir(submodule_path)
@@ -191,10 +207,20 @@ def submodules_update(args, release_version, branch):
             if msg:
                 skip_msg += submodule_path + " skipped: " + msg + "\n"
             else:
-                if make_utils.git_branch(args.git_command) != submodule_branch:
-                    call([args.git_command, "fetch", "origin"])
-                    call([args.git_command, "checkout", submodule_branch])
-                call([args.git_command, "pull", "--rebase", "origin", submodule_branch])
+                # Find a matching branch that exists.
+                call([args.git_command, "fetch", "origin"])
+                if make_utils.git_branch_exists(args.git_command, submodule_branch):
+                    pass
+                elif make_utils.git_branch_exists(args.git_command, submodule_branch_fallback):
+                    submodule_branch = submodule_branch_fallback
+                else:
+                    submodule_branch = None
+
+                # Switch to branch and pull.
+                if submodule_branch:
+                    if make_utils.git_branch(args.git_command) != submodule_branch:
+                        call([args.git_command, "checkout", submodule_branch])
+                    call([args.git_command, "pull", "--rebase", "origin", submodule_branch])
         finally:
             os.chdir(cwd)
 
@@ -208,6 +234,10 @@ if __name__ == "__main__":
 
     # Test if we are building a specific release version.
     branch = make_utils.git_branch(args.git_command)
+    if branch == 'HEAD':
+        sys.stderr.write('Blender git repository is in detached HEAD state, must be in a branch\n')
+        sys.exit(1)
+
     tag = make_utils.git_tag(args.git_command)
     release_version = make_utils.git_branch_release_version(branch, tag)
 

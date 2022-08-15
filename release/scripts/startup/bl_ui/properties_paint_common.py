@@ -1,22 +1,4 @@
-# ##### BEGIN GPL LICENSE BLOCK #####
-#
-#  This program is free software; you can redistribute it and/or
-#  modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2
-#  of the License, or (at your option) any later version.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software Foundation,
-#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# ##### END GPL LICENSE BLOCK #####
-
-# <pep8 compliant>
+# SPDX-License-Identifier: GPL-2.0-or-later
 from bpy.types import Menu
 
 
@@ -95,6 +77,8 @@ class UnifiedPaintPanel:
             return tool_settings.gpencil_weight_paint
         elif mode == 'VERTEX_GPENCIL':
             return tool_settings.gpencil_vertex_paint
+        elif mode == 'SCULPT_CURVES':
+            return tool_settings.curves_sculpt
         return None
 
     @staticmethod
@@ -252,7 +236,7 @@ class ClonePanel(BrushPanel):
                 col.label(text="Source Clone Slot")
                 col.template_list(
                     "TEXTURE_UL_texpaintslots", "",
-                    mat, "texture_paint_images",
+                    mat, "texture_paint_slots",
                     mat, "paint_clone_slot",
                     rows=2,
                 )
@@ -277,11 +261,10 @@ class TextureMaskPanel(BrushPanel):
         layout.use_property_decorate = False
 
         brush = context.tool_settings.image_paint.brush
+        mask_tex_slot = brush.mask_texture_slot
 
         col = layout.column()
-        col.template_ID_preview(brush, "mask_texture", new="texture.new", rows=3, cols=8)
-
-        mask_tex_slot = brush.mask_texture_slot
+        col.template_ID_preview(mask_tex_slot, "texture", new="texture.new", rows=3, cols=8)
 
         # map_mode
         layout.row().prop(mask_tex_slot, "mask_map_mode", text="Mask Mapping")
@@ -357,7 +340,7 @@ class StrokePanel(BrushPanel):
             col.operator("paintcurve.draw")
             col.separator()
 
-        if brush.use_space:
+        if brush.use_space or brush.use_line or brush.use_curve:
             col.separator()
             row = col.row(align=True)
             col.prop(brush, "dash_ratio", text="Dash Ratio")
@@ -420,7 +403,13 @@ class FalloffPanel(BrushPanel):
         if not super().poll(context):
             return False
         settings = cls.paint_settings(context)
-        return (settings and settings.brush and settings.brush.curve)
+        if not (settings and settings.brush and settings.brush.curve):
+            return False
+        if cls.get_brush_mode(context) == 'SCULPT_CURVES':
+            brush = settings.brush
+            if brush.curves_sculpt_tool in {'ADD', 'DELETE'}:
+                return False
+        return True
 
     def draw(self, context):
         layout = self.layout
@@ -447,7 +436,13 @@ class FalloffPanel(BrushPanel):
             row.operator("brush.curve_preset", icon='LINCURVE', text="").shape = 'LINE'
             row.operator("brush.curve_preset", icon='NOCURVE', text="").shape = 'MAX'
 
+        show_fallof_shape = False
         if mode in {'SCULPT', 'PAINT_VERTEX', 'PAINT_WEIGHT'} and brush.sculpt_tool != 'POSE':
+            show_fallof_shape = True
+        if not show_fallof_shape and mode == 'SCULPT_CURVES' and context.space_data.type == 'PROPERTIES':
+            show_fallof_shape = True
+
+        if show_fallof_shape:
             col.separator()
             row = col.row(align=True)
             row.use_property_split = True
@@ -497,7 +492,7 @@ class DisplayPanel(BrushPanel):
             icon='HIDE_OFF' if brush.use_cursor_overlay else 'HIDE_ON',
         )
 
-        if mode in ['PAINT_2D', 'PAINT_TEXTURE', 'PAINT_VERTEX', 'SCULPT']:
+        if mode in {'PAINT_2D', 'PAINT_TEXTURE', 'PAINT_VERTEX', 'SCULPT'}:
             row = col.row(align=True)
             row.prop(brush, "texture_overlay_alpha", text="Texture Opacity")
             row.prop(brush, "use_primary_overlay_override", toggle=True, text="", icon='BRUSH_DATA')
@@ -507,7 +502,7 @@ class DisplayPanel(BrushPanel):
                     icon='HIDE_OFF' if brush.use_primary_overlay else 'HIDE_ON',
                 )
 
-        if mode in ['PAINT_TEXTURE', 'PAINT_2D']:
+        if mode in {'PAINT_TEXTURE', 'PAINT_2D'}:
             row = col.row(align=True)
             row.prop(brush, "mask_overlay_alpha", text="Mask Texture Opacity")
             row.prop(brush, "use_secondary_overlay_override", toggle=True, text="", icon='BRUSH_DATA')
@@ -614,7 +609,6 @@ def brush_settings(layout, context, brush, popover=False):
 
         # use_persistent, set_persistent_base
         if capabilities.has_persistence:
-            ob = context.sculpt_object
             layout.separator()
             layout.prop(brush, "use_persistent")
             layout.operator("sculpt.set_persistent_base")
@@ -785,6 +779,25 @@ def brush_settings(layout, context, brush, popover=False):
             elif brush.color_type == 'GRADIENT':
                 layout.row().prop(brush, "gradient_fill_mode", expand=True)
 
+    elif mode == 'SCULPT_CURVES':
+        if brush.curves_sculpt_tool == 'ADD':
+            layout.prop(brush.curves_sculpt_settings, "add_amount")
+            col = layout.column(heading="Interpolate", align=True)
+            col.prop(brush.curves_sculpt_settings, "interpolate_length", text="Length")
+            col.prop(brush.curves_sculpt_settings, "interpolate_shape", text="Shape")
+            col.prop(brush.curves_sculpt_settings, "interpolate_point_count", text="Point Count")
+
+            col = layout.column()
+            col.active = not brush.curves_sculpt_settings.interpolate_length
+            col.prop(brush.curves_sculpt_settings, "curve_length")
+
+            col = layout.column()
+            col.active = not brush.curves_sculpt_settings.interpolate_point_count
+            col.prop(brush.curves_sculpt_settings, "points_per_curve")
+        elif brush.curves_sculpt_tool == 'GROW_SHRINK':
+            layout.prop(brush.curves_sculpt_settings, "scale_uniform")
+            layout.prop(brush.curves_sculpt_settings, "minimum_length")
+
 
 def brush_shared_settings(layout, context, brush, popover=False):
     """ Draw simple brush settings that are shared between different paint modes. """
@@ -838,6 +851,12 @@ def brush_shared_settings(layout, context, brush, popover=False):
     if mode == 'UV_SCULPT':
         size = True
         strength = True
+
+    # Sculpt Curves #
+    if mode == 'SCULPT_CURVES':
+        size = True
+        strength = True
+        direction = brush.curves_sculpt_tool in {'GROW_SHRINK', 'SELECTION_PAINT'}
 
     ### Draw settings. ###
     ups = context.scene.tool_settings.unified_paint_settings
@@ -902,7 +921,7 @@ def brush_settings_advanced(layout, context, brush, popover=False):
     if popover:
         brush_settings(layout, context, brush, popover=True)
         layout.separator()
-        layout.label(text="Advanced:")
+        layout.label(text="Advanced")
 
     # These options are shared across many modes.
     use_accumulate = False
@@ -1109,7 +1128,11 @@ def brush_basic_texpaint_settings(layout, context, brush, *, compact=False):
     capabilities = brush.image_paint_capabilities
 
     if capabilities.has_color:
-        UnifiedPaintPanel.prop_unified_color(layout, context, brush, "color", text="")
+        row = layout.row(align=True)
+        row.ui_units_x = 4
+        UnifiedPaintPanel.prop_unified_color(row, context, brush, "color", text="")
+        UnifiedPaintPanel.prop_unified_color(row, context, brush, "secondary_color", text="")
+        row.separator()
         layout.prop(brush, "blend", text="" if compact else "Blend")
 
     UnifiedPaintPanel.prop_unified(
@@ -1143,16 +1166,18 @@ def brush_basic__draw_color_selector(context, layout, brush, gp_settings, props)
     if not gp_settings.use_material_pin:
         ma = context.object.active_material
     icon_id = 0
+    txt_ma = ""
     if ma:
-        icon_id = ma.id_data.preview.icon_id
-        txt_ma = ma.name
-        maxw = 25
-        if len(txt_ma) > maxw:
-            txt_ma = txt_ma[:maxw - 5] + '..' + txt_ma[-3:]
-    else:
-        txt_ma = ""
+        ma.id_data.preview_ensure()
+        if ma.id_data.preview:
+            icon_id = ma.id_data.preview.icon_id
+            txt_ma = ma.name
+            maxw = 25
+            if len(txt_ma) > maxw:
+                txt_ma = txt_ma[:maxw - 5] + '..' + txt_ma[-3:]
 
-    sub = row.row()
+    sub = row.row(align=True)
+    sub.enabled = not gp_settings.use_material_pin
     sub.ui_units_x = 8
     sub.popover(
         panel="TOPBAR_PT_gpencil_materials",
@@ -1215,21 +1240,29 @@ def brush_basic_gpencil_paint_settings(layout, context, brush, *, compact=False)
 
     # FIXME: tools must use their own UI drawing!
     elif brush.gpencil_tool == 'FILL':
+        use_property_split_prev = layout.use_property_split
+        if compact:
+            row = layout.row(align=True)
+            row.prop(gp_settings, "fill_direction", text="", expand=True)
+        else:
+            layout.use_property_split = False
+            row = layout.row(align=True)
+            row.prop(gp_settings, "fill_direction", expand=True)
+
         row = layout.row(align=True)
-        row.prop(gp_settings, "fill_direction", text="", expand=True)
+        row.prop(gp_settings, "fill_factor")
         row = layout.row(align=True)
-        row.prop(gp_settings, "fill_leak", text="Leak Size")
+        row.prop(gp_settings, "dilate")
         row = layout.row(align=True)
         row.prop(brush, "size", text="Thickness")
-        row = layout.row(align=True)
-        row.prop(gp_settings, "fill_simplify_level", text="Simplify")
+        layout.use_property_split = use_property_split_prev
 
     else:  # brush.gpencil_tool == 'DRAW/TINT':
         row = layout.row(align=True)
         row.prop(brush, "size", text="Radius")
         row.prop(gp_settings, "use_pressure", text="", icon='STYLUS_PRESSURE')
 
-        if gp_settings.use_pressure and context.area.type == 'PROPERTIES':
+        if gp_settings.use_pressure and not compact:
             col = layout.column()
             col.template_curve_mapping(gp_settings, "curve_sensitivity", brush=True,
                                        use_negative_slope=True)
@@ -1238,7 +1271,7 @@ def brush_basic_gpencil_paint_settings(layout, context, brush, *, compact=False)
         row.prop(gp_settings, "pen_strength", slider=True)
         row.prop(gp_settings, "use_strength_pressure", text="", icon='STYLUS_PRESSURE')
 
-        if gp_settings.use_strength_pressure and context.area.type == 'PROPERTIES':
+        if gp_settings.use_strength_pressure and not compact:
             col = layout.column()
             col.template_curve_mapping(gp_settings, "curve_strength", brush=True,
                                        use_negative_slope=True)
@@ -1246,6 +1279,12 @@ def brush_basic_gpencil_paint_settings(layout, context, brush, *, compact=False)
         if brush.gpencil_tool == 'TINT':
             row = layout.row(align=True)
             row.prop(gp_settings, "vertex_mode", text="Mode")
+        else:
+            row = layout.row(align=True)
+            if context.region.type == 'TOOL_HEADER':
+                row.prop(gp_settings, "caps_type", text="", expand=True)
+            else:
+                row.prop(gp_settings, "caps_type", text="Caps Type")
 
     # FIXME: tools must use their own UI drawing!
     if tool.idname in {
@@ -1275,8 +1314,12 @@ def brush_basic_gpencil_paint_settings(layout, context, brush, *, compact=False)
                 layout.template_curve_mapping(settings, "thickness_primitive_curve", brush=True)
 
 
-def brush_basic_gpencil_sculpt_settings(layout, context, brush, *, compact=False):
+def brush_basic_gpencil_sculpt_settings(layout, _context, brush, *, compact=False):
+    if brush is None:
+        return
     gp_settings = brush.gpencil_settings
+    if gp_settings is None:
+        return
     tool = brush.gpencil_sculpt_tool
 
     row = layout.row(align=True)
@@ -1310,7 +1353,6 @@ def brush_basic_gpencil_sculpt_settings(layout, context, brush, *, compact=False
 
 
 def brush_basic_gpencil_weight_settings(layout, _context, brush, *, compact=False):
-    gp_settings = brush.gpencil_settings
     layout.prop(brush, "size", slider=True)
 
     row = layout.row(align=True)

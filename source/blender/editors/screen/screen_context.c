@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2008 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2008 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup edscr
@@ -36,6 +20,7 @@
 #include "DNA_sequence_types.h"
 #include "DNA_space_types.h"
 #include "DNA_windowmanager_types.h"
+#include "DNA_workspace_types.h"
 
 #include "BLI_ghash.h"
 #include "BLI_listbase.h"
@@ -48,14 +33,20 @@
 #include "BKE_gpencil.h"
 #include "BKE_layer.h"
 #include "BKE_object.h"
+#include "BKE_tracking.h"
 
 #include "RNA_access.h"
+#include "RNA_prototypes.h"
 
 #include "ED_anim_api.h"
 #include "ED_armature.h"
+#include "ED_clip.h"
 #include "ED_gpencil.h"
 
+#include "SEQ_channels.h"
+#include "SEQ_select.h"
 #include "SEQ_sequencer.h"
+#include "SEQ_transform.h"
 
 #include "UI_interface.h"
 #include "WM_api.h"
@@ -90,10 +81,14 @@ const char *screen_context_dir[] = {
     "image_paint_object",
     "particle_edit_object",
     "pose_object",
+    "active_sequence_strip",
     "sequences",
     "selected_sequences",
     "selected_editable_sequences", /* sequencer */
-    "selected_nla_strips",         /* nla editor */
+    "active_nla_track",
+    "active_nla_strip",
+    "selected_nla_strips", /* nla editor */
+    "selected_movieclip_tracks",
     "gpencil_data",
     "gpencil_data_owner", /* grease pencil data */
     "annotation_data",
@@ -105,12 +100,17 @@ const char *screen_context_dir[] = {
     "active_gpencil_frame",
     "active_annotation_layer",
     "active_operator",
+    "active_action",
+    "selected_visible_actions",
+    "selected_editable_actions",
     "visible_fcurves",
     "editable_fcurves",
     "selected_visible_fcurves",
     "selected_editable_fcurves",
     "active_editable_fcurve",
     "selected_editable_keyframes",
+    "ui_list",
+    "asset_library_ref",
     NULL,
 };
 
@@ -489,7 +489,7 @@ static eContextResult screen_ctx_active_pose_bone(const bContext *C, bContextDat
   Object *obact = view_layer->basact ? view_layer->basact->object : NULL;
   Object *obpose = BKE_object_pose_armature_get(obact);
 
-  bPoseChannel *pchan = BKE_pose_channel_active(obpose);
+  bPoseChannel *pchan = BKE_pose_channel_active_if_layer_visible(obpose);
   if (pchan) {
     CTX_data_pointer_set(result, &obpose->id, &RNA_PoseBone, pchan);
     return CTX_RESULT_OK;
@@ -600,11 +600,23 @@ static eContextResult screen_ctx_pose_object(const bContext *C, bContextDataResu
   }
   return CTX_RESULT_OK;
 }
+static eContextResult screen_ctx_active_sequence_strip(const bContext *C,
+                                                       bContextDataResult *result)
+{
+  wmWindow *win = CTX_wm_window(C);
+  Scene *scene = WM_window_get_active_scene(win);
+  Sequence *seq = SEQ_select_active_get(scene);
+  if (seq) {
+    CTX_data_pointer_set(result, &scene->id, &RNA_Sequence, seq);
+    return CTX_RESULT_OK;
+  }
+  return CTX_RESULT_NO_DATA;
+}
 static eContextResult screen_ctx_sequences(const bContext *C, bContextDataResult *result)
 {
   wmWindow *win = CTX_wm_window(C);
   Scene *scene = WM_window_get_active_scene(win);
-  Editing *ed = SEQ_editing_get(scene, false);
+  Editing *ed = SEQ_editing_get(scene);
   if (ed) {
     LISTBASE_FOREACH (Sequence *, seq, ed->seqbasep) {
       CTX_data_list_add(result, &scene->id, &RNA_Sequence, seq);
@@ -618,7 +630,7 @@ static eContextResult screen_ctx_selected_sequences(const bContext *C, bContextD
 {
   wmWindow *win = CTX_wm_window(C);
   Scene *scene = WM_window_get_active_scene(win);
-  Editing *ed = SEQ_editing_get(scene, false);
+  Editing *ed = SEQ_editing_get(scene);
   if (ed) {
     LISTBASE_FOREACH (Sequence *, seq, ed->seqbasep) {
       if (seq->flag & SELECT) {
@@ -635,14 +647,35 @@ static eContextResult screen_ctx_selected_editable_sequences(const bContext *C,
 {
   wmWindow *win = CTX_wm_window(C);
   Scene *scene = WM_window_get_active_scene(win);
-  Editing *ed = SEQ_editing_get(scene, false);
-  if (ed) {
-    LISTBASE_FOREACH (Sequence *, seq, ed->seqbasep) {
-      if (seq->flag & SELECT && !(seq->flag & SEQ_LOCK)) {
-        CTX_data_list_add(result, &scene->id, &RNA_Sequence, seq);
-      }
+  Editing *ed = SEQ_editing_get(scene);
+  if (ed == NULL) {
+    return CTX_RESULT_NO_DATA;
+  }
+
+  ListBase *channels = SEQ_channels_displayed_get(ed);
+  LISTBASE_FOREACH (Sequence *, seq, ed->seqbasep) {
+    if (seq->flag & SELECT && !SEQ_transform_is_locked(channels, seq)) {
+      CTX_data_list_add(result, &scene->id, &RNA_Sequence, seq);
     }
-    CTX_data_type_set(result, CTX_DATA_TYPE_COLLECTION);
+  }
+  CTX_data_type_set(result, CTX_DATA_TYPE_COLLECTION);
+  return CTX_RESULT_OK;
+}
+
+static eContextResult screen_ctx_active_nla_track(const bContext *C, bContextDataResult *result)
+{
+  PointerRNA ptr;
+  if (ANIM_nla_context_track_ptr(C, &ptr)) {
+    CTX_data_pointer_set_ptr(result, &ptr);
+    return CTX_RESULT_OK;
+  }
+  return CTX_RESULT_NO_DATA;
+}
+static eContextResult screen_ctx_active_nla_strip(const bContext *C, bContextDataResult *result)
+{
+  PointerRNA ptr;
+  if (ANIM_nla_context_strip_ptr(C, &ptr)) {
+    CTX_data_pointer_set_ptr(result, &ptr);
     return CTX_RESULT_OK;
   }
   return CTX_RESULT_NO_DATA;
@@ -671,6 +704,33 @@ static eContextResult screen_ctx_selected_nla_strips(const bContext *C, bContext
     return CTX_RESULT_OK;
   }
   return CTX_RESULT_NO_DATA;
+}
+static eContextResult screen_ctx_selected_movieclip_tracks(const bContext *C,
+                                                           bContextDataResult *result)
+{
+  SpaceClip *space_clip = CTX_wm_space_clip(C);
+  if (space_clip == NULL) {
+    return CTX_RESULT_NO_DATA;
+  }
+  MovieClip *clip = ED_space_clip_get_clip(space_clip);
+  if (clip == NULL) {
+    return CTX_RESULT_NO_DATA;
+  }
+  MovieTracking *tracking = &clip->tracking;
+  if (tracking == NULL) {
+    return CTX_RESULT_NO_DATA;
+  }
+
+  ListBase *tracks_list = BKE_tracking_get_active_tracks(tracking);
+  LISTBASE_FOREACH (MovieTrackingTrack *, track, tracks_list) {
+    if (!TRACK_SELECTED(track)) {
+      continue;
+    }
+    CTX_data_list_add(result, &clip->id, &RNA_MovieTrackingTrack, track);
+  }
+
+  CTX_data_type_set(result, CTX_DATA_TYPE_COLLECTION);
+  return CTX_RESULT_OK;
 }
 static eContextResult screen_ctx_gpencil_data(const bContext *C, bContextDataResult *result)
 {
@@ -704,7 +764,7 @@ static eContextResult screen_ctx_gpencil_data_owner(const bContext *C, bContextD
   bGPdata **gpd_ptr = ED_gpencil_data_get_pointers_direct(area, obact, &ptr);
 
   if (gpd_ptr) {
-    CTX_data_pointer_set(result, ptr.owner_id, ptr.type, ptr.data);
+    CTX_data_pointer_set_ptr(result, &ptr);
     return CTX_RESULT_OK;
   }
   return CTX_RESULT_NO_DATA;
@@ -736,7 +796,7 @@ static eContextResult screen_ctx_annotation_data_owner(const bContext *C,
   bGPdata **gpd_ptr = ED_annotation_data_get_pointers_direct((ID *)screen, area, scene, &ptr);
 
   if (gpd_ptr) {
-    CTX_data_pointer_set(result, ptr.owner_id, ptr.type, ptr.data);
+    CTX_data_pointer_set_ptr(result, &ptr);
     return CTX_RESULT_OK;
   }
   return CTX_RESULT_NO_DATA;
@@ -866,7 +926,7 @@ static eContextResult screen_ctx_editable_gpencil_strokes(const bContext *C,
           LISTBASE_FOREACH (bGPDstroke *, gps, &gpf->strokes) {
             if (ED_gpencil_stroke_can_use_direct(area, gps)) {
               /* check if the color is editable */
-              if (ED_gpencil_stroke_color_use(obact, gpl, gps) == false) {
+              if (ED_gpencil_stroke_material_editable(obact, gpl, gps) == false) {
                 continue;
               }
 
@@ -874,7 +934,7 @@ static eContextResult screen_ctx_editable_gpencil_strokes(const bContext *C,
             }
           }
         }
-        /* if not multiedit out of loop */
+        /* If not multi-edit out of loop. */
         if (!is_multiedit) {
           break;
         }
@@ -896,17 +956,118 @@ static eContextResult screen_ctx_active_operator(const bContext *C, bContextData
     /* do nothing */
   }
   else {
-    /* note, this checks poll, could be a problem, but this also
+    /* NOTE: this checks poll, could be a problem, but this also
      * happens for the toolbar */
     op = WM_operator_last_redo(C);
   }
-  /* TODO, get the operator from popup's */
+  /* TODO: get the operator from popup's. */
 
   if (op && op->ptr) {
     CTX_data_pointer_set(result, NULL, &RNA_Operator, op);
     return CTX_RESULT_OK;
   }
   return CTX_RESULT_NO_DATA;
+}
+static eContextResult screen_ctx_sel_actions_impl(const bContext *C,
+                                                  bContextDataResult *result,
+                                                  bool active_only,
+                                                  bool editable)
+{
+  bAnimContext ac;
+  if (ANIM_animdata_get_context(C, &ac) && ELEM(ac.spacetype, SPACE_ACTION, SPACE_GRAPH)) {
+    /* In the Action and Shape Key editor always use the action field at the top. */
+    if (ac.spacetype == SPACE_ACTION) {
+      SpaceAction *saction = (SpaceAction *)ac.sl;
+
+      if (ELEM(saction->mode, SACTCONT_ACTION, SACTCONT_SHAPEKEY)) {
+        if (active_only) {
+          CTX_data_id_pointer_set(result, (ID *)saction->action);
+        }
+        else {
+          if (saction->action && !(editable && ID_IS_LINKED(saction->action))) {
+            CTX_data_id_list_add(result, &saction->action->id);
+          }
+
+          CTX_data_type_set(result, CTX_DATA_TYPE_COLLECTION);
+        }
+
+        return CTX_RESULT_OK;
+      }
+    }
+
+    /* Search for selected animation data items. */
+    ListBase anim_data = {NULL, NULL};
+
+    int filter = ANIMFILTER_DATA_VISIBLE;
+    bool check_selected = false;
+
+    switch (ac.spacetype) {
+      case SPACE_GRAPH:
+        filter |= ANIMFILTER_FCURVESONLY | ANIMFILTER_CURVE_VISIBLE |
+                  (active_only ? ANIMFILTER_ACTIVE : ANIMFILTER_SEL);
+        break;
+
+      case SPACE_ACTION:
+        filter |= ANIMFILTER_LIST_VISIBLE | ANIMFILTER_LIST_CHANNELS;
+        check_selected = true;
+        break;
+    }
+
+    ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
+
+    GSet *seen_set = active_only ? NULL : BLI_gset_ptr_new("seen actions");
+
+    LISTBASE_FOREACH (bAnimListElem *, ale, &anim_data) {
+      /* In dopesheet check selection status of individual items, skipping
+       * if not selected or has no selection flag. This is needed so that
+       * selecting action or group rows without any channels works. */
+      if (check_selected && ANIM_channel_setting_get(&ac, ale, ACHANNEL_SETTING_SELECT) <= 0) {
+        continue;
+      }
+
+      bAction *action = ANIM_channel_action_get(ale);
+
+      if (action) {
+        if (active_only) {
+          CTX_data_id_pointer_set(result, (ID *)action);
+          break;
+        }
+        if (editable && ID_IS_LINKED(action)) {
+          continue;
+        }
+
+        /* Add the action to the output list if not already added. */
+        if (BLI_gset_add(seen_set, action)) {
+          CTX_data_id_list_add(result, &action->id);
+        }
+      }
+    }
+
+    ANIM_animdata_freelist(&anim_data);
+
+    if (!active_only) {
+      BLI_gset_free(seen_set, NULL);
+
+      CTX_data_type_set(result, CTX_DATA_TYPE_COLLECTION);
+    }
+
+    return CTX_RESULT_OK;
+  }
+  return CTX_RESULT_NO_DATA;
+}
+static eContextResult screen_ctx_active_action(const bContext *C, bContextDataResult *result)
+{
+  return screen_ctx_sel_actions_impl(C, result, true, false);
+}
+static eContextResult screen_ctx_selected_visible_actions(const bContext *C,
+                                                          bContextDataResult *result)
+{
+  return screen_ctx_sel_actions_impl(C, result, false, false);
+}
+static eContextResult screen_ctx_selected_editable_actions(const bContext *C,
+                                                           bContextDataResult *result)
+{
+  return screen_ctx_sel_actions_impl(C, result, false, true);
 }
 static eContextResult screen_ctx_sel_edit_fcurves_(const bContext *C,
                                                    bContextDataResult *result,
@@ -917,8 +1078,9 @@ static eContextResult screen_ctx_sel_edit_fcurves_(const bContext *C,
     ListBase anim_data = {NULL, NULL};
 
     int filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_NODUPLIS) |
-                 (ac.spacetype == SPACE_GRAPH ? ANIMFILTER_CURVE_VISIBLE :
-                                                ANIMFILTER_LIST_VISIBLE) |
+                 (ac.spacetype == SPACE_GRAPH ?
+                      (ANIMFILTER_CURVE_VISIBLE | ANIMFILTER_FCURVESONLY) :
+                      ANIMFILTER_LIST_VISIBLE) |
                  extra_filter;
 
     ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
@@ -962,7 +1124,7 @@ static eContextResult screen_ctx_active_editable_fcurve(const bContext *C,
     ListBase anim_data = {NULL, NULL};
 
     int filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_ACTIVE | ANIMFILTER_FOREDIT |
-                  ANIMFILTER_CURVE_VISIBLE);
+                  ANIMFILTER_FCURVESONLY | ANIMFILTER_CURVE_VISIBLE);
 
     ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
 
@@ -988,8 +1150,9 @@ static eContextResult screen_ctx_selected_editable_keyframes(const bContext *C,
     /* Use keyframes from editable selected FCurves. */
     int filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_NODUPLIS | ANIMFILTER_FOREDIT |
                   ANIMFILTER_SEL) |
-                 (ac.spacetype == SPACE_GRAPH ? ANIMFILTER_CURVE_VISIBLE :
-                                                ANIMFILTER_LIST_VISIBLE);
+                 (ac.spacetype == SPACE_GRAPH ?
+                      (ANIMFILTER_CURVE_VISIBLE | ANIMFILTER_FCURVESONLY) :
+                      ANIMFILTER_LIST_VISIBLE);
 
     ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
 
@@ -1020,6 +1183,28 @@ static eContextResult screen_ctx_selected_editable_keyframes(const bContext *C,
 
     CTX_data_type_set(result, CTX_DATA_TYPE_COLLECTION);
     return CTX_RESULT_OK;
+  }
+  return CTX_RESULT_NO_DATA;
+}
+
+static eContextResult screen_ctx_asset_library(const bContext *C, bContextDataResult *result)
+{
+  WorkSpace *workspace = CTX_wm_workspace(C);
+  CTX_data_pointer_set(
+      result, &workspace->id, &RNA_AssetLibraryReference, &workspace->asset_library_ref);
+  return CTX_RESULT_OK;
+}
+
+static eContextResult screen_ctx_ui_list(const bContext *C, bContextDataResult *result)
+{
+  wmWindow *win = CTX_wm_window(C);
+  ARegion *region = CTX_wm_region(C);
+  if (region) {
+    uiList *list = UI_list_find_mouse_over(region, win->eventstate);
+    if (list) {
+      CTX_data_pointer_set(result, NULL, &RNA_UIList, list);
+      return CTX_RESULT_OK;
+    }
   }
   return CTX_RESULT_NO_DATA;
 }
@@ -1077,10 +1262,14 @@ static void ensure_ed_screen_context_functions(void)
   register_context_function("image_paint_object", screen_ctx_image_paint_object);
   register_context_function("particle_edit_object", screen_ctx_particle_edit_object);
   register_context_function("pose_object", screen_ctx_pose_object);
+  register_context_function("active_sequence_strip", screen_ctx_active_sequence_strip);
   register_context_function("sequences", screen_ctx_sequences);
   register_context_function("selected_sequences", screen_ctx_selected_sequences);
   register_context_function("selected_editable_sequences", screen_ctx_selected_editable_sequences);
+  register_context_function("active_nla_track", screen_ctx_active_nla_track);
+  register_context_function("active_nla_strip", screen_ctx_active_nla_strip);
   register_context_function("selected_nla_strips", screen_ctx_selected_nla_strips);
+  register_context_function("selected_movieclip_tracks", screen_ctx_selected_movieclip_tracks);
   register_context_function("gpencil_data", screen_ctx_gpencil_data);
   register_context_function("gpencil_data_owner", screen_ctx_gpencil_data_owner);
   register_context_function("annotation_data", screen_ctx_annotation_data);
@@ -1092,15 +1281,19 @@ static void ensure_ed_screen_context_functions(void)
   register_context_function("editable_gpencil_layers", screen_ctx_editable_gpencil_layers);
   register_context_function("editable_gpencil_strokes", screen_ctx_editable_gpencil_strokes);
   register_context_function("active_operator", screen_ctx_active_operator);
+  register_context_function("active_action", screen_ctx_active_action);
+  register_context_function("selected_visible_actions", screen_ctx_selected_visible_actions);
+  register_context_function("selected_editable_actions", screen_ctx_selected_editable_actions);
   register_context_function("editable_fcurves", screen_ctx_editable_fcurves);
   register_context_function("visible_fcurves", screen_ctx_visible_fcurves);
   register_context_function("selected_editable_fcurves", screen_ctx_selected_editable_fcurves);
   register_context_function("selected_visible_fcurves", screen_ctx_selected_visible_fcurves);
   register_context_function("active_editable_fcurve", screen_ctx_active_editable_fcurve);
   register_context_function("selected_editable_keyframes", screen_ctx_selected_editable_keyframes);
+  register_context_function("asset_library_ref", screen_ctx_asset_library);
+  register_context_function("ui_list", screen_ctx_ui_list);
 }
 
-/* Entry point for the screen context. */
 int ed_screen_context(const bContext *C, const char *member, bContextDataResult *result)
 {
   if (CTX_data_dir(member)) {

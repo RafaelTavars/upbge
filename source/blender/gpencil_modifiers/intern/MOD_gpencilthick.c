@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2017, Blender Foundation
- * This is a new part of Blender
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2017 Blender Foundation. */
 
 /** \file
  * \ingroup modifiers
@@ -24,7 +8,7 @@
 #include <stdio.h>
 
 #include "BLI_listbase.h"
-#include "BLI_math.h"
+#include "BLI_math_vector.h"
 #include "BLI_utildefines.h"
 
 #include "BLT_translation.h"
@@ -34,13 +18,11 @@
 #include "DNA_gpencil_types.h"
 #include "DNA_meshdata_types.h"
 #include "DNA_object_types.h"
-#include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 
 #include "BKE_colortools.h"
 #include "BKE_context.h"
 #include "BKE_deform.h"
-#include "BKE_gpencil.h"
 #include "BKE_gpencil_modifier.h"
 #include "BKE_lib_query.h"
 #include "BKE_modifier.h"
@@ -120,18 +102,28 @@ static void deformStroke(GpencilModifierData *md,
   }
 
   float stroke_thickness_inv = 1.0f / max_ii(gps->thickness, 1);
+  const bool is_normalized = (mmd->flag & GP_THICK_NORMALIZE);
+  bool is_inverted = ((mmd->flag & GP_THICK_WEIGHT_FACTOR) == 0) &&
+                     ((mmd->flag & GP_THICK_INVERT_VGROUP) != 0);
 
   for (int i = 0; i < gps->totpoints; i++) {
     bGPDspoint *pt = &gps->points[i];
     MDeformVert *dvert = gps->dvert != NULL ? &gps->dvert[i] : NULL;
     /* Verify point is part of vertex group. */
-    float weight = get_modifier_point_weight(
-        dvert, (mmd->flag & GP_THICK_INVERT_VGROUP) != 0, def_nr);
+    float weight = get_modifier_point_weight(dvert, is_inverted, def_nr);
     if (weight < 0.0f) {
       continue;
     }
 
+    /* Apply weight directly. */
+    if ((!is_normalized) && (mmd->flag & GP_THICK_WEIGHT_FACTOR)) {
+      pt->pressure *= ((mmd->flag & GP_THICK_INVERT_VGROUP) ? 1.0f - weight : weight);
+      CLAMP_MIN(pt->pressure, 0.0f);
+      continue;
+    }
+
     float curvef = 1.0f;
+
     if ((mmd->flag & GP_THICK_CUSTOM_CURVE) && (mmd->curve_thickness)) {
       /* Normalize value to evaluate curve. */
       float value = (float)i / (gps->totpoints - 1);
@@ -139,7 +131,7 @@ static void deformStroke(GpencilModifierData *md,
     }
 
     float target;
-    if (mmd->flag & GP_THICK_NORMALIZE) {
+    if (is_normalized) {
       target = mmd->thickness * stroke_thickness_inv;
       target *= curvef;
     }
@@ -159,15 +151,7 @@ static void bakeModifier(struct Main *UNUSED(bmain),
                          GpencilModifierData *md,
                          Object *ob)
 {
-  bGPdata *gpd = ob->data;
-
-  LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
-    LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
-      LISTBASE_FOREACH (bGPDstroke *, gps, &gpf->strokes) {
-        deformStroke(md, depsgraph, ob, gpl, gpf, gps);
-      }
-    }
-  }
+  generic_bake_deform_stroke(depsgraph, md, ob, false, deformStroke);
 }
 
 static void foreachIDLink(GpencilModifierData *md, Object *ob, IDWalkFunc walk, void *userData)
@@ -185,13 +169,18 @@ static void panel_draw(const bContext *UNUSED(C), Panel *panel)
 
   uiLayoutSetPropSep(layout, true);
 
-  uiItemR(layout, ptr, "normalize_thickness", 0, NULL, ICON_NONE);
-
-  if (RNA_boolean_get(ptr, "normalize_thickness")) {
+  uiItemR(layout, ptr, "use_normalized_thickness", 0, NULL, ICON_NONE);
+  if (RNA_boolean_get(ptr, "use_normalized_thickness")) {
     uiItemR(layout, ptr, "thickness", 0, NULL, ICON_NONE);
   }
   else {
-    uiItemR(layout, ptr, "thickness_factor", 0, NULL, ICON_NONE);
+    const bool is_weighted = !RNA_boolean_get(ptr, "use_weight_factor");
+    uiLayout *row = uiLayoutRow(layout, true);
+    uiLayoutSetActive(row, is_weighted);
+    uiItemR(row, ptr, "thickness_factor", 0, NULL, ICON_NONE);
+    uiLayout *sub = uiLayoutRow(row, true);
+    uiLayoutSetActive(sub, true);
+    uiItemR(row, ptr, "use_weight_factor", 0, "", ICON_MOD_VERTEX_WEIGHT);
   }
 
   gpencil_modifier_panel_end(layout, ptr);
@@ -217,7 +206,7 @@ static void panelRegister(ARegionType *region_type)
 }
 
 GpencilModifierTypeInfo modifierType_Gpencil_Thick = {
-    /* name */ "Thickness",
+    /* name */ N_("Thickness"),
     /* structName */ "ThickGpencilModifierData",
     /* structSize */ sizeof(ThickGpencilModifierData),
     /* type */ eGpencilModifierTypeType_Gpencil,

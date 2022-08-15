@@ -1,22 +1,4 @@
-# ##### BEGIN GPL LICENSE BLOCK #####
-#
-#  This program is free software; you can redistribute it and/or
-#  modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2
-#  of the License, or (at your option) any later version.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software Foundation,
-#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# ##### END GPL LICENSE BLOCK #####
-
-# <pep8 compliant>
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 import enchant
 import os
@@ -48,6 +30,8 @@ class SpellChecker:
         "equi",  # equi-angular, etc.
         "fader",
         "globbing",
+        "gridded",
+        "haptics",
         "hasn",  # hasn't
         "hetero",
         "hoc",  # ad-hoc
@@ -63,14 +47,25 @@ class SpellChecker:
         "mplayer",
         "ons",  # add-ons
         "pong",  # ping pong
+        "resumable",
+        "runtimes",
         "scalable",
         "shadeless",
         "shouldn",  # shouldn't
         "smoothen",
         "spacings",
         "teleport", "teleporting",
+        "tangency",
         "vertices",
         "wasn",  # wasn't
+        "zig", "zag",
+
+        # Brands etc.
+        "htc",
+        "huawei",
+        "radeon",
+        "vive",
+        "xbox",
 
         # Merged words
         "antialiasing", "antialias",
@@ -107,6 +102,7 @@ class SpellChecker:
         "builtin", "builtins",
         "bytecode",
         "chunksize",
+        "codebase",
         "customdata",
         "dataset", "datasets",
         "de",
@@ -119,13 +115,17 @@ class SpellChecker:
         "dirtree",
         "editcurve",
         "editmesh",
+        "faceforward",
         "filebrowser",
         "filelist",
         "filename", "filenames",
         "filepath", "filepaths",
         "forcefield", "forcefields",
+        "framerange",
+        "frontmost",
         "fulldome", "fulldomes",
         "fullscreen",
+        "gamepad",
         "gridline", "gridlines",
         "hardlight",
         "hemi",
@@ -134,6 +134,7 @@ class SpellChecker:
         "inscatter", "inscattering",
         "libdata",
         "lightcache",
+        "lightgroup", "lightgroups",
         "lightprobe", "lightprobes",
         "lightless",
         "lineset",
@@ -171,11 +172,14 @@ class SpellChecker:
         "precalculate",
         "precomputing",
         "prefetch",
+        "prefilter", "prefiltering",
+        "preload",
         "premultiply", "premultiplied",
         "prepass",
         "prepend",
-        "preprocess", "preprocessing", "preprocessor",
+        "preprocess", "preprocessing", "preprocessor", "preprocessed",
         "preseek",
+        "preselect", "preselected",
         "promillage",
         "pushdown",
         "raytree",
@@ -183,11 +187,13 @@ class SpellChecker:
         "realtime",
         "reinject", "reinjected",
         "rekey",
+        "relink",
         "remesh",
         "reprojection", "reproject", "reprojecting",
+        "resample",
         "resize",
         "restpose",
-        "resync",
+        "resync", "resynced",
         "retarget", "retargets", "retargeting", "retargeted",
         "retiming",
         "rigidbody",
@@ -200,6 +206,7 @@ class SpellChecker:
         "selfcollision",
         "shadowbuffer", "shadowbuffers",
         "singletexture",
+        "softbox",
         "spellcheck", "spellchecking",
         "startup",
         "stateful",
@@ -215,6 +222,7 @@ class SpellChecker:
         "subpath",
         "subsize",
         "substep", "substeps",
+        "substring",
         "targetless",
         "textbox", "textboxes",
         "tilemode",
@@ -223,8 +231,10 @@ class SpellChecker:
         "todo",
         "tradeoff",
         "un",
+        "unadjust", "unadjusted",
         "unassociate", "unassociated",
         "unbake",
+        "uncheck",
         "unclosed",
         "uncomment",
         "unculled",
@@ -379,11 +389,15 @@ class SpellChecker:
         "albedo",
         "anamorphic",
         "anisotropic", "anisotropy",
+        "bimanual",  # OpenXR?
         "bitangent",
         "boid", "boids",
         "ceil",
+        "centum",  # From 'centum weight'
         "compressibility",
+        "coplanar",
         "curvilinear",
+        "dekameter", "dekameters",
         "equiangular",
         "equisolid",
         "euler", "eulers",
@@ -391,6 +405,7 @@ class SpellChecker:
         "gettext",
         "hashable",
         "hotspot",
+        "hydrostatic",
         "interocular",
         "intrinsics",
         "irradiance",
@@ -400,8 +415,11 @@ class SpellChecker:
         "lambertian",
         "laplacian",
         "metadata",
+        "microwatt", "microwatts",
+        "milliwatt", "milliwatts",
         "msgfmt",
         "nand", "xnor",
+        "nanowatt", "nanowatts",
         "normals",
         "numpad",
         "octahedral",
@@ -415,6 +433,7 @@ class SpellChecker:
         "polyline", "polylines",
         "probabilistically",
         "pulldown", "pulldowns",
+        "quadratically",
         "quantized",
         "quartic",
         "quaternion", "quaternions",
@@ -428,6 +447,7 @@ class SpellChecker:
         "spacebar",
         "subtractive",
         "superellipse",
+        "thumbstick",
         "tooltip", "tooltips",
         "trackpad",
         "tuple",
@@ -472,6 +492,7 @@ class SpellChecker:
         "framerate",
         "gimbal",
         "grayscale",
+        "icosahedron",
         "icosphere",
         "inpaint",
         "kerning",
@@ -481,6 +502,7 @@ class SpellChecker:
         "luminance",
         "mantaflow",
         "matcap",
+        "microfacet",
         "midtones",
         "mipmap", "mipmaps", "mip",
         "ngon", "ngons",
@@ -488,10 +510,12 @@ class SpellChecker:
         "nurb", "nurbs",
         "perlin",
         "phong",
+        "photorealistic",
         "pinlight",
+        "posterize",
         "qi",
         "radiosity",
-        "raycasting",
+        "raycast", "raycasting",
         "raytrace", "raytracing", "raytraced",
         "refractions",
         "remesher", "remeshing", "remesh",
@@ -509,6 +533,7 @@ class SpellChecker:
         "tonemap",
         "toon",
         "transmissive",
+        "uvproject",
         "vividlight",
         "volumetrics",
         "voronoi",
@@ -529,6 +554,7 @@ class SpellChecker:
         "bspline",
         "bweight",
         "colorband",
+        "crazyspace",
         "datablock", "datablocks",
         "despeckle",
         "depsgraph",
@@ -644,14 +670,16 @@ class SpellChecker:
 
         # Acronyms
         "aa", "msaa",
+        "acescg",  # ACEScg color space.
         "ao",
+        "aov", "aovs",
         "api",
         "apic",  # Affine Particle-In-Cell
         "asc", "cdl",
         "ascii",
         "atrac",
         "avx",
-        "bsdf",
+        "bsdf", "bsdfs",
         "bssrdf",
         "bw",
         "ccd",
@@ -661,11 +689,13 @@ class SpellChecker:
         "ctrl",
         "cw", "ccw",
         "dev",
+        "dls",
         "djv",
         "dpi",
         "dvar",
         "dx",
         "eo",
+        "ewa",
         "fh",
         "fk",
         "fov",
@@ -682,28 +712,34 @@ class SpellChecker:
         "hdc",
         "hdr", "hdri", "hdris",
         "hh", "mm", "ss", "ff",  # hh:mm:ss:ff timecode
+        "hpg",  # Intel Xe-HPG architecture
         "hsv", "hsva", "hsl",
         "id",
         "ies",
         "ior",
         "itu",
         "jonswap",
+        "lfe",
         "lhs",
         "lmb", "mmb", "rmb",
+        "lscm",
         "kb",
         "mocap",
         "msgid", "msgids",
         "mux",
         "ndof",
+        "pbr",  # Physically Based Rendering
         "ppc",
         "precisa",
         "px",
         "qmc",
+        "rdna",
         "rdp",
         "rgb", "rgba",
         "rhs",
         "rv",
         "sdl",
+        "sdls",
         "sl",
         "smpte",
         "ssao",
@@ -712,6 +748,7 @@ class SpellChecker:
         "tma",
         "ui",
         "unix",
+        "uuid",
         "vbo", "vbos",
         "vr",
         "wxyz",
@@ -738,6 +775,7 @@ class SpellChecker:
         "svbvh",
 
         # Files types/formats
+        "aac",
         "avi",
         "attrac",
         "autocad",
@@ -760,6 +798,7 @@ class SpellChecker:
         "ico",
         "jpg", "jpeg", "jpegs",
         "json",
+        "lzw",
         "matroska",
         "mdd",
         "mkv",
@@ -769,6 +808,7 @@ class SpellChecker:
         "openjpeg",
         "osl",
         "oso",
+        "pcm",
         "piz",
         "png", "pngs",
         "po",

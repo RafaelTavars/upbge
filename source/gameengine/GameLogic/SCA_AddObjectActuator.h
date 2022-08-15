@@ -33,7 +33,6 @@
 
 #pragma once
 
-
 /* Actuator tree */
 #include "MT_Vector3.h"
 #include "SCA_IActuator.h"
@@ -50,6 +49,9 @@ class SCA_AddObjectActuator : public SCA_IActuator {
 
   /// Original object reference (object to replicate)
   KX_GameObject *m_OriginalObject;
+
+  /// Full Object copy
+  bool m_duplicateObject;
 
   /// Object will be added to the following scene
   KX_Scene *m_scene;
@@ -79,7 +81,8 @@ class SCA_AddObjectActuator : public SCA_IActuator {
                         const float *linvel,
                         bool linv_local,
                         const float *angvel,
-                        bool angv_local);
+                        bool angv_local,
+                        bool duplicateObject);
 
   ~SCA_AddObjectActuator(void);
 
@@ -103,7 +106,8 @@ class SCA_AddObjectActuator : public SCA_IActuator {
 
   EXP_PYMETHOD_DOC_NOARGS(SCA_AddObjectActuator, InstantAddObject);
 
-  static PyObject *pyattr_get_object(EXP_PyObjectPlus *self, const struct EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *pyattr_get_object(EXP_PyObjectPlus *self,
+                                     const struct EXP_PYATTRIBUTE_DEF *attrdef);
   static int pyattr_set_object(EXP_PyObjectPlus *self,
                                const struct EXP_PYATTRIBUTE_DEF *attrdef,
                                PyObject *value);
@@ -113,4 +117,3 @@ class SCA_AddObjectActuator : public SCA_IActuator {
 #endif /* WITH_PYTHON */
 
 }; /* end of class SCA_AddObjectActuator : public KX_EditObjectActuator */
-

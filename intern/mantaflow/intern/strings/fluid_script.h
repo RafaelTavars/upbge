@@ -1,24 +1,8 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2016 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2016 Blender Foundation. All rights reserved. */
 
 /** \file
- * \ingroup mantaflow
+ * \ingroup intern_mantaflow
  */
 
 #include <string>
@@ -711,7 +695,7 @@ def fluid_file_export_s$ID$(framenr, file_format, path, dict, file_name=None, mo
             file = os.path.join(path, file_name + '_' + framenr + file_format)\n\
             if not os.path.isfile(file) or mode_override:\n\
                 if file_format == '.vdb':\n\
-                    saveCombined = save(name=file, objects=list(dict.values()), worldSize=domainSize_s$ID$, skipDeletedParts=True, compression=vdbCompression_s$ID$, precision=vdbPrecision_s$ID$, clip=vdbClip_s$ID$, clipGrid=clipGrid)\n\
+                    saveCombined = save(name=file, objects=list(dict.values()), worldSize=domainSize_s$ID$, skipDeletedParts=True, compression=vdbCompression_s$ID$, precision=vdbPrecision_s$ID$, clip=vdbClip_s$ID$, clipGrid=clipGrid, meta=True)\n\
                 elif file_format == '.bobj.gz' or file_format == '.obj':\n\
                     for name, object in dict.items():\n\
                         if not os.path.isfile(file) or mode_override:\n\
@@ -755,13 +739,13 @@ file_format_data      = '$CACHE_DATA_FORMAT$'\n\
 file_format_mesh      = '$CACHE_MESH_FORMAT$'\n\
 \n\
 # How many frame to load from cache\n\
-from_cache_cnt = 100\n\
+from_cache_count = 100\n\
 \n\
-loop_cnt = 0\n\
+loop_count = 0\n\
 while current_frame_s$ID$ <= end_frame_s$ID$:\n\
     \n\
     # Load already simulated data from cache:\n\
-    if loop_cnt < from_cache_cnt:\n\
+    if loop_count < from_cache_count:\n\
         load_data(current_frame_s$ID$, cache_resumable)\n\
     \n\
     # Otherwise simulate new data\n\
@@ -772,7 +756,7 @@ while current_frame_s$ID$ <= end_frame_s$ID$:\n\
             step(current_frame_s$ID$)\n\
     \n\
     current_frame_s$ID$ += 1\n\
-    loop_cnt += 1\n\
+    loop_count += 1\n\
     \n\
     if gui:\n\
         gui.pause()\n";

@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup pythonintern
@@ -50,15 +36,19 @@
 #include "BKE_appdir.h"
 #include "BKE_blender_version.h"
 #include "BKE_global.h"
+#include "BKE_main.h"
 
 #include "DNA_ID.h"
 
 #include "UI_interface_icons.h"
 
+#include "RNA_enum_types.h" /* For `rna_enum_wm_job_type_items`. */
+
 /* for notifiers */
 #include "WM_api.h"
 #include "WM_types.h"
 
+#include "../generic/py_capi_rna.h"
 #include "../generic/py_capi_utils.h"
 #include "../generic/python_utildefines.h"
 
@@ -82,7 +72,10 @@ static PyTypeObject BlenderAppType;
 
 static PyStructSequence_Field app_info_fields[] = {
     {"version", "The Blender version as a tuple of 3 numbers. eg. (2, 83, 1)"},
-    {"version_file", "The blend file version, compatible with ``bpy.data.version``"},
+    {"version_file",
+     "The Blender version, as a tuple, last used to save a .blend file, compatible with "
+     "``bpy.data.version``. This value should be used for handling compatibility changes between "
+     "Blender versions"},
     {"version_string", "The Blender version formatted as a string"},
     {"version_cycle", "The release status of this build alpha/beta/rc/release"},
     {"version_char", "Deprecated, always an empty string"},
@@ -216,7 +209,7 @@ static PyObject *make_app_info(void)
 #undef SetObjItem
 
   if (PyErr_Occurred()) {
-    Py_CLEAR(app_info);
+    Py_DECREF(app_info);
     return NULL;
   }
   return app_info;
@@ -293,15 +286,6 @@ static int bpy_app_global_flag_set__only_disable(PyObject *UNUSED(self),
     return -1;
   }
   return bpy_app_global_flag_set(NULL, value, closure);
-}
-
-PyDoc_STRVAR(bpy_app_binary_path_python_doc,
-             "String, the path to the python executable (read-only). "
-             "Deprecated! Use ``sys.executable`` instead.");
-static PyObject *bpy_app_binary_path_python_get(PyObject *UNUSED(self), void *UNUSED(closure))
-{
-  PyErr_Warn(PyExc_RuntimeWarning, "Use 'sys.executable' instead of 'binary_path_python'!");
-  return Py_INCREF_RET(PySys_GetObject("executable"));
 }
 
 PyDoc_STRVAR(bpy_app_debug_value_doc,
@@ -424,11 +408,6 @@ static PyGetSetDef bpy_app_getsets[] = {
      bpy_app_debug_set,
      bpy_app_debug_doc,
      (void *)G_DEBUG_SIMDATA},
-    {"debug_gpumem",
-     bpy_app_debug_get,
-     bpy_app_debug_set,
-     bpy_app_debug_doc,
-     (void *)G_DEBUG_GPU_MEM},
     {"debug_io", bpy_app_debug_get, bpy_app_debug_set, bpy_app_debug_doc, (void *)G_DEBUG_IO},
 
     {"use_event_simulate",
@@ -442,12 +421,6 @@ static PyGetSetDef bpy_app_getsets[] = {
      bpy_app_global_flag_set,
      bpy_app_global_flag_doc,
      (void *)G_FLAG_USERPREF_NO_SAVE_ON_EXIT},
-
-    {"binary_path_python",
-     bpy_app_binary_path_python_get,
-     NULL,
-     bpy_app_binary_path_python_doc,
-     NULL},
 
     {"debug_value",
      bpy_app_debug_value_get,
@@ -476,7 +449,47 @@ static PyGetSetDef bpy_app_getsets[] = {
      NULL,
      (void *)G_FLAG_SCRIPT_AUTOEXEC_FAIL_QUIET},
     {"autoexec_fail_message", bpy_app_autoexec_fail_message_get, NULL, NULL, NULL},
+
+    /* End-of-list marker. */
     {NULL, NULL, NULL, NULL, NULL},
+};
+
+PyDoc_STRVAR(bpy_app_is_job_running_doc,
+             ".. staticmethod:: is_job_running(job_type)\n"
+             "\n"
+             "   Check whether a job of the given type is running.\n"
+             "\n"
+             "   :arg job_type: job type in :ref:`rna_enum_wm_job_type_items`.\n"
+             "   :type job_type: str\n"
+             "   :return: Whether a job of the given type is currently running.\n"
+             "   :rtype: bool.\n");
+static PyObject *bpy_app_is_job_running(PyObject *UNUSED(self), PyObject *args, PyObject *kwds)
+{
+  struct BPy_EnumProperty_Parse job_type_enum = {
+      .items = rna_enum_wm_job_type_items,
+      .value = 0,
+  };
+  static const char *_keywords[] = {"job_type", NULL};
+  static _PyArg_Parser _parser = {
+      "O&" /* `job_type` */
+      ":is_job_running",
+      _keywords,
+      0,
+  };
+  if (!_PyArg_ParseTupleAndKeywordsFast(
+          args, kwds, &_parser, pyrna_enum_value_parse_string, &job_type_enum)) {
+    return NULL;
+  }
+  wmWindowManager *wm = G_MAIN->wm.first;
+  return PyBool_FromLong(WM_jobs_has_running_type(wm, job_type_enum.value));
+}
+
+static struct PyMethodDef bpy_app_methods[] = {
+    {"is_job_running",
+     (PyCFunction)bpy_app_is_job_running,
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     bpy_app_is_job_running_doc},
+    {NULL, NULL, 0, NULL},
 };
 
 static void py_struct_seq_getset_init(void)
@@ -488,6 +501,17 @@ static void py_struct_seq_getset_init(void)
     Py_DECREF(item);
   }
 }
+
+static void py_struct_seq_method_init(void)
+{
+  for (PyMethodDef *method = bpy_app_methods; method->ml_name; method++) {
+    BLI_assert_msg(method->ml_flags & METH_STATIC, "Only static methods make sense for 'bpy.app'");
+    PyObject *item = PyCFunction_New(method, NULL);
+    PyDict_SetItemString(BlenderAppType.tp_dict, method->ml_name, item);
+    Py_DECREF(item);
+  }
+}
+
 /* end dynamic bpy.app */
 
 PyObject *BPY_app_struct(void)
@@ -506,6 +530,7 @@ PyObject *BPY_app_struct(void)
 
   /* kindof a hack ontop of PyStructSequence */
   py_struct_seq_getset_init();
+  py_struct_seq_method_init();
 
   return ret;
 }

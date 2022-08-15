@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2011 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2011 Blender Foundation. All rights reserved. */
 
 #ifndef LIBMV_C_API_CAMERA_INTRINSICS_H_
 #define LIBMV_C_API_CAMERA_INTRINSICS_H_
@@ -56,10 +40,10 @@ typedef struct libmv_CameraIntrinsicsOptions {
   double brown_p1, brown_p2;
 } libmv_CameraIntrinsicsOptions;
 
-libmv_CameraIntrinsics *libmv_cameraIntrinsicsNew(
+libmv_CameraIntrinsics* libmv_cameraIntrinsicsNew(
     const libmv_CameraIntrinsicsOptions* libmv_camera_intrinsics_options);
 
-libmv_CameraIntrinsics *libmv_cameraIntrinsicsCopy(
+libmv_CameraIntrinsics* libmv_cameraIntrinsicsCopy(
     const libmv_CameraIntrinsics* libmv_intrinsics);
 
 void libmv_cameraIntrinsicsDestroy(libmv_CameraIntrinsics* libmv_intrinsics);
@@ -76,7 +60,7 @@ void libmv_cameraIntrinsicsExtractOptions(
 
 void libmv_cameraIntrinsicsUndistortByte(
     const libmv_CameraIntrinsics* libmv_intrinsics,
-    const unsigned char *source_image,
+    const unsigned char* source_image,
     int width,
     int height,
     float overscan,
@@ -94,12 +78,12 @@ void libmv_cameraIntrinsicsUndistortFloat(
 
 void libmv_cameraIntrinsicsDistortByte(
     const struct libmv_CameraIntrinsics* libmv_intrinsics,
-    const unsigned char *source_image,
+    const unsigned char* source_image,
     int width,
     int height,
     float overscan,
     int channels,
-    unsigned char *destination_image);
+    unsigned char* destination_image);
 
 void libmv_cameraIntrinsicsDistortFloat(
     const libmv_CameraIntrinsics* libmv_intrinsics,
@@ -131,7 +115,7 @@ void libmv_cameraIntrinsicsInvert(
 #ifdef __cplusplus
 
 namespace libmv {
-  class CameraIntrinsics;
+class CameraIntrinsics;
 }
 
 libmv::CameraIntrinsics* libmv_cameraIntrinsicsCreateFromOptions(

@@ -17,8 +17,186 @@
 # ##### END GPL LICENSE BLOCK #####
 
 # <pep8 compliant>
-import bpy
 from bpy.types import Panel, Menu
+
+import re
+
+
+PascalCasePattern = r"((?<=[a-z])[A-Z]|(?<!\A)[A-Z](?=[a-z]))"
+
+ReplacementPattern = r" \1"
+
+def split_pascal_case(text):
+    return re.sub(PascalCasePattern, ReplacementPattern, text)
+
+
+class GameButtonsPanel:
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "game"
+    bl_order = 1000
+
+
+class GAME_PT_game_object(GameButtonsPanel, Panel):
+    bl_label = "Game Object"
+
+    @classmethod
+    def poll(cls, context):
+        ob = context.active_object
+        return ob and ob.game
+
+    def draw(self, context):
+        layout = self.layout
+
+        ob = context.active_object
+        game = ob.game
+
+        row = layout.row()
+
+        if game.custom_object and game.custom_object.name:
+            obj = game.custom_object
+
+            box = layout.box()
+            row = box.row()
+
+            row.prop(obj, "show_expanded", text="", emboss=False)
+            row.label(text=split_pascal_case(obj.name))
+
+            row.operator("logic.custom_object_reload", text="", icon="RECOVER_LAST")
+            row.operator("logic.custom_object_remove", text="", icon="X")
+
+            if obj.show_expanded and len(obj.properties) > 0:
+                box = box.box()
+                for prop in obj.properties:
+                    row = box.row()
+                    row.label(text=split_pascal_case(prop.name))
+                    col = row.column()
+                    col.prop(prop, "value", text="")
+        else:
+            row.operator("logic.custom_object_register", icon="PLUS", text="Select")
+            row.operator("logic.custom_object_create", icon="PLUS", text="Create")
+
+
+class GAME_PT_game_components(GameButtonsPanel, Panel):
+    bl_label = "Game Components"
+
+    @classmethod
+    def poll(cls, context):
+        ob = context.active_object
+        return ob and ob.game
+
+    def draw(self, context):
+        layout = self.layout
+
+        ob = context.active_object
+        game = ob.game
+
+        row = layout.row()
+
+        row.operator("logic.python_component_register", icon="PLUS", text="Add")
+        row.operator("logic.python_component_create", icon="PLUS", text="Create")
+
+        for i, c in enumerate(game.components):
+            box = layout.box()
+            row = box.row()
+
+            row.prop(c, "show_expanded", text="", emboss=False)
+            row.label(text=split_pascal_case(c.name))
+            row.context_pointer_set("component", c)
+            row.menu("GAME_MT_component_context_menu", icon="DOWNARROW_HLT", text="")
+
+            row.operator("logic.python_component_remove", text="", icon="X").index = i
+
+            if c.show_expanded and len(c.properties) > 0:
+                box = box.box()
+                for prop in c.properties:
+                    row = box.row()
+                    row.label(text=split_pascal_case(prop.name))
+                    col = row.column()
+                    col.prop(prop, "value", text="")
+
+
+class GAME_MT_component_context_menu(Menu):
+    bl_label = "Game Component"
+
+
+    @classmethod
+    def poll(cls, context):
+        ob = context.active_object
+
+        return ob and ob.game and ob.game.components
+
+    def draw(self, context):
+        layout = self.layout
+
+        components = context.active_object.game.components
+        index = components.find(context.component.name)  # FIXME: Should not use component.name as a key.
+
+        layout.operator("logic.python_component_reload", icon="RECOVER_LAST").index = index
+
+        layout.separator()
+
+        layout.operator("logic.python_component_move_up", icon="TRIA_UP").index = index
+        layout.operator("logic.python_component_move_down", icon="TRIA_DOWN").index = index
+
+
+class GAME_PT_game_properties(GameButtonsPanel, Panel):
+    bl_label = "Game Properties"
+
+    @classmethod
+    def poll(cls, context):
+        ob = context.active_object
+        return ob and ob.game
+
+    def draw(self, context):
+        layout = self.layout
+
+        ob = context.active_object
+        game = ob.game
+        is_font = (ob.type == 'FONT')
+
+        if is_font:
+            prop_index = game.properties.find("Text")
+            if prop_index != -1:
+                layout.operator("object.game_property_remove", text="Remove Text Game Property",
+                                icon='X').index = prop_index
+                row = layout.row()
+                sub = row.row()
+                sub.enabled = 0
+                prop = game.properties[prop_index]
+                sub.prop(prop, "name", text="")
+                row.prop(prop, "type", text="")
+                # get the property from the body, not the game property
+                # note, don't do this - it's too slow and body can potentially be a really long string.
+                # ~ row.prop(ob.data, "body", text="")
+                row.label(text="See Text Object")
+            else:
+                props = layout.operator("object.game_property_new", text="Add Text Game Property", icon='PLUS')
+                props.name = "Text"
+                props.type = 'STRING'
+
+        props = layout.operator("object.game_property_new", text="Add Game Property", icon='PLUS')
+        props.name = ""
+
+        for i, prop in enumerate(game.properties):
+
+            if is_font and i == prop_index:
+                continue
+
+            box = layout.box()
+            row = box.row()
+            row.prop(prop, "name", text="")
+            row.prop(prop, "type", text="")
+            row.prop(prop, "value", text="")
+            row.prop(prop, "show_debug", text="", toggle=True, icon='INFO')
+            sub = row.row(align=True)
+            props = sub.operator("object.game_property_move", text="", icon='TRIA_UP')
+            props.index = i
+            props.direction = 'UP'
+            props = sub.operator("object.game_property_move", text="", icon='TRIA_DOWN')
+            props.index = i
+            props.direction = 'DOWN'
+            row.operator("object.game_property_remove", text="", icon='X', emboss=False).index = i
 
 
 class PhysicsButtonsPanel:
@@ -30,7 +208,7 @@ class PhysicsButtonsPanel:
 
 class PHYSICS_PT_game_physics(PhysicsButtonsPanel, Panel):
     bl_label = "Game Physics"
-    COMPAT_ENGINES = {'BLENDER_GAME', 'BLENDER_EEVEE'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE', 'BLENDER_WORKBENCH'}
 
     @classmethod
     def poll(cls, context):
@@ -52,6 +230,7 @@ class PHYSICS_PT_game_physics(PhysicsButtonsPanel, Panel):
 
         if physics_type == 'CHARACTER':
             layout.prop(game, "use_actor")
+            layout.prop(ob, "hide_render", text="Invisible")  # out of place but useful
 
             layout.separator()
 
@@ -71,6 +250,7 @@ class PHYSICS_PT_game_physics(PhysicsButtonsPanel, Panel):
             col = split.column()
             col.prop(game, "use_actor")
             col.prop(game, "use_ghost")
+            col.prop(ob, "hide_render", text="Invisible")  # out of place but useful
 
             col = split.column()
             col.prop(game, "use_physics_fh")
@@ -150,6 +330,7 @@ class PHYSICS_PT_game_physics(PhysicsButtonsPanel, Panel):
             col = layout.column()
             col.prop(game, "use_actor")
             #col.prop(game, "use_ghost") Seems not supported in bullet for SoftBodies
+            col.prop(ob, "hide_render", text="Invisible")
 
             layout.separator()
 
@@ -219,6 +400,7 @@ class PHYSICS_PT_game_physics(PhysicsButtonsPanel, Panel):
             col = layout.column()
             col.prop(game, "use_actor")
             col.prop(game, "use_ghost")
+            col.prop(ob, "hide_render", text="Invisible")
 
             layout.separator()
 
@@ -242,6 +424,10 @@ class PHYSICS_PT_game_physics(PhysicsButtonsPanel, Panel):
         elif physics_type == 'SENSOR':
             col = layout.column()
             col.prop(game, "use_actor", text="Detect Actors")
+            col.prop(ob, "hide_render", text="Invisible")
+
+        elif physics_type in {'INVISIBLE', 'NO_COLLISION', 'OCCLUDER'}:
+            layout.prop(ob, "hide_render", text="Invisible")
 
         elif physics_type == 'NAVMESH':
             layout.operator("mesh.navmesh_face_copy")
@@ -267,7 +453,7 @@ class PHYSICS_PT_game_physics(PhysicsButtonsPanel, Panel):
 
 class PHYSICS_PT_game_collision_bounds(PhysicsButtonsPanel, Panel):
     bl_label = "Collision Bounds"
-    COMPAT_ENGINES = {'BLENDER_GAME', 'BLENDER_EEVEE'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE', 'BLENDER_WORKBENCH'}
 
     @classmethod
     def poll(cls, context):
@@ -307,7 +493,7 @@ class PHYSICS_PT_game_collision_bounds(PhysicsButtonsPanel, Panel):
 
 class PHYSICS_PT_game_obstacles(PhysicsButtonsPanel, Panel):
     bl_label = "Create Obstacle"
-    COMPAT_ENGINES = {'BLENDER_GAME', 'BLENDER_EEVEE'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE', 'BLENDER_WORKBENCH'}
 
     @classmethod
     def poll(cls, context):
@@ -349,8 +535,8 @@ class SceneButtonsPanel:
 
 
 class SCENE_PT_game_physics(SceneButtonsPanel, Panel):
-    bl_label = "Physics"
-    COMPAT_ENGINES = {'BLENDER_GAME', 'BLENDER_EEVEE'}
+    bl_label = "Game Physics"
+    COMPAT_ENGINES = {'BLENDER_EEVEE', 'BLENDER_WORKBENCH'}
 
     @classmethod
     def poll(cls, context):
@@ -398,6 +584,10 @@ class SCENE_PT_game_physics(SceneButtonsPanel, Panel):
             sub.prop(gs, "erp2_parameter", text="ERP for Contact Constraints")
             sub.prop(gs, "cfm_parameter", text="CFM for Soft Constraints")
 
+            row = layout.row()
+            row.label(text="Object Activity:")
+            row.prop(gs, "use_activity_culling")
+
         else:
             split = layout.split()
 
@@ -413,7 +603,7 @@ class SCENE_PT_game_physics(SceneButtonsPanel, Panel):
 class SCENE_PT_game_physics_obstacles(SceneButtonsPanel, Panel):
     bl_label = "Obstacle Simulation"
     bl_options = {'DEFAULT_CLOSED'}
-    COMPAT_ENGINES = {'BLENDER_GAME', 'BLENDER_EEVEE'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE', 'BLENDER_WORKBENCH'}
 
     @classmethod
     def poll(cls, context):
@@ -434,7 +624,7 @@ class SCENE_PT_game_physics_obstacles(SceneButtonsPanel, Panel):
 class SCENE_PT_game_navmesh(SceneButtonsPanel, Panel):
     bl_label = "Navigation Mesh"
     bl_options = {'DEFAULT_CLOSED'}
-    COMPAT_ENGINES = {'BLENDER_GAME', 'BLENDER_EEVEE'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE', 'BLENDER_WORKBENCH'}
 
     @classmethod
     def poll(cls, context):
@@ -495,7 +685,7 @@ class SCENE_PT_game_navmesh(SceneButtonsPanel, Panel):
 
 class SCENE_PT_game_hysteresis(SceneButtonsPanel, Panel):
     bl_label = "Level of Detail"
-    COMPAT_ENGINES = {'BLENDER_GAME', 'BLENDER_EEVEE'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE', 'BLENDER_WORKBENCH'}
 
     @classmethod
     def poll(cls, context):
@@ -550,6 +740,32 @@ class ObjectButtonsPanel:
     bl_region_type = 'WINDOW'
     bl_context = "object"
 
+class OBJECT_PT_activity_culling(ObjectButtonsPanel, Panel):
+    bl_label = "Activity Culling"
+    COMPAT_ENGINES = {'BLENDER_EEVEE', 'BLENDER_WORKBENCH'}
+
+    @classmethod
+    def poll(cls, context):
+        ob = context.object
+        return context.scene.render.engine in cls.COMPAT_ENGINES and ob.type not in {'CAMERA'}
+
+    def draw(self, context):
+        layout = self.layout
+        activity = context.object.game.activity_culling
+
+        split = layout.split()
+
+        col = split.column()
+        col.prop(activity, "use_physics", text="Physics")
+        sub = col.column()
+        sub.active = activity.use_physics
+        sub.prop(activity, "physics_radius")
+
+        col = split.column()
+        col.prop(activity, "use_logic", text="Logic")
+        sub = col.column()
+        sub.active = activity.use_logic
+        sub.prop(activity, "logic_radius")
 
 class OBJECT_MT_lod_tools(Menu):
     bl_label = "Level Of Detail Tools"
@@ -564,11 +780,12 @@ class OBJECT_MT_lod_tools(Menu):
 
 class OBJECT_PT_levels_of_detail(ObjectButtonsPanel, Panel):
     bl_label = "Levels of Detail"
-    COMPAT_ENGINES = {'BLENDER_GAME', 'BLENDER_EEVEE'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE', 'BLENDER_WORKBENCH'}
 
     @classmethod
     def poll(cls, context):
-        return context.engine in cls.COMPAT_ENGINES
+        ob = context.object
+        return context.engine in cls.COMPAT_ENGINES and ob.type not in {'CAMERA', 'EMPTY', 'LIGHT'}
 
     def draw(self, context):
         layout = self.layout
@@ -576,6 +793,10 @@ class OBJECT_PT_levels_of_detail(ObjectButtonsPanel, Panel):
         gs = context.scene.game_settings
 
         col = layout.column()
+        col.prop(ob, "lod_factor", text="Distance Factor")
+
+        col = layout.column()
+        col.prop(ob, "use_lod_physics", text="Physics Update")
 
         for i, level in enumerate(ob.lod_levels):
             if i == 0:
@@ -605,6 +826,10 @@ class OBJECT_PT_levels_of_detail(ObjectButtonsPanel, Panel):
 
 
 classes = (
+    GAME_PT_game_object,
+    GAME_PT_game_components,
+    GAME_PT_game_properties,
+    GAME_MT_component_context_menu,
     PHYSICS_PT_game_physics,
     PHYSICS_PT_game_collision_bounds,
     PHYSICS_PT_game_obstacles,
@@ -614,6 +839,7 @@ classes = (
     SCENE_PT_game_hysteresis,
     SCENE_PT_game_console,
     OBJECT_MT_lod_tools,
+    OBJECT_PT_activity_culling,
     OBJECT_PT_levels_of_detail,
 )
 

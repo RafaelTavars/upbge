@@ -1,35 +1,11 @@
-/*
- * ***** BEGIN GPL LICENSE BLOCK *****
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software  Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Copyright (c) 2007 The Zdeno Ash Miklas
- *
- * This source file is part of VideoTexture library
- *
- * Contributor(s):
- *
- * ***** END GPL LICENSE BLOCK *****
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2007 The Zdeno Ash Miklas. */
 
 /** \file ImageRender.h
  *  \ingroup bgevideotex
  */
 
 #pragma once
-
 
 #include "DNA_screen_types.h"
 
@@ -40,7 +16,6 @@
 #include "RAS_ICanvas.h"
 #include "RAS_Rasterizer.h"
 
-class RAS_FrameBuffer;
 struct GPUFrameBuffer;
 
 /// class for render 3d scene
@@ -86,6 +61,14 @@ class ImageRender : public ImageViewport {
   /// in case fbo is used, method to unbind
   void Unbind();
 
+  void RunPreDrawCallbacks();
+  void RunPostDrawCallbacks();
+
+#ifdef WITH_PYTHON
+  PyObject *m_preDrawCallbacks;
+  PyObject *m_postDrawCallbacks;
+#endif
+
  protected:
   /// true if ready to render
   bool m_render;
@@ -95,6 +78,8 @@ class ImageRender : public ImageViewport {
   KX_Scene *m_scene;
   /// camera for render
   KX_Camera *m_camera;
+  /// number of render passes
+  unsigned short m_samples;
   /// do we own the camera?
   bool m_owncamera;
 
@@ -126,4 +111,3 @@ class ImageRender : public ImageViewport {
   /// render 3d scene to image
   virtual void calcViewport(unsigned int texId, double ts, unsigned int format);
 };
-

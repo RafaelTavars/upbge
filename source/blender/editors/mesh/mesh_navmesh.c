@@ -64,13 +64,8 @@
 
 #include "mesh_intern.h" /* own include */
 
-static void createVertsTrisData(bContext *C,
-                                LinkNode *obs,
-                                int *nverts_r,
-                                float **verts_r,
-                                int *ntris_r,
-                                int **tris_r,
-                                unsigned int *r_lay)
+static void createVertsTrisData(
+    bContext *C, LinkNode *obs, int *nverts_r, float **verts_r, int *ntris_r, int **tris_r)
 {
   MVert *mvert;
   int nfaces = 0, *tri, i, curnverts, basenverts, curnfaces;
@@ -92,7 +87,8 @@ static void createVertsTrisData(bContext *C,
   /* calculate number of verts and tris */
   for (oblink = obs; oblink; oblink = oblink->next) {
     ob = (Object *)oblink->link;
-    dm = mesh_get_derived_final(depsgraph, scene, DEG_get_evaluated_object(depsgraph, ob), &CD_MASK_MESH);
+    dm = mesh_get_derived_final(
+        depsgraph, scene, DEG_get_evaluated_object(depsgraph, ob), &CD_MASK_MESH);
     DM_ensure_tessface(dm);
     BLI_linklist_append(&dms_pair, dm);
 
@@ -107,8 +103,6 @@ static void createVertsTrisData(bContext *C,
       if (mf->v4)
         ntris += 1;
     }
-
-    *r_lay |= ob->lay;
   }
   LinkNode *dms = dms_pair.list;
 
@@ -345,8 +339,7 @@ static bool buildNavMesh(const RecastData *recastParams,
 static Object *createRepresentation(bContext *C,
                                     struct recast_polyMesh *pmesh,
                                     struct recast_polyMeshDetail *dmesh,
-                                    Base *base,
-                                    unsigned int lay)
+                                    Base *base)
 {
   float co[3], rot[3];
   BMEditMesh *em;
@@ -508,17 +501,16 @@ static int navmesh_create_exec(bContext *C, wmOperator *op)
     struct recast_polyMesh *pmesh = NULL;
     struct recast_polyMeshDetail *dmesh = NULL;
     bool ok;
-    unsigned int lay = 0;
 
     int nverts = 0, ntris = 0;
     int *tris = NULL;
     float *verts = NULL;
 
-    createVertsTrisData(C, obs, &nverts, &verts, &ntris, &tris, &lay);
+    createVertsTrisData(C, obs, &nverts, &verts, &ntris, &tris);
     BLI_linklist_free(obs, NULL);
     if ((ok = buildNavMesh(
              &scene->gm.recastData, nverts, verts, ntris, tris, &pmesh, &dmesh, op->reports))) {
-      createRepresentation(C, pmesh, dmesh, navmeshBase, lay);
+      createRepresentation(C, pmesh, dmesh, navmeshBase);
     }
 
     MEM_freeN(verts);
@@ -737,6 +729,7 @@ static int navmesh_clear_exec(bContext *C, wmOperator *UNUSED(op))
   Mesh *me = ob->data;
 
   CustomData_free_layers(&me->pdata, CD_RECAST, me->totpoly);
+  ob->gameflag &= ~OB_NAVMESH;
 
   DEG_id_tag_update(&me->id, ID_RECALC_GEOMETRY);
   WM_event_add_notifier(C, NC_GEOM | ND_DATA, &me->id);
@@ -747,7 +740,7 @@ static int navmesh_clear_exec(bContext *C, wmOperator *UNUSED(op))
 void MESH_OT_navmesh_clear(struct wmOperatorType *ot)
 {
   /* identifiers */
-  ot->name = "NavMesh Clear Data";
+  ot->name = "Remove NavMesh";
   ot->description = "Remove navmesh data from this mesh";
   ot->idname = "MESH_OT_navmesh_clear";
 

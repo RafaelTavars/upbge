@@ -1,20 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Copyright 2020, Blender Foundation.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2020 Blender Foundation. */
 
 /** \file
  * \ingroup draw_engine
@@ -85,7 +70,9 @@ void OVERLAY_edit_gpencil_cache_init(OVERLAY_Data *vedata)
                             (GPENCIL_VERTEX_MODE(gpd) && !use_vertex_mask));
 
   const bool do_multiedit = GPENCIL_MULTIEDIT_SESSIONS_ON(gpd);
-  const bool show_multi_edit_lines = (v3d->gp_flag & V3D_GP_SHOW_MULTIEDIT_LINES) != 0;
+  const bool show_multi_edit_lines = (do_multiedit) &&
+                                     ((v3d->gp_flag & (V3D_GP_SHOW_MULTIEDIT_LINES |
+                                                       V3D_GP_SHOW_EDIT_LINES)) != 0);
 
   const bool show_lines = (v3d->gp_flag & V3D_GP_SHOW_EDIT_LINES) || show_multi_edit_lines;
 
@@ -137,7 +124,7 @@ void OVERLAY_edit_gpencil_cache_init(OVERLAY_Data *vedata)
     }
   }
 
-  /* Handles and curve point for Curve Edit submode. */
+  /* Handles and curve point for Curve Edit sub-mode. */
   if (GPENCIL_CURVE_EDIT_SESSIONS_ON(gpd)) {
     DRWState state = DRW_STATE_WRITE_COLOR;
     DRW_PASS_CREATE(psl->edit_gpencil_curve_ps, state | pd->clipping_state);
@@ -187,7 +174,7 @@ void OVERLAY_edit_gpencil_cache_init(OVERLAY_Data *vedata)
         bGPDcontrolpoint *cp = &gpd->runtime.cp_points[i];
         grp = DRW_shgroup_create_sub(grp);
         DRW_shgroup_uniform_vec3_copy(grp, "pPosition", &cp->x);
-        DRW_shgroup_uniform_float_copy(grp, "pSize", cp->size * 0.8f * G_draw.block.sizePixel);
+        DRW_shgroup_uniform_float_copy(grp, "pSize", cp->size * 0.8f * G_draw.block.size_pixel);
         DRW_shgroup_uniform_vec4_copy(grp, "pColor", cp->color);
         DRW_shgroup_call_procedural_points(grp, NULL, 1);
       }
@@ -209,7 +196,7 @@ void OVERLAY_edit_gpencil_cache_init(OVERLAY_Data *vedata)
         DRW_shgroup_uniform_vec3_copy(grp, "pPosition", scene->cursor.location);
       }
       DRW_shgroup_uniform_vec4_copy(grp, "pColor", color);
-      DRW_shgroup_uniform_float_copy(grp, "pSize", 8.0f * G_draw.block.sizePixel);
+      DRW_shgroup_uniform_float_copy(grp, "pSize", 8.0f * G_draw.block.size_pixel);
       DRW_shgroup_call_procedural_points(grp, NULL, 1);
     }
   }
@@ -258,6 +245,16 @@ void OVERLAY_gpencil_cache_init(OVERLAY_Data *vedata)
 
     copy_m4_m4(mat, ob->obmat);
 
+    /* Rotate and scale except align to cursor. */
+    bGPDlayer *gpl = BKE_gpencil_layer_active_get(gpd);
+    if (gpl != NULL) {
+      if (ts->gp_sculpt.lock_axis != GP_LOCKAXIS_CURSOR) {
+        float matrot[3][3];
+        copy_m3_m4(matrot, gpl->layer_mat);
+        mul_m4_m4m3(mat, mat, matrot);
+      }
+    }
+
     float viewinv[4][4];
     /* Set the grid in the selected axis */
     switch (ts->gp_sculpt.lock_axis) {
@@ -294,8 +291,13 @@ void OVERLAY_gpencil_cache_init(OVERLAY_Data *vedata)
     mul_v2_v2fl(size, gpd->grid.scale, 2.0f * ED_scene_grid_scale(scene, &grid_unit));
     rescale_m4(mat, (float[3]){size[0], size[1], 0.0f});
 
+    /* Apply layer loc transform, except cursor mode. */
+    if ((gpl != NULL) && (ts->gpencil_v3d_align & GP_PROJECT_CURSOR) == 0) {
+      add_v3_v3(mat[3], gpl->layer_mat[3]);
+    }
+
     const int gridlines = (gpd->grid.lines <= 0) ? 1 : gpd->grid.lines;
-    int line_ct = gridlines * 4 + 2;
+    const int line_count = gridlines * 4 + 2;
 
     DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_ALPHA;
     state |= (grid_xray) ? DRW_STATE_DEPTH_ALWAYS : DRW_STATE_DEPTH_LESS_EQUAL;
@@ -309,8 +311,8 @@ void OVERLAY_gpencil_cache_init(OVERLAY_Data *vedata)
     DRW_shgroup_uniform_vec3_copy(grp, "xAxis", mat[0]);
     DRW_shgroup_uniform_vec3_copy(grp, "yAxis", mat[1]);
     DRW_shgroup_uniform_vec3_copy(grp, "origin", mat[3]);
-    DRW_shgroup_uniform_int_copy(grp, "halfLineCount", line_ct / 2);
-    DRW_shgroup_call_procedural_lines(grp, NULL, line_ct);
+    DRW_shgroup_uniform_int_copy(grp, "halfLineCount", line_count / 2);
+    DRW_shgroup_call_procedural_lines(grp, NULL, line_count);
   }
 }
 
@@ -365,7 +367,7 @@ static void overlay_gpencil_draw_stroke_color_name(bGPDlayer *UNUSED(gpl),
                                                    void *thunk)
 {
   Object *ob = (Object *)thunk;
-  Material *ma = BKE_object_material_get(ob, gps->mat_nr + 1);
+  Material *ma = BKE_object_material_get_eval(ob, gps->mat_nr + 1);
   if (ma == NULL) {
     return;
   }
@@ -414,7 +416,7 @@ static void OVERLAY_gpencil_color_names(Object *ob)
   const DRWContextState *draw_ctx = DRW_context_state_get();
   int cfra = DEG_get_ctime(draw_ctx->depsgraph);
 
-  BKE_gpencil_visible_stroke_iter(
+  BKE_gpencil_visible_stroke_advanced_iter(
       NULL, ob, NULL, overlay_gpencil_draw_stroke_color_name, ob, false, cfra);
 }
 

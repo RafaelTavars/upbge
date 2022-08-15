@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 #pragma once
 
@@ -88,6 +74,16 @@ BLI_INLINE unsigned int BLI_hash_string(const char *str)
     i = i * 37 + c;
   }
   return i;
+}
+
+BLI_INLINE float BLI_hash_int_2d_to_float(uint32_t kx, uint32_t ky)
+{
+  return (float)BLI_hash_int_2d(kx, ky) / (float)0xFFFFFFFFu;
+}
+
+BLI_INLINE float BLI_hash_int_3d_to_float(uint32_t kx, uint32_t ky, uint32_t kz)
+{
+  return (float)BLI_hash_int_3d(kx, ky, kz) / (float)0xFFFFFFFFu;
 }
 
 BLI_INLINE unsigned int BLI_hash_int(unsigned int k)

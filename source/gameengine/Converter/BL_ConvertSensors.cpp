@@ -48,13 +48,12 @@
 //#  include "BLI_winstuff.h"
 #endif
 
-#include "BL_BlenderDataConversion.h"
-#include "BL_BlenderSceneConverter.h"
+#include "BL_DataConversion.h"
+#include "BL_SceneConverter.h"
 #include "CM_Utils.h"
 #include "EXP_IntValue.h"
 #include "KX_GameObject.h"
 #include "KX_Globals.h"
-#include "KX_NetworkMessageSensor.h"
 #include "PHY_IPhysicsEnvironment.h"
 #include "RAS_ICanvas.h"
 #include "SCA_ActuatorSensor.h"
@@ -65,6 +64,7 @@
 #include "SCA_KeyboardSensor.h"
 #include "SCA_MouseFocusSensor.h"
 #include "SCA_MovementSensor.h"
+#include "SCA_NetworkMessageSensor.h"
 #include "SCA_PropertySensor.h"
 #include "SCA_RadarSensor.h"
 #include "SCA_RandomSensor.h"
@@ -78,7 +78,7 @@ void BL_ConvertSensors(struct Object *blenderobject,
                        int activeLayerBitInfo,
                        bool isInActiveLayer,
                        RAS_ICanvas *canvas,
-                       BL_BlenderSceneConverter *converter)
+                       BL_SceneConverter *converter)
 {
 
   int executePriority = 0;
@@ -153,7 +153,8 @@ void BL_ConvertSensors(struct Object *blenderobject,
             bCollisionPulse = (blendercollisionsensor->mode & SENS_COLLISION_PULSE);
 
             const std::string touchPropOrMatName = bFindMaterial ?
-													   CM_RemovePrefix(blendercollisionsensor->materialName) :
+                                                       CM_RemovePrefix(
+                                                           blendercollisionsensor->materialName) :
                                                        blendercollisionsensor->name;
 
             if (gameobj->GetPhysicsController()) {
@@ -174,10 +175,10 @@ void BL_ConvertSensors(struct Object *blenderobject,
           /* filter on the incoming subjects, might be empty */
           const std::string subject = msgSens->subject;
 
-          gamesensor = new KX_NetworkMessageSensor(eventmgr,      // our eventmanager
-                                                   NetworkScene,  // our NetworkScene
-                                                   gameobj,       // the sensor controlling object
-                                                   subject);      // subject to filter on
+          gamesensor = new SCA_NetworkMessageSensor(eventmgr,      // our eventmanager
+                                                    NetworkScene,  // our NetworkScene
+                                                    gameobj,       // the sensor controlling object
+                                                    subject);      // subject to filter on
           break;
         }
         case SENS_NEAR: {
@@ -303,7 +304,8 @@ void BL_ConvertSensors(struct Object *blenderobject,
               bool bFindMaterial = (bmouse->mode & SENS_COLLISION_MATERIAL);
               bool bXRay = (bmouse->flag & SENS_RAY_XRAY);
               int mask = bmouse->mask;
-			  std::string checkname = (bFindMaterial ? CM_RemovePrefix(bmouse->matname) : bmouse->propname);
+              std::string checkname = (bFindMaterial ? CM_RemovePrefix(bmouse->matname) :
+                                                       bmouse->propname);
 
               gamesensor = new SCA_MouseFocusSensor(
                   eventmgr,
@@ -451,7 +453,7 @@ void BL_ConvertSensors(struct Object *blenderobject,
             bool bFindMaterial = (blenderraysensor->mode & SENS_COLLISION_MATERIAL);
             bool bXRay = (blenderraysensor->mode & SENS_RAY_XRAY);
 
-			std::string checkname = (bFindMaterial ? CM_RemovePrefix(blenderraysensor->matname) :
+            std::string checkname = (bFindMaterial ? CM_RemovePrefix(blenderraysensor->matname) :
                                                      blenderraysensor->propname);
 
             // don't want to get rays of length 0.0 or so
@@ -482,20 +484,21 @@ void BL_ConvertSensors(struct Object *blenderobject,
           }
           break;
         }
-		case SENS_MOVEMENT: {
-		  bMovementSensor *blendermovsensor = (bMovementSensor *)sens->data;
-		  // some files didn't write movementsensor, avoid crash now for NULL ptr's
-		  if (blendermovsensor) {
-			SCA_EventManager *eventmgr = logicmgr->FindEventManager(SCA_EventManager::BASIC_EVENTMGR);
-			if (eventmgr) {
-			  bool localflag = (blendermovsensor->localflag & SENS_MOVEMENT_LOCAL);
-			  int axis = blendermovsensor->axisflag;
-			  float threshold = blendermovsensor->threshold;
-			  gamesensor = new SCA_MovementSensor(eventmgr, gameobj, axis, localflag, threshold);
-			}
-		  }
-		  break;
-		}
+        case SENS_MOVEMENT: {
+          bMovementSensor *blendermovsensor = (bMovementSensor *)sens->data;
+          // some files didn't write movementsensor, avoid crash now for NULL ptr's
+          if (blendermovsensor) {
+            SCA_EventManager *eventmgr = logicmgr->FindEventManager(
+                SCA_EventManager::BASIC_EVENTMGR);
+            if (eventmgr) {
+              bool localflag = (blendermovsensor->localflag & SENS_MOVEMENT_LOCAL);
+              int axis = blendermovsensor->axisflag;
+              float threshold = blendermovsensor->threshold;
+              gamesensor = new SCA_MovementSensor(eventmgr, gameobj, axis, localflag, threshold);
+            }
+          }
+          break;
+        }
         case SENS_JOYSTICK: {
           int joysticktype = SCA_JoystickSensor::KX_JOYSENSORMODE_NODEF;
 

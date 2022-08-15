@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2013 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2013 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup GHOST
@@ -24,6 +8,7 @@
 #pragma once
 
 #include "GHOST_Context.h"
+#include "GHOST_System.h"
 
 #include <GL/eglew.h>
 
@@ -36,11 +21,15 @@
 #endif
 
 class GHOST_ContextEGL : public GHOST_Context {
+  /* XR code needs low level graphics data to send to OpenXR. */
+  friend class GHOST_XrGraphicsBindingOpenGL;
+
  public:
   /**
    * Constructor.
    */
-  GHOST_ContextEGL(bool stereoVisual,
+  GHOST_ContextEGL(const GHOST_System *const system,
+                   bool stereoVisual,
                    EGLNativeWindowType nativeWindow,
                    EGLNativeDisplayType nativeDisplay,
                    EGLint contextProfileMask,
@@ -100,8 +89,16 @@ class GHOST_ContextEGL : public GHOST_Context {
    */
   GHOST_TSuccess getSwapInterval(int &intervalOut);
 
+  EGLDisplay getDisplay() const;
+
+  EGLConfig getConfig() const;
+
+  EGLContext getContext() const;
+
  private:
   bool initContextEGLEW();
+
+  const GHOST_System *const m_system;
 
   EGLNativeDisplayType m_nativeDisplay;
   EGLNativeWindowType m_nativeWindow;
@@ -117,6 +114,7 @@ class GHOST_ContextEGL : public GHOST_Context {
   EGLContext m_context;
   EGLSurface m_surface;
   EGLDisplay m_display;
+  EGLConfig m_config;
 
   EGLint m_swap_interval;
 

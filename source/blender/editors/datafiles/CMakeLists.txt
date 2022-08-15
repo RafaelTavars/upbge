@@ -1,19 +1,4 @@
-# ***** BEGIN GPL LICENSE BLOCK *****
-#
-# This program is free software; you can redistribute it and/or
-# modify it under the terms of the GNU General Public LicenseS
-# as published by the Free Software Foundation; either version 2
-# of the License, or (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software Foundation,
-# Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-# ***** END GPL LICENSE BLOCK *****
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 set(INC
 
@@ -53,6 +38,9 @@ set(ICON_NAMES
   collapsemenu
   x
   duplicate
+  trash
+  collection_new
+  options
   node
   node_sel
   window
@@ -65,6 +53,7 @@ set(ICON_NAMES
   panel_close
   copy_id
   eyedropper
+  checkmark
   auto
   checkbox_dehlt
   checkbox_hlt
@@ -75,6 +64,10 @@ set(ICON_NAMES
   screen_back
   rightarrow
   downarrow_hlt
+  fcurve_snapshot
+  object_hidden
+  topbar
+  statusbar
   plugin
   help
   ghost_enabled
@@ -101,6 +94,7 @@ set(ICON_NAMES
   three_dots
   fullscreen_enter
   fullscreen_exit
+  brushes_all
   light
   material
   texture
@@ -125,6 +119,7 @@ set(ICON_NAMES
   info
   sequence
   text
+  spreadsheet
   sound
   action
   nla
@@ -133,7 +128,7 @@ set(ICON_NAMES
   nodetree
   logic
   console
-  clip
+  tracker
   asset_manager
   node_compositing
   node_texture
@@ -141,6 +136,7 @@ set(ICON_NAMES
   object_datamode
   editmode_hlt
   uv
+  uv_data
   vpaint_hlt
   tpaint_hlt
   wpaint_hlt
@@ -196,7 +192,6 @@ set(ICON_NAMES
   library_data_broken
   boids
   strands
-  library_data_indirect
   greasepencil
   line_data
   library_data_override
@@ -214,6 +209,7 @@ set(ICON_NAMES
   mouse_lmb_drag
   mouse_mmb_drag
   mouse_rmb_drag
+  memory
   preset_new
   decorate
   decorate_keyframe
@@ -224,7 +220,8 @@ set(ICON_NAMES
   decorate_unlocked
   decorate_locked
   decorate_override
-  sealed
+  fund
+  tracker_data
   heart
   orphan_data
   user
@@ -246,6 +243,7 @@ set(ICON_NAMES
   outliner_ob_greasepencil
   outliner_ob_lightprobe
   outliner_ob_image
+  outliner_collection
   restrict_color_off
   restrict_color_on
   hide_on
@@ -254,6 +252,7 @@ set(ICON_NAMES
   restrict_select_off
   restrict_render_on
   restrict_render_off
+  restrict_instanced_off
   outliner_data_empty
   outliner_data_mesh
   outliner_data_curve
@@ -265,17 +264,21 @@ set(ICON_NAMES
   outliner_data_font
   outliner_data_surface
   outliner_data_speaker
+  outliner_data_lightprobe
+  outliner_data_gp_layer
   outliner_data_greasepencil
   gp_select_points
   gp_select_strokes
   gp_multiframe_editing
   gp_only_selected
+  gp_select_between_strokes
   modifier_off
   modifier_on
   onionskin_off
   onionskin_on
   restrict_view_on
   restrict_view_off
+  restrict_instanced_on
   mesh_plane
   mesh_cube
   mesh_circle
@@ -318,6 +321,7 @@ set(ICON_NAMES
   lightprobe_cubemap
   lightprobe_planar
   lightprobe_grid
+  mod_dash
   color_red
   color_green
   color_blue
@@ -338,6 +342,8 @@ set(ICON_NAMES
   force_turbulence
   force_drag
   force_fluidflow
+  rigid_body
+  rigid_body_constraint
   image_plane
   image_background
   image_reference
@@ -346,6 +352,16 @@ set(ICON_NAMES
   node_top
   node_side
   node_corner
+  anchor_top
+  anchor_bottom
+  anchor_left
+  anchor_right
+  anchor_center
+  select_set
+  select_extend
+  select_subtract
+  select_intersect
+  select_difference
   align_left
   align_center
   align_right
@@ -359,6 +375,41 @@ set(ICON_NAMES
   underline
   small_caps
   modifier
+  con_action
+  mod_length
+  mod_dash
+  mod_lineart
+  holdout_off
+  holdout_on
+  indirect_only_off
+  indirect_only_on
+  con_camerasolver
+  con_followtrack
+  con_objectsolver
+  con_loclike
+  con_rotlike
+  con_sizelike
+  con_translike
+  con_distlimit
+  con_loclimit
+  con_rotlimit
+  con_sizelimit
+  con_samevol
+  con_transform
+  con_transform_cache
+  con_clampto
+  con_kinematic
+  con_locktrack
+  con_splineik
+  con_stretchto
+  con_trackto
+  con_armature
+  con_childof
+  con_floor
+  con_followpath
+  con_pivot
+  con_shrinkwrap
+  modifier_data
   mod_wave
   mod_build
   mod_decim
@@ -386,6 +437,7 @@ set(ICON_NAMES
   mod_mask
   mod_cloth
   mod_explode
+  mod_fluidsim
   mod_multires
   mod_fluid
   mod_solidify
@@ -416,6 +468,7 @@ set(ICON_NAMES
   pause
   prev_keyframe
   next_keyframe
+  play_sound
   play_reverse
   preview_range
   action_tweak
@@ -457,6 +510,7 @@ set(ICON_NAMES
   vertexsel
   edgesel
   facesel
+  cursor
   pivot_boundbox
   pivot_cursor
   pivot_individual
@@ -465,6 +519,7 @@ set(ICON_NAMES
   center_only
   smoothcurve
   spherecurve
+  inversesquarecurve
   rootcurve
   sharpcurve
   lincurve
@@ -473,10 +528,13 @@ set(ICON_NAMES
   prop_off
   prop_on
   prop_con
-  sculpt_dyntopo
+  prop_projected
   particle_point
   particle_tip
   particle_path
+  snap_face_center
+  snap_perpendicular
+  snap_midpoint
   snap_off
   snap_on
   snap_normal
@@ -514,6 +572,12 @@ set(ICON_NAMES
   uv_facesel
   uv_islandsel
   uv_sync_select
+  gp_caps_flat
+  gp_caps_round
+  fixed_size
+  transform_origins
+  gizmo
+  orientation_cursor
   normals_vertex
   normals_face
   normals_vertex_face
@@ -531,6 +595,19 @@ set(ICON_NAMES
   axis_top
   layer_used
   layer_active
+  outliner_ob_curves
+  outliner_data_curves
+  curves_data
+  outliner_ob_pointcloud
+  outliner_data_pointcloud
+  pointcloud_data
+  outliner_ob_volume
+  outliner_data_volume
+  volume_data
+  current_file
+  home
+  documents
+  temp
   sortalpha
   sortbyext
   sorttime
@@ -542,6 +619,7 @@ set(ICON_NAMES
   fontpreview
   filter
   newfolder
+  folder_redirect
   file_parent
   file_refresh
   file_folder
@@ -563,6 +641,7 @@ set(ICON_NAMES
   loop_forwards
   back
   forward
+  file_archive
   file_cache
   file_volume
   file_3d
@@ -573,7 +652,7 @@ set(ICON_NAMES
   matsphere
   matcube
   monkey
-  hair
+  curves
   aliased
   antialiased
   mat_sphere_sky
@@ -587,16 +666,27 @@ set(ICON_NAMES
   linenumbers_off
   linenumbers_on
   scriptplugins
+  disc
+  desktop
+  external_drive
+  network_drive
   seq_sequencer
   seq_preview
   seq_luma_waveform
   seq_chroma_scope
   seq_histogram
   seq_splitview
+  seq_strip_meta
+  seq_strip_duplicate
   image_rgb
   image_rgb_alpha
   image_alpha
   image_zdepth
+  handle_autoclamped
+  handle_auto
+  handle_aligned
+  handle_vector
+  handle_free
   view_perspective
   view_ortho
   view_camera
@@ -659,11 +749,13 @@ set_property(GLOBAL PROPERTY ICON_GEOM_NAMES
   brush.sculpt.mask
   brush.sculpt.multiplane_scrape
   brush.sculpt.nudge
+  brush.sculpt.paint
   brush.sculpt.pinch
   brush.sculpt.pose
   brush.sculpt.rotate
   brush.sculpt.scrape
   brush.sculpt.simplify
+  brush.sculpt.smear
   brush.sculpt.smooth
   brush.sculpt.snake_hook
   brush.sculpt.thumb
@@ -678,13 +770,26 @@ set_property(GLOBAL PROPERTY ICON_GEOM_NAMES
   ops.curve.draw
   ops.curve.extrude_cursor
   ops.curve.extrude_move
+  ops.curve.pen
   ops.curve.radius
   ops.curve.vertex_random
+  ops.curves.sculpt_add
+  ops.curves.sculpt_comb
+  ops.curves.sculpt_cut
+  ops.curves.sculpt_delete
+  ops.curves.sculpt_density
+  ops.curves.sculpt_grow_shrink
+  ops.curves.sculpt_pinch
+  ops.curves.sculpt_puff
+  ops.curves.sculpt_slide
+  ops.curves.sculpt_smooth
+  ops.curves.sculpt_snake_hook
   ops.generic.cursor
   ops.generic.select
   ops.generic.select_box
   ops.generic.select_circle
   ops.generic.select_lasso
+  ops.generic.select_paint
   ops.gpencil.draw
   ops.gpencil.draw.eraser
   ops.gpencil.draw.line
@@ -751,12 +856,14 @@ set_property(GLOBAL PROPERTY ICON_GEOM_NAMES
   ops.sculpt.border_mask
   ops.sculpt.box_trim
   ops.sculpt.cloth_filter
+  ops.sculpt.color_filter
   ops.sculpt.face_set_edit
   ops.sculpt.lasso_face_set
   ops.sculpt.lasso_mask
   ops.sculpt.lasso_trim
   ops.sculpt.line_mask
   ops.sculpt.line_project
+  ops.sculpt.mask_by_color
   ops.sculpt.mesh_filter
   ops.sequencer.blade
   ops.transform.bone_envelope
@@ -828,6 +935,7 @@ if(WITH_BLENDER)
     data_to_c_simple(../../../../release/datafiles/brushicons/mask.png SRC)
     data_to_c_simple(../../../../release/datafiles/brushicons/mix.png SRC)
     data_to_c_simple(../../../../release/datafiles/brushicons/nudge.png SRC)
+    data_to_c_simple(../../../../release/datafiles/brushicons/paint_select.png SRC)
     data_to_c_simple(../../../../release/datafiles/brushicons/pinch.png SRC)
     data_to_c_simple(../../../../release/datafiles/brushicons/scrape.png SRC)
     data_to_c_simple(../../../../release/datafiles/brushicons/smear.png SRC)
@@ -864,6 +972,19 @@ if(WITH_BLENDER)
     data_to_c_simple(../../../../release/datafiles/brushicons/gp_brush_erase_soft.png SRC)
     data_to_c_simple(../../../../release/datafiles/brushicons/gp_brush_erase_hard.png SRC)
     data_to_c_simple(../../../../release/datafiles/brushicons/gp_brush_erase_stroke.png SRC)
+
+    # curve sculpt
+    data_to_c_simple(../../../../release/datafiles/brushicons/curves_sculpt_add.png SRC)
+    data_to_c_simple(../../../../release/datafiles/brushicons/curves_sculpt_comb.png SRC)
+    data_to_c_simple(../../../../release/datafiles/brushicons/curves_sculpt_cut.png SRC)
+    data_to_c_simple(../../../../release/datafiles/brushicons/curves_sculpt_delete.png SRC)
+    data_to_c_simple(../../../../release/datafiles/brushicons/curves_sculpt_density.png SRC)
+    data_to_c_simple(../../../../release/datafiles/brushicons/curves_sculpt_grow_shrink.png SRC)
+    data_to_c_simple(../../../../release/datafiles/brushicons/curves_sculpt_pinch.png SRC)
+    data_to_c_simple(../../../../release/datafiles/brushicons/curves_sculpt_puff.png SRC)
+    data_to_c_simple(../../../../release/datafiles/brushicons/curves_sculpt_slide.png SRC)
+    data_to_c_simple(../../../../release/datafiles/brushicons/curves_sculpt_smooth.png SRC)
+    data_to_c_simple(../../../../release/datafiles/brushicons/curves_sculpt_snake_hook.png SRC)
 
   endif()
 

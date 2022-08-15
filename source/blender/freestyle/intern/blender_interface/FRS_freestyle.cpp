@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup freestyle
@@ -65,9 +51,6 @@ using namespace Freestyle;
 
 extern "C" {
 
-#define DEFAULT_SPHERE_RADIUS 1.0f
-#define DEFAULT_DKR_EPSILON 0.0f
-
 struct FreestyleGlobals g_freestyle;
 
 // Freestyle configuration
@@ -89,8 +72,8 @@ static void load_post_callback(struct Main * /*main*/,
 }
 
 static bCallbackFuncStore load_post_callback_funcstore = {
-    nullptr,
-    nullptr,            /* next, prev */
+    nullptr,            /* next */
+    nullptr,            /* prev */
     load_post_callback, /* func */
     nullptr,            /* arg */
     0                   /* alloc */
@@ -176,24 +159,6 @@ static void init_view(Render *re)
     }
     cout << "Unit line thickness : " << thickness << " pixel(s)" << endl;
   }
-}
-
-static void init_camera(Render *re)
-{
-  // It is assumed that imported meshes are in the camera coordinate system.
-  // Therefore, the view point (i.e., camera position) is at the origin, and
-  // the model-view matrix is simply the identity matrix.
-
-  zero_v3(g_freestyle.viewpoint);
-
-  unit_m4(g_freestyle.mv);
-
-  copy_m4_m4(g_freestyle.proj, re->winmat);
-
-#if 0
-  print_m4("mv", g_freestyle.mv);
-  print_m4("proj", g_freestyle.proj);
-#endif
 }
 
 static char *escape_quotes(char *name)
@@ -451,14 +416,8 @@ static void prepare(Render *re, ViewLayer *view_layer, Depsgraph *depsgraph)
   }
 
   // set parameters
-  if (config->flags & FREESTYLE_ADVANCED_OPTIONS_FLAG) {
-    controller->setSphereRadius(config->sphere_radius);
-    controller->setSuggestiveContourKrDerivativeEpsilon(config->dkr_epsilon);
-  }
-  else {
-    controller->setSphereRadius(DEFAULT_SPHERE_RADIUS);
-    controller->setSuggestiveContourKrDerivativeEpsilon(DEFAULT_DKR_EPSILON);
-  }
+  controller->setSphereRadius(config->sphere_radius);
+  controller->setSuggestiveContourKrDerivativeEpsilon(config->dkr_epsilon);
   controller->setFaceSmoothness((config->flags & FREESTYLE_FACE_SMOOTHNESS_FLAG) ? true : false);
   controller->setCreaseAngle(RAD2DEGF(config->crease_angle));
   controller->setVisibilityAlgo((config->flags & FREESTYLE_CULLING) ?
@@ -518,6 +477,11 @@ void FRS_composite_result(Render *re, ViewLayer *view_layer, Render *freestyle_r
   int x, y, rectx, recty;
 
   if (freestyle_render == nullptr || freestyle_render->result == nullptr) {
+    if (view_layer->freestyle_config.flags & FREESTYLE_AS_RENDER_PASS) {
+      // Create a blank render pass output.
+      RE_create_render_pass(
+          re->result, RE_PASSNAME_FREESTYLE, 4, "RGBA", view_layer->name, re->viewname, true);
+    }
     return;
   }
 
@@ -552,7 +516,7 @@ void FRS_composite_result(Render *re, ViewLayer *view_layer, Render *freestyle_r
 
   if (view_layer->freestyle_config.flags & FREESTYLE_AS_RENDER_PASS) {
     RE_create_render_pass(
-        re->result, RE_PASSNAME_FREESTYLE, 4, "RGBA", view_layer->name, re->viewname);
+        re->result, RE_PASSNAME_FREESTYLE, 4, "RGBA", view_layer->name, re->viewname, true);
     dest = RE_RenderLayerGetPass(rl, RE_PASSNAME_FREESTYLE, re->viewname);
   }
   else {
@@ -632,9 +596,8 @@ void FRS_init_stroke_renderer(Render *re)
   controller->ResetRenderCount();
 }
 
-void FRS_begin_stroke_rendering(Render *re)
+void FRS_begin_stroke_rendering(Render *UNUSED(re))
 {
-  init_camera(re);
 }
 
 void FRS_do_stroke_rendering(Render *re, ViewLayer *view_layer)
@@ -656,6 +619,15 @@ void FRS_do_stroke_rendering(Render *re, ViewLayer *view_layer)
       &re->scene->view_layers, view_layer->name, offsetof(ViewLayer, name));
   Depsgraph *depsgraph = DEG_graph_new(re->main, re->scene, scene_view_layer, DAG_EVAL_RENDER);
   BKE_scene_graph_update_for_newframe(depsgraph);
+
+  /* Init camera
+   * Objects are transformed into camera coordinate system, therefore the camera position
+   * is zero and the modelview matrix is the identity matrix. */
+  Object *ob_camera_orig = RE_GetCamera(re);
+  Object *ob_camera_eval = DEG_get_evaluated_object(depsgraph, ob_camera_orig);
+  zero_v3(g_freestyle.viewpoint);
+  unit_m4(g_freestyle.mv);
+  RE_GetCameraWindow(re, ob_camera_eval, g_freestyle.proj);
 
   // prepare Freestyle:
   //   - load mesh
@@ -687,8 +659,8 @@ void FRS_do_stroke_rendering(Render *re, ViewLayer *view_layer)
       g_freestyle.scene = nullptr;
 
       // composite result
+      FRS_composite_result(re, view_layer, freestyle_render);
       if (freestyle_render) {
-        FRS_composite_result(re, view_layer, freestyle_render);
         RE_FreeRender(freestyle_render);
       }
     }
@@ -783,10 +755,6 @@ void FRS_delete_active_lineset(FreestyleConfig *config)
   }
 }
 
-/**
- * Reinsert the active lineset at an offset \a direction from current position.
- * \return if position of active lineset has changed.
- */
 bool FRS_move_active_lineset(FreestyleConfig *config, int direction)
 {
   FreestyleLineSet *lineset = BKE_freestyle_lineset_get_active(config);

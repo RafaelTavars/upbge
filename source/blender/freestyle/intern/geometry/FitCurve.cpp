@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup freestyle
@@ -134,7 +120,7 @@ static BezierCurve GenerateBezier(
   double alpha_l; /* Alpha values, left and right */
   double alpha_r;
   Vector2 tmp;          /* Utility variable */
-  BezierCurve bezCurve; /* RETURN bezier curve ctl pts */
+  BezierCurve bezCurve; /* RETURN bezier curve control points. */
 
   bezCurve = (Vector2 *)malloc(4 * sizeof(Vector2));
   nPts = last - first + 1;
@@ -461,10 +447,6 @@ static Vector2 V2SubII(Vector2 a, Vector2 b)
 }
 
 //------------------------- WRAPPER -----------------------------//
-
-FitCurveWrapper::FitCurveWrapper()
-{
-}
 
 FitCurveWrapper::~FitCurveWrapper()
 {

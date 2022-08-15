@@ -132,7 +132,8 @@ typedef struct bObjectActuator {
   short flag, type, otype;
   short damping;
   float forceloc[3], forcerot[3];
-  float _pad[3], _pad1[3];
+  short servotype, _pad2[1];
+  float _pad[2], _pad1[3];
   float dloc[3], drot[3]; /* angle in radians */
   float linearvelocity[3], angularvelocity[3];
   struct Object *reference;
@@ -323,6 +324,10 @@ typedef struct bActuator {
 #define ACT_OBJECT_SERVO 1
 #define ACT_OBJECT_CHARACTER 2
 
+/* objectactuator->servotype */
+#define ACT_SERVO_LINEAR 0
+#define ACT_SERVO_ANGULAR 1
+
 /* actuator->type */
 #define ACT_OBJECT 0
 #define ACT_IPO 1
@@ -454,6 +459,7 @@ typedef struct bActuator {
 
 /* editObjectActuator->flag */
 #define ACT_TRACK_3D 1
+#define ACT_EDOB_ADD_OBJECT_DUPLI 2
 
 /* editObjectActuator->upflag */
 #define ACT_TRACK_UP_X 0
@@ -469,8 +475,8 @@ typedef struct bActuator {
 #define ACT_TRACK_TRAXIS_NEGZ 5
 
 /* editObjectActuator->flag for replace mesh actuator */
-#define ACT_EDOB_REPLACE_MESH_NOGFX		2 /* use for replace mesh actuator */
-#define ACT_EDOB_REPLACE_MESH_PHYS		4
+#define ACT_EDOB_REPLACE_MESH_NOGFX 2 /* use for replace mesh actuator */
+#define ACT_EDOB_REPLACE_MESH_PHYS 4
 
 /* editObjectActuator->dyn_operation */
 #define ACT_EDOB_RESTORE_DYN 0
@@ -553,7 +559,7 @@ typedef struct bActuator {
 #define ACT_2DFILTER_ENABLED -2
 #define ACT_2DFILTER_DISABLED -1
 #define ACT_2DFILTER_NOFILTER 0
-#define ACT_2DFILTER_MOTIONBLUR 1
+//#define ACT_2DFILTER_MOTIONBLUR 1 Deprecated since 0.3.0
 #define ACT_2DFILTER_BLUR 2
 #define ACT_2DFILTER_SHARPEN 3
 #define ACT_2DFILTER_DILATION 4

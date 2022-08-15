@@ -31,7 +31,6 @@
 
 #pragma once
 
-
 /** \file gameengine/Converter/BL_IpoConvert.h
  *  \ingroup bgeconv
  */
@@ -51,15 +50,14 @@
 #include "DNA_object_types.h"
 #include "DNA_world_types.h"
 
-#include "BL_BlenderConverter.h"
-#include "BL_BlenderScalarInterpolator.h"
+#include "BL_Converter.h"
+#include "BL_ScalarInterpolator.h"
 #include "KX_CameraIpoSGController.h"
 #include "KX_GameObject.h"
 #include "KX_Globals.h"
 #include "KX_IInterpolator.h"
-#include "KX_IPO_SGController.h"
+#include "KX_IpoController.h"
 #include "KX_LightIpoSGController.h"
-#include "KX_MaterialIpoController.h"
 #include "KX_ObColorIpoSGController.h"
 #include "KX_ScalarInterpolator.h"
 #include "RAS_IPolygonMaterial.h"
@@ -74,15 +72,11 @@ SG_Controller *BL_CreateLampIPO(struct bAction *action, KX_GameObject *lightobj,
 SG_Controller *BL_CreateCameraIPO(struct bAction *action,
                                   KX_GameObject *cameraobj,
                                   KX_Scene *scene);
-SG_Controller *BL_CreateMaterialIpo(struct bAction *action,
-                                    RAS_IPolyMaterial *polymat,
-                                    KX_GameObject *gameobj,
-                                    KX_Scene *scene);
 
 /* Definitions */
 static BL_InterpolatorList *GetAdtList(struct bAction *for_act, KX_Scene *scene)
 {
-  BL_BlenderConverter *converter = KX_GetActiveEngine()->GetConverter();
+  BL_Converter *converter = KX_GetActiveEngine()->GetConverter();
   BL_InterpolatorList *adtList = converter->FindInterpolatorList(scene, for_act);
 
   if (!adtList) {
@@ -95,7 +89,7 @@ static BL_InterpolatorList *GetAdtList(struct bAction *for_act, KX_Scene *scene)
 
 SG_Controller *BL_CreateIPO(struct bAction *action, KX_GameObject *gameobj, KX_Scene *scene)
 {
-  KX_IpoSGController *ipocontr = new KX_IpoSGController();
+  KX_IpoController *ipocontr = new KX_IpoController();
   ipocontr->SetGameObject(gameobj);
 
   Object *blenderobject = gameobj->GetBlenderObject();
@@ -284,109 +278,3 @@ SG_Controller *BL_CreateCameraIPO(struct bAction *action,
 
   return ipocontr;
 }
-
-SG_Controller *BL_CreateMaterialIpo(struct bAction *action,
-                                    RAS_IPolyMaterial *polymat,
-                                    KX_GameObject *gameobj,
-                                    KX_Scene *scene)
-{
-  KX_MaterialIpoController *ipocontr = nullptr;
-
-  BL_InterpolatorList *adtList = GetAdtList(action, scene);
-  KX_IInterpolator *interpolator;
-  BL_ScalarInterpolator *sinterp;
-
-  // --
-  for (int i = 0; i < 3; i++) {
-    if ((sinterp = adtList->GetScalarInterpolator("diffuse_color", i))) {
-      if (!ipocontr) {
-        ipocontr = new KX_MaterialIpoController(polymat);
-      }
-      interpolator = new KX_ScalarInterpolator(&ipocontr->m_rgba[i], sinterp);
-      ipocontr->AddInterpolator(interpolator);
-    }
-  }
-
-  if ((sinterp = adtList->GetScalarInterpolator("alpha", 0))) {
-    if (!ipocontr) {
-      ipocontr = new KX_MaterialIpoController(polymat);
-    }
-    interpolator = new KX_ScalarInterpolator(&ipocontr->m_rgba[3], sinterp);
-    ipocontr->AddInterpolator(interpolator);
-  }
-
-  for (int i = 0; i < 3; i++) {
-    if ((sinterp = adtList->GetScalarInterpolator("specular_color", i))) {
-      if (!ipocontr) {
-        ipocontr = new KX_MaterialIpoController(polymat);
-      }
-      interpolator = new KX_ScalarInterpolator(&ipocontr->m_specrgb[i], sinterp);
-      ipocontr->AddInterpolator(interpolator);
-    }
-  }
-
-  if ((sinterp = adtList->GetScalarInterpolator("specular_hardness", 0))) {
-    if (!ipocontr) {
-      ipocontr = new KX_MaterialIpoController(polymat);
-    }
-    interpolator = new KX_ScalarInterpolator(&ipocontr->m_hard, sinterp);
-    ipocontr->AddInterpolator(interpolator);
-  }
-
-  if ((sinterp = adtList->GetScalarInterpolator("specular_intensity", 0))) {
-    if (!ipocontr) {
-      ipocontr = new KX_MaterialIpoController(polymat);
-    }
-    interpolator = new KX_ScalarInterpolator(&ipocontr->m_spec, sinterp);
-    ipocontr->AddInterpolator(interpolator);
-  }
-
-  if ((sinterp = adtList->GetScalarInterpolator("diffuse_intensity", 0))) {
-    if (!ipocontr) {
-      ipocontr = new KX_MaterialIpoController(polymat);
-    }
-    interpolator = new KX_ScalarInterpolator(&ipocontr->m_ref, sinterp);
-    ipocontr->AddInterpolator(interpolator);
-  }
-
-  if ((sinterp = adtList->GetScalarInterpolator("emit", 0))) {
-    if (!ipocontr) {
-      ipocontr = new KX_MaterialIpoController(polymat);
-    }
-    interpolator = new KX_ScalarInterpolator(&ipocontr->m_emit, sinterp);
-    ipocontr->AddInterpolator(interpolator);
-  }
-
-  if ((sinterp = adtList->GetScalarInterpolator("ambient", 0))) {
-    if (!ipocontr) {
-      ipocontr = new KX_MaterialIpoController(polymat);
-    }
-    interpolator = new KX_ScalarInterpolator(&ipocontr->m_ambient, sinterp);
-    ipocontr->AddInterpolator(interpolator);
-  }
-
-  if ((sinterp = adtList->GetScalarInterpolator("specular_alpha", 0))) {
-    if (!ipocontr) {
-      ipocontr = new KX_MaterialIpoController(polymat);
-    }
-    interpolator = new KX_ScalarInterpolator(&ipocontr->m_specAlpha, sinterp);
-    ipocontr->AddInterpolator(interpolator);
-  }
-
-  if (ipocontr) {
-    Material *blendermaterial = polymat->GetBlenderMaterial();
-    ipocontr->m_rgba[0] = blendermaterial->r;
-    ipocontr->m_rgba[1] = blendermaterial->g;
-    ipocontr->m_rgba[2] = blendermaterial->b;
-    ipocontr->m_rgba[3] = 1.0f;  // blendermaterial->alpha;
-
-    ipocontr->m_specrgb[0] = blendermaterial->specr;
-    ipocontr->m_specrgb[1] = blendermaterial->specg;
-    ipocontr->m_specrgb[2] = blendermaterial->specb;
-    ipocontr->m_spec = blendermaterial->spec;
-    ipocontr->m_alpha = 1.0f;  // blendermaterial->alpha;
-  }
-
-  return ipocontr;
-}
-

@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2001-2002 by NaN Holding BV.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2001-2002 NaN Holding BV. All rights reserved. */
 
 /** \file
  * \ingroup edtransform
@@ -45,10 +29,23 @@
 
 /* -------------------------------------------------------------------- */
 /** \name Edit Mesh #CD_MVERT_SKIN Transform Creation
- *
  * \{ */
 
-static void mesh_skin_transdata_create(TransDataBasic *td, BMEditMesh *em, BMVert *eve)
+static float *tc_mesh_skin_transdata_center(const struct TransIslandData *island_data,
+                                            const int island_index,
+                                            BMVert *eve)
+{
+  if (island_data->center && island_index != -1) {
+    return island_data->center[island_index];
+  }
+  return eve->co;
+}
+
+static void tc_mesh_skin_transdata_create(TransDataBasic *td,
+                                          BMEditMesh *em,
+                                          BMVert *eve,
+                                          const struct TransIslandData *island_data,
+                                          const int island_index)
 {
   BLI_assert(BM_elem_flag_test(eve, BM_ELEM_HIDDEN) == 0);
   MVertSkin *vs = CustomData_bmesh_get(&em->bm->vdata, eve->head.data, CD_MVERT_SKIN);
@@ -65,10 +62,11 @@ static void mesh_skin_transdata_create(TransDataBasic *td, BMEditMesh *em, BMVer
     td->flag |= TD_SELECTED;
   }
 
+  copy_v3_v3(td->center, tc_mesh_skin_transdata_center(island_data, island_index, eve));
   td->extra = eve;
 }
 
-void createTransMeshSkin(TransInfo *t)
+static void createTransMeshSkin(bContext *UNUSED(C), TransInfo *t)
 {
   BLI_assert(t->mode == TFM_SKIN_RESIZE);
   FOREACH_TRANS_DATA_CONTAINER (t, tc) {
@@ -188,8 +186,15 @@ void createTransMeshSkin(TransInfo *t)
         continue;
       }
 
+      int island_index = -1;
+      if (island_data.island_vert_map) {
+        const int connected_index = (dists_index && dists_index[a] != -1) ? dists_index[a] : a;
+        island_index = island_data.island_vert_map[connected_index];
+      }
+
       if (mirror_data.vert_map && mirror_data.vert_map[a].index != -1) {
-        mesh_skin_transdata_create((TransDataBasic *)td_mirror, em, eve);
+        tc_mesh_skin_transdata_create(
+            (TransDataBasic *)td_mirror, em, eve, &island_data, island_index);
 
         int elem_index = mirror_data.vert_map[a].index;
         BMVert *v_src = BM_vert_at_index(bm, elem_index);
@@ -200,7 +205,7 @@ void createTransMeshSkin(TransInfo *t)
         td_mirror++;
       }
       else if (prop_mode || BM_elem_flag_test(eve, BM_ELEM_SELECT)) {
-        mesh_skin_transdata_create((TransDataBasic *)td, em, eve);
+        tc_mesh_skin_transdata_create((TransDataBasic *)td, em, eve, &island_data, island_index);
 
         if (t->around == V3D_AROUND_LOCAL_ORIGINS) {
           createSpaceNormal(td->axismtx, eve->no);
@@ -252,10 +257,9 @@ void createTransMeshSkin(TransInfo *t)
 
 /* -------------------------------------------------------------------- */
 /** \name Recalc Mesh Data
- *
  * \{ */
 
-static void mesh_skin_apply_to_mirror(TransInfo *t)
+static void tc_mesh_skin_apply_to_mirror(TransInfo *t)
 {
   FOREACH_TRANS_DATA_CONTAINER (t, tc) {
     if (tc->use_mirror_axis_any) {
@@ -267,21 +271,28 @@ static void mesh_skin_apply_to_mirror(TransInfo *t)
   }
 }
 
-void recalcData_mesh_skin(TransInfo *t)
+static void recalcData_mesh_skin(TransInfo *t)
 {
   bool is_canceling = t->state == TRANS_CANCEL;
   /* mirror modifier clipping? */
   if (!is_canceling) {
-    if ((t->flag & T_NO_MIRROR) == 0 && (t->options & CTX_NO_MIRROR) == 0) {
-      mesh_skin_apply_to_mirror(t);
+    if (!(t->flag & T_NO_MIRROR)) {
+      tc_mesh_skin_apply_to_mirror(t);
     }
   }
 
   FOREACH_TRANS_DATA_CONTAINER (t, tc) {
-    DEG_id_tag_update(tc->obedit->data, 0); /* sets recalc flags */
+    DEG_id_tag_update(tc->obedit->data, ID_RECALC_GEOMETRY);
     BMEditMesh *em = BKE_editmesh_from_object(tc->obedit);
-    EDBM_mesh_normals_update(em);
-    BKE_editmesh_looptri_calc(em);
+    BKE_editmesh_looptri_and_normals_calc(em);
   }
 }
+
 /** \} */
+
+TransConvertTypeInfo TransConvertType_MeshSkin = {
+    /* flags */ (T_EDIT | T_POINTS),
+    /* createTransData */ createTransMeshSkin,
+    /* recalcData */ recalcData_mesh_skin,
+    /* special_aftertrans_update */ NULL,
+};

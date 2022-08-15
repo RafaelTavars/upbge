@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2008 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2008 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup spbuttons
@@ -32,6 +16,7 @@
 
 #include "BKE_context.h"
 #include "BKE_gpencil_modifier.h" /* Types for registering panels. */
+#include "BKE_lib_remap.h"
 #include "BKE_modifier.h"
 #include "BKE_screen.h"
 #include "BKE_shader_fx.h"
@@ -166,11 +151,6 @@ static void buttons_main_region_init(wmWindowManager *wm, ARegion *region)
 /** \name Property Editor Layout
  * \{ */
 
-/**
- * Fills an array with the tab context values for the properties editor. -1 signals a separator.
- *
- * \return The total number of items in the array returned.
- */
 int ED_buttons_tabs_list(SpaceProperties *sbuts, short *context_tabs_array)
 {
   int length = 0;
@@ -200,6 +180,14 @@ int ED_buttons_tabs_list(SpaceProperties *sbuts, short *context_tabs_array)
   }
   if (sbuts->pathflag & (1 << BCONTEXT_WORLD)) {
     context_tabs_array[length] = BCONTEXT_WORLD;
+    length++;
+  }
+  if (sbuts->pathflag & (1 << BCONTEXT_COLLECTION)) {
+    if (length != 0) {
+      context_tabs_array[length] = -1;
+      length++;
+    }
+    context_tabs_array[length] = BCONTEXT_COLLECTION;
     length++;
   }
   if (length != 0) {
@@ -242,6 +230,10 @@ int ED_buttons_tabs_list(SpaceProperties *sbuts, short *context_tabs_array)
     context_tabs_array[length] = BCONTEXT_BONE_CONSTRAINT;
     length++;
   }
+  if (sbuts->pathflag & (1 << BCONTEXT_GAME)) {
+    context_tabs_array[length] = BCONTEXT_GAME;
+    length++;
+  }
   if (sbuts->pathflag & (1 << BCONTEXT_MATERIAL)) {
     context_tabs_array[length] = BCONTEXT_MATERIAL;
     length++;
@@ -271,6 +263,8 @@ static const char *buttons_main_region_context_string(const short mainb)
       return "view_layer";
     case BCONTEXT_WORLD:
       return "world";
+    case BCONTEXT_COLLECTION:
+      return "collection";
     case BCONTEXT_OBJECT:
       return "object";
     case BCONTEXT_DATA:
@@ -295,6 +289,8 @@ static const char *buttons_main_region_context_string(const short mainb)
       return "bone_constraint";
     case BCONTEXT_TOOL:
       return "tool";
+    case BCONTEXT_GAME:
+      return "game";
   }
 
   /* All the cases should be handled. */
@@ -435,7 +431,7 @@ static void property_search_all_tabs(const bContext *C,
                    i,
                    property_search_for_context(C, region_copy, &sbuts_copy));
 
-    UI_blocklist_free(C, &region_copy->uiblocks);
+    UI_blocklist_free(C, region_copy);
   }
 
   BKE_area_region_free(area_copy.type, region_copy);
@@ -514,12 +510,11 @@ static void buttons_main_region_layout(const bContext *C, ARegion *region)
   sbuts->mainbo = sbuts->mainb;
 }
 
-static void buttons_main_region_listener(wmWindow *UNUSED(win),
-                                         ScrArea *UNUSED(area),
-                                         ARegion *region,
-                                         wmNotifier *wmn,
-                                         const Scene *UNUSED(scene))
+static void buttons_main_region_listener(const wmRegionListenerParams *params)
 {
+  ARegion *region = params->region;
+  wmNotifier *wmn = params->notifier;
+
   /* context changes */
   switch (wmn->category) {
     case NC_SCREEN:
@@ -567,15 +562,13 @@ static void buttons_header_region_draw(const bContext *C, ARegion *region)
   ED_region_header(C, region);
 }
 
-static void buttons_header_region_message_subscribe(const bContext *UNUSED(C),
-                                                    WorkSpace *UNUSED(workspace),
-                                                    Scene *UNUSED(scene),
-                                                    bScreen *UNUSED(screen),
-                                                    ScrArea *area,
-                                                    ARegion *region,
-                                                    struct wmMsgBus *mbus)
+static void buttons_header_region_message_subscribe(const wmRegionMessageSubscribeParams *params)
 {
+  struct wmMsgBus *mbus = params->message_bus;
+  ScrArea *area = params->area;
+  ARegion *region = params->region;
   SpaceProperties *sbuts = area->spacedata.first;
+
   wmMsgSubscribeValue msg_sub_value_region_tag_redraw = {
       .owner = region,
       .user_data = region,
@@ -621,14 +614,12 @@ static void buttons_navigation_bar_region_draw(const bContext *C, ARegion *regio
   ED_region_panels_draw(C, region);
 }
 
-static void buttons_navigation_bar_region_message_subscribe(const bContext *UNUSED(C),
-                                                            WorkSpace *UNUSED(workspace),
-                                                            Scene *UNUSED(scene),
-                                                            bScreen *UNUSED(screen),
-                                                            ScrArea *UNUSED(area),
-                                                            ARegion *region,
-                                                            struct wmMsgBus *mbus)
+static void buttons_navigation_bar_region_message_subscribe(
+    const wmRegionMessageSubscribeParams *params)
 {
+  struct wmMsgBus *mbus = params->message_bus;
+  ARegion *region = params->region;
+
   wmMsgSubscribeValue msg_sub_value_region_tag_redraw = {
       .owner = region,
       .user_data = region,
@@ -657,11 +648,10 @@ static void buttons_area_redraw(ScrArea *area, short buttons)
  * \{ */
 
 /* reused! */
-static void buttons_area_listener(wmWindow *UNUSED(win),
-                                  ScrArea *area,
-                                  wmNotifier *wmn,
-                                  Scene *UNUSED(scene))
+static void buttons_area_listener(const wmSpaceTypeListenerParams *params)
 {
+  ScrArea *area = params->area;
+  wmNotifier *wmn = params->notifier;
   SpaceProperties *sbuts = area->spacedata.first;
 
   /* context changes */
@@ -740,11 +730,17 @@ static void buttons_area_listener(wmWindow *UNUSED(win),
           /* Needed to refresh context path when changing active particle system index. */
           buttons_area_redraw(area, BCONTEXT_PARTICLE);
           break;
+        case ND_DRAW_ANIMVIZ:
+          buttons_area_redraw(area, BCONTEXT_OBJECT);
+          break;
         default:
           /* Not all object RNA props have a ND_ notifier (yet) */
           ED_area_tag_redraw(area);
           break;
       }
+      break;
+    case NC_LOGIC:
+      buttons_area_redraw(area, BCONTEXT_GAME);
       break;
     case NC_GEOM:
       switch (wmn->data) {
@@ -791,6 +787,9 @@ static void buttons_area_listener(wmWindow *UNUSED(win),
         sbuts->preview = 1;
       }
       break;
+    case NC_WORKSPACE:
+      buttons_area_redraw(area, BCONTEXT_TOOL);
+      break;
     case NC_SPACE:
       if (wmn->data == ND_SPACE_PROPERTIES) {
         ED_area_tag_redraw(area);
@@ -807,6 +806,9 @@ static void buttons_area_listener(wmWindow *UNUSED(win),
       break;
     case NC_ANIMATION:
       switch (wmn->data) {
+        case ND_NLA_ACTCHANGE:
+          ED_area_tag_redraw(area);
+          break;
         case ND_KEYFRAME:
           if (ELEM(wmn->action, NA_EDITED, NA_ADDED, NA_REMOVED)) {
             ED_area_tag_redraw(area);
@@ -858,54 +860,55 @@ static void buttons_area_listener(wmWindow *UNUSED(win),
   }
 }
 
-static void buttons_id_remap(ScrArea *UNUSED(area), SpaceLink *slink, ID *old_id, ID *new_id)
+static void buttons_id_remap(ScrArea *UNUSED(area),
+                             SpaceLink *slink,
+                             const struct IDRemapper *mappings)
 {
   SpaceProperties *sbuts = (SpaceProperties *)slink;
 
-  if (sbuts->pinid == old_id) {
-    sbuts->pinid = new_id;
-    if (new_id == NULL) {
-      sbuts->flag &= ~SB_PIN_CONTEXT;
-    }
+  if (BKE_id_remapper_apply(mappings, &sbuts->pinid, ID_REMAP_APPLY_DEFAULT) ==
+      ID_REMAP_RESULT_SOURCE_UNASSIGNED) {
+    sbuts->flag &= ~SB_PIN_CONTEXT;
   }
 
   if (sbuts->path) {
     ButsContextPath *path = sbuts->path;
+    for (int i = 0; i < path->len; i++) {
+      switch (BKE_id_remapper_apply(mappings, &path->ptr[i].owner_id, ID_REMAP_APPLY_DEFAULT)) {
+        case ID_REMAP_RESULT_SOURCE_UNASSIGNED: {
+          path->len = i;
+          if (i != 0) {
+            /* If the first item in the path is cleared, the whole path is cleared, so no need to
+             * clear further items here, see also at the end of this block. */
+            memset(&path->ptr[i], 0, sizeof(path->ptr[i]) * (path->len - i));
+          }
+          break;
+        }
+        case ID_REMAP_RESULT_SOURCE_REMAPPED: {
+          RNA_id_pointer_create(path->ptr[i].owner_id, &path->ptr[i]);
+          /* There is no easy way to check/make path downwards valid, just nullify it.
+           * Next redraw will rebuild this anyway. */
+          i++;
+          memset(&path->ptr[i], 0, sizeof(path->ptr[i]) * (path->len - i));
+          path->len = i;
+          break;
+        }
 
-    int i;
-    for (i = 0; i < path->len; i++) {
-      if (path->ptr[i].owner_id == old_id) {
-        break;
+        case ID_REMAP_RESULT_SOURCE_NOT_MAPPABLE:
+        case ID_REMAP_RESULT_SOURCE_UNAVAILABLE: {
+          /* Nothing to do. */
+          break;
+        }
       }
     }
-
-    if (i == path->len) {
-      /* pass */
-    }
-    else if (new_id == NULL) {
-      if (i == 0) {
-        MEM_SAFE_FREE(sbuts->path);
-      }
-      else {
-        memset(&path->ptr[i], 0, sizeof(path->ptr[i]) * (path->len - i));
-        path->len = i;
-      }
-    }
-    else {
-      RNA_id_pointer_create(new_id, &path->ptr[i]);
-      /* There is no easy way to check/make path downwards valid, just nullify it.
-       * Next redraw will rebuild this anyway. */
-      i++;
-      memset(&path->ptr[i], 0, sizeof(path->ptr[i]) * (path->len - i));
-      path->len = i;
+    if (path->len == 0) {
+      MEM_SAFE_FREE(sbuts->path);
     }
   }
 
   if (sbuts->texuser) {
     ButsContextTexture *ct = sbuts->texuser;
-    if ((ID *)ct->texture == old_id) {
-      ct->texture = (Tex *)new_id;
-    }
+    BKE_id_remapper_apply(mappings, (ID **)&ct->texture, ID_REMAP_APPLY_DEFAULT);
     BLI_freelistN(&ct->users);
     ct->user = NULL;
   }
@@ -917,7 +920,6 @@ static void buttons_id_remap(ScrArea *UNUSED(area), SpaceLink *slink, ID *old_id
 /** \name Space Type Initialization
  * \{ */
 
-/* only called once, from space/spacetypes.c */
 void ED_spacetype_buttons(void)
 {
   SpaceType *st = MEM_callocN(sizeof(SpaceType), "spacetype buttons");

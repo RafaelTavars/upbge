@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 20014 by Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2014 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup bke
@@ -41,12 +25,12 @@
 #include "BKE_armature.h"
 #include "BKE_constraint.h"
 #include "BKE_curve.h"
+#include "BKE_curves.h"
 #include "BKE_displist.h"
 #include "BKE_editmesh.h"
 #include "BKE_effect.h"
 #include "BKE_gpencil.h"
 #include "BKE_gpencil_modifier.h"
-#include "BKE_hair.h"
 #include "BKE_image.h"
 #include "BKE_key.h"
 #include "BKE_lattice.h"
@@ -67,14 +51,6 @@
 #include "DEG_depsgraph.h"
 #include "DEG_depsgraph_query.h"
 
-/**
- * Restore the object->data to a non-modifier evaluated state.
- *
- * Some changes done directly in evaluated object require them to be reset
- * before being re-evaluated.
- * For example, we need to call this before #BKE_mesh_new_from_object(),
- * in case we removed/added modifiers in the evaluated object.
- */
 void BKE_object_eval_reset(Object *ob_eval)
 {
   BKE_object_free_derived_caches(ob_eval);
@@ -88,10 +64,10 @@ void BKE_object_eval_local_transform(Depsgraph *depsgraph, Object *ob)
   BKE_object_to_mat4(ob, ob->obmat);
 }
 
-/* Evaluate parent */
-/* NOTE: based on solve_parenting(), but with the cruft stripped out */
 void BKE_object_eval_parent(Depsgraph *depsgraph, Object *ob)
 {
+  /* NOTE: based on `solve_parenting()`, but with the cruft stripped out. */
+
   Object *par = ob->parent;
 
   float totmat[4][4];
@@ -123,7 +99,7 @@ void BKE_object_eval_parent(Depsgraph *depsgraph, Object *ob)
 void BKE_object_eval_constraints(Depsgraph *depsgraph, Scene *scene, Object *ob)
 {
   bConstraintOb *cob;
-  float ctime = BKE_scene_frame_get(scene);
+  float ctime = BKE_scene_ctime_get(scene);
 
   DEG_debug_print_eval(depsgraph, __func__, ob->id.name, ob);
 
@@ -154,11 +130,6 @@ void BKE_object_eval_transform_final(Depsgraph *depsgraph, Object *ob)
   else {
     ob->transflag &= ~OB_NEG_SCALE;
   }
-
-  /* Assign evaluated version. */
-  if ((ob->type == OB_GPENCIL) && (ob->runtime.gpd_eval != NULL)) {
-    ob->data = ob->runtime.gpd_eval;
-  }
 }
 
 void BKE_object_handle_data_update(Depsgraph *depsgraph, Scene *scene, Object *ob)
@@ -168,54 +139,44 @@ void BKE_object_handle_data_update(Depsgraph *depsgraph, Scene *scene, Object *o
   /* includes all keys and modifiers */
   switch (ob->type) {
     case OB_MESH: {
-#if 0
-      BMEditMesh *em = (ob->mode & OB_MODE_EDIT) ? BKE_editmesh_from_object(ob) : NULL;
-#else
-      BMEditMesh *em = (ob->mode & OB_MODE_EDIT) ? ((Mesh *)ob->data)->edit_mesh : NULL;
-#endif
-
       CustomData_MeshMasks cddata_masks = scene->customdata_mask;
       CustomData_MeshMasks_update(&cddata_masks, &CD_MASK_BAREMESH);
-      if (DEG_get_mode(depsgraph) == DAG_EVAL_RENDER) {
-        /* Make sure Freestyle edge/face marks appear in DM for render (see T40315). */
+      /* Custom attributes should not be removed automatically. They might be used by the render
+       * engine or scripts. They can still be removed explicitly using geometry nodes. */
+      cddata_masks.vmask |= CD_MASK_PROP_ALL;
+      cddata_masks.emask |= CD_MASK_PROP_ALL;
+      cddata_masks.fmask |= CD_MASK_PROP_ALL;
+      cddata_masks.pmask |= CD_MASK_PROP_ALL;
+      cddata_masks.lmask |= CD_MASK_PROP_ALL;
+
+      /* Make sure Freestyle edge/face marks appear in DM for render (see T40315).
+       * Due to Line Art implementation, edge marks should also be shown in viewport. */
 #ifdef WITH_FREESTYLE
-        cddata_masks.emask |= CD_MASK_FREESTYLE_EDGE;
-        cddata_masks.pmask |= CD_MASK_FREESTYLE_FACE;
+      cddata_masks.emask |= CD_MASK_FREESTYLE_EDGE;
+      cddata_masks.pmask |= CD_MASK_FREESTYLE_FACE;
+      cddata_masks.vmask |= CD_MASK_MDEFORMVERT;
 #endif
+      if (DEG_get_mode(depsgraph) == DAG_EVAL_RENDER) {
         /* Always compute UVs, vertex colors as orcos for render. */
-        cddata_masks.lmask |= CD_MASK_MLOOPUV | CD_MASK_MLOOPCOL;
+        cddata_masks.lmask |= CD_MASK_MLOOPUV | CD_MASK_PROP_BYTE_COLOR;
         cddata_masks.vmask |= CD_MASK_ORCO | CD_MASK_PROP_COLOR;
       }
-      if (em) {
-        makeDerivedMesh(depsgraph, scene, ob, em, &cddata_masks); /* was CD_MASK_BAREMESH */
-      }
-      else {
-        makeDerivedMesh(depsgraph, scene, ob, NULL, &cddata_masks);
-      }
+      makeDerivedMesh(depsgraph, scene, ob, &cddata_masks); /* was CD_MASK_BAREMESH */
       break;
     }
     case OB_ARMATURE:
-      if (ID_IS_LINKED(ob) && ob->proxy_from) {
-        if (BKE_pose_copy_result(ob->pose, ob->proxy_from->pose) == false) {
-          printf("Proxy copy error, lib Object: %s proxy Object: %s\n",
-                 ob->id.name + 2,
-                 ob->proxy_from->id.name + 2);
-        }
-      }
-      else {
-        BKE_pose_where_is(depsgraph, scene, ob);
-      }
+      BKE_pose_where_is(depsgraph, scene, ob);
       break;
 
     case OB_MBALL:
       BKE_displist_make_mball(depsgraph, scene, ob);
       break;
 
-    case OB_CURVE:
+    case OB_CURVES_LEGACY:
     case OB_SURF:
     case OB_FONT: {
       bool for_render = (DEG_get_mode(depsgraph) == DAG_EVAL_RENDER);
-      BKE_displist_make_curveTypes(depsgraph, scene, ob, for_render, false);
+      BKE_displist_make_curveTypes(depsgraph, scene, ob, for_render);
       break;
     }
 
@@ -225,11 +186,11 @@ void BKE_object_handle_data_update(Depsgraph *depsgraph, Scene *scene, Object *o
     case OB_GPENCIL: {
       BKE_gpencil_prepare_eval_data(depsgraph, scene, ob);
       BKE_gpencil_modifiers_calc(depsgraph, scene, ob);
-      BKE_gpencil_update_layer_parent(depsgraph, ob);
+      BKE_gpencil_update_layer_transforms(depsgraph, ob);
       break;
     }
-    case OB_HAIR:
-      BKE_hair_data_update(depsgraph, scene, ob);
+    case OB_CURVES:
+      BKE_curves_data_update(depsgraph, scene, ob);
       break;
     case OB_POINTCLOUD:
       BKE_pointcloud_data_update(depsgraph, scene, ob);
@@ -273,7 +234,12 @@ void BKE_object_handle_data_update(Depsgraph *depsgraph, Scene *scene, Object *o
 /** Bounding box from evaluated geometry. */
 static void object_sync_boundbox_to_original(Object *object_orig, Object *object_eval)
 {
-  BoundBox *bb = BKE_object_boundbox_get(object_eval);
+  const BoundBox *bb = object_eval->runtime.bb;
+  if (!bb || (bb->flag & BOUNDBOX_DIRTY)) {
+    BKE_object_boundbox_calc_from_evaluated_geometry(object_eval);
+  }
+
+  bb = BKE_object_boundbox_get(object_eval);
   if (bb != NULL) {
     if (object_orig->runtime.bb == NULL) {
       object_orig->runtime.bb = MEM_mallocN(sizeof(*object_orig->runtime.bb), __func__);
@@ -311,63 +277,39 @@ void BKE_object_sync_to_original(Depsgraph *depsgraph, Object *object)
   object_sync_boundbox_to_original(object_orig, object);
 }
 
-bool BKE_object_eval_proxy_copy(Depsgraph *depsgraph, Object *object)
+void BKE_object_eval_uber_transform(Depsgraph *UNUSED(depsgraph), Object *UNUSED(object))
 {
-  /* Handle proxy copy for target, */
-  if (ID_IS_LINKED(object) && object->proxy_from) {
-    DEG_debug_print_eval(depsgraph, __func__, object->id.name, object);
-    if (object->proxy_from->proxy_group) {
-      /* Transform proxy into group space. */
-      Object *obg = object->proxy_from->proxy_group;
-      float imat[4][4];
-      invert_m4_m4(imat, obg->obmat);
-      mul_m4_m4m4(object->obmat, imat, object->proxy_from->obmat);
-      /* Should always be true. */
-      if (obg->instance_collection) {
-        add_v3_v3(object->obmat[3], obg->instance_collection->instance_offset);
-      }
-    }
-    else {
-      copy_m4_m4(object->obmat, object->proxy_from->obmat);
-    }
-    return true;
-  }
-  return false;
-}
-
-void BKE_object_eval_uber_transform(Depsgraph *depsgraph, Object *object)
-{
-  BKE_object_eval_proxy_copy(depsgraph, object);
 }
 
 void BKE_object_batch_cache_dirty_tag(Object *ob)
 {
   switch (ob->type) {
     case OB_MESH:
-      BKE_mesh_batch_cache_dirty_tag(ob->data, BKE_MESH_BATCH_DIRTY_ALL);
+      BKE_mesh_batch_cache_dirty_tag((struct Mesh *)ob->data, BKE_MESH_BATCH_DIRTY_ALL);
       break;
     case OB_LATTICE:
-      BKE_lattice_batch_cache_dirty_tag(ob->data, BKE_LATTICE_BATCH_DIRTY_ALL);
+      BKE_lattice_batch_cache_dirty_tag((struct Lattice *)ob->data, BKE_LATTICE_BATCH_DIRTY_ALL);
       break;
-    case OB_CURVE:
-    case OB_FONT:
-    case OB_SURF:
-      BKE_curve_batch_cache_dirty_tag(ob->data, BKE_CURVE_BATCH_DIRTY_ALL);
+    case OB_CURVES_LEGACY:
+      BKE_curve_batch_cache_dirty_tag((struct Curve *)ob->data, BKE_CURVE_BATCH_DIRTY_ALL);
       break;
     case OB_MBALL:
-      BKE_mball_batch_cache_dirty_tag(ob->data, BKE_MBALL_BATCH_DIRTY_ALL);
+      BKE_mball_batch_cache_dirty_tag((struct MetaBall *)ob->data, BKE_MBALL_BATCH_DIRTY_ALL);
       break;
     case OB_GPENCIL:
-      BKE_gpencil_batch_cache_dirty_tag(ob->data);
+      BKE_gpencil_batch_cache_dirty_tag((struct bGPdata *)ob->data);
       break;
-    case OB_HAIR:
-      BKE_hair_batch_cache_dirty_tag(ob->data, BKE_HAIR_BATCH_DIRTY_ALL);
+    case OB_CURVES:
+      BKE_curves_batch_cache_dirty_tag((struct Curves *)ob->data, BKE_CURVES_BATCH_DIRTY_ALL);
       break;
     case OB_POINTCLOUD:
-      BKE_pointcloud_batch_cache_dirty_tag(ob->data, BKE_POINTCLOUD_BATCH_DIRTY_ALL);
+      BKE_pointcloud_batch_cache_dirty_tag((struct PointCloud *)ob->data,
+                                           BKE_POINTCLOUD_BATCH_DIRTY_ALL);
       break;
     case OB_VOLUME:
-      BKE_volume_batch_cache_dirty_tag(ob->data, BKE_VOLUME_BATCH_DIRTY_ALL);
+      BKE_volume_batch_cache_dirty_tag((struct Volume *)ob->data, BKE_VOLUME_BATCH_DIRTY_ALL);
+      break;
+    default:
       break;
   }
 }
@@ -407,7 +349,7 @@ void BKE_object_data_select_update(Depsgraph *depsgraph, ID *object_data)
     case ID_ME:
       BKE_mesh_batch_cache_dirty_tag((Mesh *)object_data, BKE_MESH_BATCH_DIRTY_SELECT);
       break;
-    case ID_CU:
+    case ID_CU_LEGACY:
       BKE_curve_batch_cache_dirty_tag((Curve *)object_data, BKE_CURVE_BATCH_DIRTY_SELECT);
       break;
     case ID_LT:

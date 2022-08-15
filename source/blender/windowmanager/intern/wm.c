@@ -1,26 +1,10 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2007 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2007 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup wm
  *
- * Internal functions for managing UI registrable types (operator, UI and menu types).
+ * Internal functions for managing UI registerable types (operator, UI and menu types).
  *
  * Also Blender's main event loop (WM_main).
  */
@@ -86,18 +70,25 @@ static void window_manager_foreach_id(ID *id, LibraryForeachIDData *data)
   wmWindowManager *wm = (wmWindowManager *)id;
 
   LISTBASE_FOREACH (wmWindow *, win, &wm->windows) {
-    BKE_LIB_FOREACHID_PROCESS(data, win->scene, IDWALK_CB_USER_ONE);
+    BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, win->scene, IDWALK_CB_USER_ONE);
 
     /* This pointer can be NULL during old files reading, better be safe than sorry. */
     if (win->workspace_hook != NULL) {
       ID *workspace = (ID *)BKE_workspace_active_get(win->workspace_hook);
-      BKE_LIB_FOREACHID_PROCESS_ID(data, workspace, IDWALK_CB_NOP);
+      BKE_lib_query_foreachid_process(data, &workspace, IDWALK_CB_USER);
       /* Allow callback to set a different workspace. */
       BKE_workspace_active_set(win->workspace_hook, (WorkSpace *)workspace);
+      if (BKE_lib_query_foreachid_iter_stop(data)) {
+        return;
+      }
+
+      BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, win->unpinned_scene, IDWALK_CB_NOP);
     }
+
     if (BKE_lib_query_foreachid_process_flags_get(data) & IDWALK_INCLUDE_UI) {
       LISTBASE_FOREACH (ScrArea *, area, &win->global_areas.areabase) {
-        BKE_screen_foreach_id_screen_area(data, area);
+        BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(data,
+                                                BKE_screen_foreach_id_screen_area(data, area));
       }
     }
   }
@@ -153,7 +144,7 @@ static void window_manager_blend_read_data(BlendDataReader *reader, ID *id)
     if (win->workspace_hook != NULL) {
       /* We need to restore a pointer to this later when reading workspaces,
        * so store in global oldnew-map.
-       * Note that this is only needed for versioning of older .blend files now.. */
+       * Note that this is only needed for versioning of older .blend files now. */
       BLO_read_data_globmap_add(reader, hook, win->workspace_hook);
       /* Cleanup pointers to data outside of this data-block scope. */
       win->workspace_hook->act_layout = NULL;
@@ -166,13 +157,13 @@ static void window_manager_blend_read_data(BlendDataReader *reader, ID *id)
     win->ghostwin = NULL;
     win->gpuctx = NULL;
     win->eventstate = NULL;
+    win->event_last_handled = NULL;
     win->cursor_keymap_status = NULL;
-    win->tweak = NULL;
-#ifdef WIN32
+#if defined(WIN32) || defined(__APPLE__)
     win->ime_data = NULL;
 #endif
 
-    BLI_listbase_clear(&win->queue);
+    BLI_listbase_clear(&win->event_queue);
     BLI_listbase_clear(&win->handlers);
     BLI_listbase_clear(&win->modalhandlers);
     BLI_listbase_clear(&win->gesture);
@@ -184,6 +175,9 @@ static void window_manager_blend_read_data(BlendDataReader *reader, ID *id)
     win->modalcursor = 0;
     win->grabcursor = 0;
     win->addmousemove = true;
+    win->event_queue_check_click = 0;
+    win->event_queue_check_drag = 0;
+    win->event_queue_check_drag_handled = 0;
     BLO_read_data_address(reader, &win->stereo3d_format);
 
     /* Multi-view always fallback to anaglyph at file opening
@@ -198,7 +192,7 @@ static void window_manager_blend_read_data(BlendDataReader *reader, ID *id)
   BLI_listbase_clear(&wm->timers);
   BLI_listbase_clear(&wm->operators);
   BLI_listbase_clear(&wm->paintcursors);
-  BLI_listbase_clear(&wm->queue);
+  BLI_listbase_clear(&wm->notifier_queue);
   BKE_reports_init(&wm->reports, RPT_STORE);
 
   BLI_listbase_clear(&wm->keyconfigs);
@@ -232,6 +226,7 @@ static void lib_link_workspace_instance_hook(BlendLibReader *reader,
 {
   WorkSpace *workspace = BKE_workspace_active_get(hook);
   BLO_read_id_address(reader, id->lib, &workspace);
+
   BKE_workspace_active_set(hook, workspace);
 }
 
@@ -247,6 +242,11 @@ static void window_manager_blend_read_lib(BlendLibReader *reader, ID *id)
     /* deprecated, but needed for versioning (will be NULL'ed then) */
     BLO_read_id_address(reader, NULL, &win->screen);
 
+    /* The unpinned scene is a UI->Scene-data pointer, and should be NULL'ed on linking (like
+     * WorkSpace.pin_scene). But the WindowManager ID (owning the window) is never linked. */
+    BLI_assert(!ID_IS_LINKED(id));
+    BLO_read_id_address(reader, id->lib, &win->unpinned_scene);
+
     LISTBASE_FOREACH (ScrArea *, area, &win->global_areas.areabase) {
       BKE_screen_area_blend_read_lib(reader, &wm->id, area);
     }
@@ -257,14 +257,14 @@ static void window_manager_blend_read_lib(BlendLibReader *reader, ID *id)
 
 IDTypeInfo IDType_ID_WM = {
     .id_code = ID_WM,
-    .id_filter = 0,
+    .id_filter = FILTER_ID_WM,
     .main_listbase_index = INDEX_ID_WM,
     .struct_size = sizeof(wmWindowManager),
     .name = "WindowManager",
     .name_plural = "window_managers",
     .translation_context = BLT_I18NCONTEXT_ID_WINDOWMANAGER,
-    .flags = IDTYPE_FLAGS_NO_COPY | IDTYPE_FLAGS_NO_LIBLINKING | IDTYPE_FLAGS_NO_MAKELOCAL |
-             IDTYPE_FLAGS_NO_ANIMDATA,
+    .flags = IDTYPE_FLAGS_NO_COPY | IDTYPE_FLAGS_NO_LIBLINKING | IDTYPE_FLAGS_NO_ANIMDATA,
+    .asset_type_info = NULL,
 
     .init_data = NULL,
     .copy_data = NULL,
@@ -272,6 +272,8 @@ IDTypeInfo IDType_ID_WM = {
     .make_local = NULL,
     .foreach_id = window_manager_foreach_id,
     .foreach_cache = NULL,
+    .foreach_path = NULL,
+    .owner_get = NULL,
 
     .blend_write = window_manager_blend_write,
     .blend_read_data = window_manager_blend_read_data,
@@ -279,6 +281,8 @@ IDTypeInfo IDType_ID_WM = {
     .blend_read_expand = NULL,
 
     .blend_read_undo_preserve = NULL,
+
+    .lib_override_apply_post = NULL,
 };
 
 #define MAX_OP_REGISTERED 32
@@ -329,13 +333,6 @@ void WM_operator_free_all_after(wmWindowManager *wm, struct wmOperator *op)
   }
 }
 
-/**
- * Use with extreme care!,
- * properties, custom-data etc - must be compatible.
- *
- * \param op: Operator to assign the type to.
- * \param ot: Operator type to assign.
- */
 void WM_operator_type_set(wmOperator *op, wmOperatorType *ot)
 {
   /* Not supported for Python. */
@@ -365,8 +362,6 @@ static void wm_reports_free(wmWindowManager *wm)
   WM_event_remove_timer(wm, NULL, wm->reports.reporttimer);
 }
 
-/* All operations get registered in the windowmanager here. */
-/* Called on event handling by event_system.c. */
 void wm_operator_register(bContext *C, wmOperator *op)
 {
   wmWindowManager *wm = CTX_wm_manager(C);
@@ -403,10 +398,6 @@ void WM_operator_stack_clear(wmWindowManager *wm)
   WM_main_add_notifier(NC_WM | ND_HISTORY, NULL);
 }
 
-/**
- * This function is needed in the case when an addon id disabled
- * while a modal operator it defined is running.
- */
 void WM_operator_handlers_clear(wmWindowManager *wm, wmOperatorType *ot)
 {
   LISTBASE_FOREACH (wmWindow *, win, &wm->windows) {
@@ -468,7 +459,10 @@ void WM_keyconfig_init(bContext *C)
       wm->defaultconf->flag |= KEYCONF_INIT_DEFAULT;
     }
 
-    WM_keyconfig_update_tag(NULL, NULL);
+    /* Harmless, but no need to update in background mode. */
+    if (!G.background) {
+      WM_keyconfig_update_tag(NULL, NULL);
+    }
     WM_keyconfig_update(wm);
 
     wm->initialized |= WM_KEYCONFIG_IS_INIT;
@@ -496,18 +490,18 @@ void WM_check(bContext *C)
   }
 
   if (!G.background) {
-    /* Case: fileread. */
+    /* Case: file-read. */
     if ((wm->initialized & WM_WINDOW_IS_INIT) == 0) {
       WM_keyconfig_init(C);
-      WM_autosave_init(wm);
+      WM_file_autosave_init(wm);
     }
 
     /* Case: no open windows at all, for old file reads. */
     wm_window_ghostwindows_ensure(wm);
   }
 
-  /* Case: fileread. */
-  /* Note: this runs in background mode to set the screen context cb. */
+  /* Case: file-read. */
+  /* NOTE: this runs in background mode to set the screen context cb. */
   if ((wm->initialized & WM_WINDOW_IS_INIT) == 0) {
     ED_screens_init(bmain, wm);
     wm->initialized |= WM_WINDOW_IS_INIT;
@@ -536,7 +530,6 @@ void wm_clear_default_size(bContext *C)
   }
 }
 
-/* On startup, it adds all data, for matching. */
 void wm_add_default(Main *bmain, bContext *C)
 {
   wmWindowManager *wm = BKE_libblock_alloc(bmain, ID_WM, "WinMan", 0);
@@ -558,11 +551,10 @@ void wm_add_default(Main *bmain, bContext *C)
   wm_window_make_drawable(wm, win);
 }
 
-/* Context is allowed to be NULL, do not free wm itself (lib_id.c). */
 void wm_close_and_free(bContext *C, wmWindowManager *wm)
 {
   if (wm->autosavetimer) {
-    wm_autosave_timer_ended(wm);
+    wm_autosave_timer_end(wm);
   }
 
 #ifdef WITH_XR_OPENXR
@@ -587,12 +579,15 @@ void wm_close_and_free(bContext *C, wmWindowManager *wm)
     WM_keyconfig_free(keyconf);
   }
 
-  BLI_freelistN(&wm->queue);
+  BLI_freelistN(&wm->notifier_queue);
 
   if (wm->message_bus != NULL) {
     WM_msgbus_destroy(wm->message_bus);
   }
 
+#ifdef WITH_PYTHON
+  BPY_callback_wm_free(wm);
+#endif
   BLI_freelistN(&wm->paintcursors);
 
   WM_drag_free_list(&wm->drags);
@@ -616,6 +611,7 @@ void wm_close_and_free_all(bContext *C, ListBase *wmlist)
     wm_close_and_free(C, wm);
     BLI_remlink(wmlist, wm);
     BKE_libblock_free_data(&wm->id, true);
+    BKE_libblock_free_data_py(&wm->id);
     MEM_freeN(wm);
   }
 }
@@ -634,10 +630,10 @@ void WM_main(bContext *C)
     /* Per window, all events to the window, screen, area and region handlers. */
     wm_event_do_handlers(C);
 
-    /* Wvents have left notes about changes, we handle and cache it. */
+    /* Events have left notes about changes, we handle and cache it. */
     wm_event_do_notifiers(C);
 
-    /* Wxecute cached changes draw. */
+    /* Execute cached changes draw. */
     wm_draw_update(C);
   }
 }

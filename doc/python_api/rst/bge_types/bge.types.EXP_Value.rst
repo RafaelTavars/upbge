@@ -1,11 +1,11 @@
 EXP_Value(EXP_PyObjectPlus)
-=======================
+===========================
 
-.. module:: bge.types
+.. currentmodule:: bge.types
 
-base class --- :class:`EXP_PyObjectPlus`
+base class --- :class:`~bge.types.EXP_PyObjectPlus`
 
-.. class:: EXP_Value(EXP_PyObjectPlus)
+.. class:: EXP_Value
 
    This class is a basis for other classes.
 

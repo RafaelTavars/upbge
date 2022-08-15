@@ -1,5 +1,9 @@
 #define COMMON_GLOBALS_LIB
 
+#ifdef USE_GPU_SHADER_CREATE_INFO
+#  error Use draw_globals as additional_info instead of common_globals_lib.glsl
+#endif
+
 /* keep in sync with GlobalsUboStorage */
 layout(std140) uniform globalsBlock
 {
@@ -7,8 +11,6 @@ layout(std140) uniform globalsBlock
   vec4 colorWireEdit;
   vec4 colorActive;
   vec4 colorSelect;
-  vec4 colorDupliSelect;
-  vec4 colorDupli;
   vec4 colorLibrarySelect;
   vec4 colorLibrary;
   vec4 colorTransform;
@@ -95,7 +97,7 @@ layout(std140) uniform globalsBlock
   vec4 colorCurrentFrame;
 
   vec4 colorGrid;
-  vec4 colorGridEmphasise;
+  vec4 colorGridEmphasis;
   vec4 colorGridAxisX;
   vec4 colorGridAxisY;
   vec4 colorGridAxisZ;
@@ -108,7 +110,7 @@ layout(std140) uniform globalsBlock
   vec4 screenVecs[2];
   vec4 sizeViewport; /* Inverted size in zw. */
 
-  float sizePixel; /* This one is for dpi scaling */
+  float sizePixel; /* This one is for DPI scaling. */
   float pixelFac;  /* To use with mul_project_m4_v3_zfac() */
   float sizeObjectCenter;
   float sizeLightCenter;

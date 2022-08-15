@@ -1,28 +1,5 @@
-/*
- * ***** BEGIN GPL LICENSE BLOCK *****
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software  Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Copyright (c) 2007 The Zdeno Ash Miklas
- *
- * This source file is part of VideoTexture library
- *
- * Contributor(s):
- *
- * ***** END GPL LICENSE BLOCK *****
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2007 The Zdeno Ash Miklas. */
 
 /** \file gameengine/VideoTexture/ImageRender.cpp
  *  \ingroup bgevideotex
@@ -32,16 +9,14 @@
 
 #include "ImageRender.h"
 
+#include "eevee_private.h"
 
+#include "EXP_PythonCallBack.h"
 #include "KX_Globals.h"
 #include "RAS_IVertex.h"
 #include "RAS_MeshObject.h"
 #include "RAS_Polygon.h"
 #include "Texture.h"
-
-#include "../depsgraph/DEG_depsgraph_query.h"
-#include "GPU_viewport.h"
-#include "eevee_private.h"
 
 ExceptionID SceneInvalid, CameraInvalid, ObserverInvalid, FrameBufferInvalid;
 ExceptionID MirrorInvalid, MirrorSizeInvalid, MirrorNormalInvalid, MirrorHorizontal,
@@ -63,10 +38,15 @@ ImageRender::ImageRender(KX_Scene *scene,
                          unsigned int height,
                          unsigned short samples)
     : ImageViewport(width, height),
+#ifdef WITH_PYTHON
+      m_preDrawCallbacks(nullptr),
+      m_postDrawCallbacks(nullptr),
+#endif
       m_render(true),
       m_done(false),
       m_scene(scene),
       m_camera(camera),
+      m_samples(samples),
       m_owncamera(false),
       m_observer(nullptr),
       m_mirror(nullptr),
@@ -89,6 +69,13 @@ ImageRender::ImageRender(KX_Scene *scene,
 // destructor
 ImageRender::~ImageRender(void)
 {
+#ifdef WITH_PYTHON
+  // These may be nullptr but the macro checks.
+  Py_CLEAR(m_preDrawCallbacks);
+  m_preDrawCallbacks = nullptr;
+  Py_CLEAR(m_postDrawCallbacks);
+  m_postDrawCallbacks = nullptr;
+#endif
   m_scene->RemoveImageRenderCamera(m_camera);
 
   if (m_owncamera) {
@@ -119,14 +106,17 @@ void ImageRender::calcViewport(unsigned int texId, double ts, unsigned int forma
   m_done = false;
 
   const RAS_Rect *viewport = &m_canvas->GetViewportArea();
-  GPU_viewport(viewport->GetLeft(), viewport->GetBottom(), viewport->GetWidth(), viewport->GetHeight());
+  GPU_viewport(
+      viewport->GetLeft(), viewport->GetBottom(), viewport->GetWidth(), viewport->GetHeight());
   GPU_scissor_test(true);
-  GPU_scissor(viewport->GetLeft(), viewport->GetBottom(), viewport->GetWidth(), viewport->GetHeight());
+  GPU_scissor(
+      viewport->GetLeft(), viewport->GetBottom(), viewport->GetWidth(), viewport->GetHeight());
   GPU_apply_state();
 
   GPU_framebuffer_texture_attach(
       m_targetfb, GPU_viewport_color_texture(m_camera->GetGPUViewport(), 0), 0, 0);
-  GPU_framebuffer_texture_attach(m_targetfb, DRW_viewport_texture_list_get()->depth, 0, 0);
+  GPU_framebuffer_texture_attach(
+      m_targetfb, GPU_viewport_depth_texture(m_camera->GetGPUViewport()), 0, 0);
   GPU_framebuffer_bind(m_targetfb);
 
   // get image from viewport (or FBO)
@@ -134,7 +124,8 @@ void ImageRender::calcViewport(unsigned int texId, double ts, unsigned int forma
 
   GPU_framebuffer_texture_detach(m_targetfb,
                                  GPU_viewport_color_texture(m_camera->GetGPUViewport(), 0));
-  GPU_framebuffer_texture_detach(m_targetfb, DRW_viewport_texture_list_get()->depth);
+  GPU_framebuffer_texture_detach(m_targetfb,
+                                 GPU_viewport_depth_texture(m_camera->GetGPUViewport()));
 
   GPU_framebuffer_restore();
 }
@@ -146,6 +137,13 @@ bool ImageRender::Render()
   if (!m_render || m_camera->GetViewport() ||  // camera must be inactive
       m_camera == m_scene->GetActiveCamera() || m_camera == m_scene->GetOverlayCamera()) {
     // no need to compute texture in non texture rendering
+    return false;
+  }
+
+  /* Viewport render mode doesn't support ImageRender then exit here
+   * if we are trying to use not supported features. */
+  if (KX_GetActiveEngine()->UseViewportRender()) {
+    std::cout << "Warning: Viewport Render mode doesn't support ImageRender" << std::endl;
     return false;
   }
 
@@ -234,7 +232,7 @@ bool ImageRender::Render()
   GPU_scissor(viewport[0], viewport[1], viewport[2], viewport[3]);
   GPU_apply_state();
 
-  GPU_clear_depth(1.0f);
+  // GPU_clear_depth(1.0f);
 
   m_rasterizer->SetAuxilaryClientInfo(m_scene);
 
@@ -327,9 +325,48 @@ bool ImageRender::Render()
 
   m_engine->UpdateAnimations(m_scene);
 
-  /* viewport and window share the same values here */
-  const rcti window = {viewport[0], viewport[2], viewport[1], viewport[3]};
-  m_scene->RenderAfterCameraSetupImageRender(m_camera, m_rasterizer, &window);
+  bContext *C = KX_GetActiveEngine()->GetContext();
+  Main *bmain = CTX_data_main(C);
+  Depsgraph *depsgraph = CTX_data_depsgraph_on_load(C);
+
+  if (!depsgraph) {
+    return false;
+  }
+
+  m_scene->SetCurrentGPUViewport(m_camera->GetGPUViewport());
+
+  if (m_scene->SomethingIsMoving()) {
+    /* Add a depsgraph notifier to trigger
+     * DRW_notify_view_update on next draw loop. */
+    DEG_id_tag_update(&m_camera->GetBlenderObject()->id, ID_RECALC_TRANSFORM);
+  }
+
+  m_scene->TagForExtraIdsUpdate(bmain, m_camera);
+  /* We need the changes to be flushed before each draw loop! */
+  BKE_scene_graph_update_tagged(depsgraph, bmain);
+
+#ifdef WITH_PYTHON
+  RunPreDrawCallbacks();
+#endif
+
+  int num_passes = max_ii(1, m_samples);
+  num_passes = min_ii(num_passes, m_scene->GetBlenderScene()->eevee.taa_samples);
+
+  for (int i = 0; i < num_passes; i++) {
+    GPU_clear_depth(1.0f);
+    /* viewport and window share the same values here */
+    const rcti window = {viewport[0], viewport[2], viewport[1], viewport[3]};
+    m_scene->RenderAfterCameraSetupImageRender(m_camera, &window);
+  }
+
+#ifdef WITH_PYTHON
+  RunPostDrawCallbacks();
+  // These may be nullptr but the macro checks.
+  Py_CLEAR(m_preDrawCallbacks);
+  m_preDrawCallbacks = nullptr;
+  Py_CLEAR(m_postDrawCallbacks);
+  m_postDrawCallbacks = nullptr;
+#endif
 
   m_canvas->EndFrame();
 
@@ -343,6 +380,34 @@ bool ImageRender::Render()
 void ImageRender::Unbind()
 {
   GPU_framebuffer_restore();
+}
+
+void ImageRender::RunPreDrawCallbacks()
+{
+  PyObject *list = m_preDrawCallbacks;
+  if (!list || PyList_GET_SIZE(list) == 0) {
+    return;
+  }
+
+  EXP_RunPythonCallBackList(list, nullptr, 0, 0);
+
+  /* Ensure DRW_notify_view_update will be called next time BKE_scene_graph_update_tagged
+   * will be called if we did changes related to scene_eval in ImageRender draw callbacks */
+  DEG_id_tag_update(&m_camera->GetBlenderObject()->id, ID_RECALC_TRANSFORM);
+}
+
+void ImageRender::RunPostDrawCallbacks()
+{
+  PyObject *list = m_postDrawCallbacks;
+  if (!list || PyList_GET_SIZE(list) == 0) {
+    return;
+  }
+
+  EXP_RunPythonCallBackList(list, nullptr, 0, 0);
+
+  /* Ensure DRW_notify_view_update will be called next time BKE_scene_graph_update_tagged
+   * will be called if we did changes related to scene_eval in ImageRender draw callbacks */
+  DEG_id_tag_update(&m_camera->GetBlenderObject()->id, ID_RECALC_TRANSFORM);
 }
 
 // cast Image pointer to ImageRender
@@ -364,7 +429,7 @@ static int ImageRender_init(PyObject *pySelf, PyObject *args, PyObject *kwds)
   RAS_ICanvas *canvas = KX_GetActiveEngine()->GetCanvas();
   int width = canvas->GetWidth();
   int height = canvas->GetHeight();
-  int samples = 0;
+  int samples = 1;
   // parameter keywords
   static const char *kwlist[] = {"sceneObj", "cameraObj", "width", "height", "samples", nullptr};
   // get parameters
@@ -462,6 +527,64 @@ static PyObject *getColorBindCode(PyImage *self, void *closure)
   return PyLong_FromLong(getImageRender(self)->GetColorBindCode());
 }
 
+static PyObject *getPreDrawCallbacks(PyImage *self, void *closure)
+{
+  ImageRender *imageRender = getImageRender(self);
+  if (!imageRender->m_preDrawCallbacks) {
+    imageRender->m_preDrawCallbacks = PyList_New(0);
+  }
+
+  Py_INCREF(imageRender->m_preDrawCallbacks);
+
+  return imageRender->m_preDrawCallbacks;
+}
+
+static int setPreDrawCallbacks(PyImage *self, PyObject *value, void *closure)
+{
+  ImageRender *imageRender = getImageRender(self);
+
+  if (!PyList_CheckExact(value)) {
+    PyErr_SetString(PyExc_ValueError, "Expected a list");
+    return PY_SET_ATTR_FAIL;
+  }
+
+  Py_XDECREF(imageRender->m_preDrawCallbacks);
+
+  Py_INCREF(value);
+  imageRender->m_preDrawCallbacks = value;
+
+  return PY_SET_ATTR_SUCCESS;
+}
+
+static PyObject *getPostDrawCallbacks(PyImage *self, void *closure)
+{
+  ImageRender *imageRender = getImageRender(self);
+  if (!imageRender->m_postDrawCallbacks) {
+    imageRender->m_postDrawCallbacks = PyList_New(0);
+  }
+
+  Py_INCREF(imageRender->m_postDrawCallbacks);
+
+  return imageRender->m_postDrawCallbacks;
+}
+
+static int setPostDrawCallbacks(PyImage *self, PyObject *value, void *closure)
+{
+  ImageRender *imageRender = getImageRender(self);
+
+  if (!PyList_CheckExact(value)) {
+    PyErr_SetString(PyExc_ValueError, "Expected a list");
+    return PY_SET_ATTR_FAIL;
+  }
+
+  Py_XDECREF(imageRender->m_postDrawCallbacks);
+
+  Py_INCREF(value);
+  imageRender->m_postDrawCallbacks = value;
+
+  return PY_SET_ATTR_SUCCESS;
+}
+
 // methods structure
 static PyMethodDef imageRenderMethods[] = {  // methods from ImageBase class
     {"refresh",
@@ -530,6 +653,16 @@ static PyGetSetDef imageRenderGetSets[] = {
      nullptr,
      (char *)"Off-screen color texture bind code",
      nullptr},
+    {(char *)"pre_draw",
+     (getter)getPreDrawCallbacks,
+     (setter)setPreDrawCallbacks,
+     (char *)"Image Render pre-draw callbacks",
+     nullptr},
+    {(char *)"post_draw",
+     (getter)getPostDrawCallbacks,
+     (setter)setPostDrawCallbacks,
+     (char *)"Image Render post-draw callbacks",
+     nullptr},
     {nullptr}};
 
 // define python type
@@ -588,7 +721,7 @@ static int ImageMirror_init(PyObject *pySelf, PyObject *args, PyObject *kwds)
   RAS_ICanvas *canvas = KX_GetActiveEngine()->GetCanvas();
   int width = canvas->GetWidth();
   int height = canvas->GetHeight();
-  int samples = 0;
+  int samples = 1;
 
   // parameter keywords
   static const char *kwlist[] = {
@@ -748,6 +881,7 @@ ImageRender::ImageRender(KX_Scene *scene,
       m_render(false),
       m_done(false),
       m_scene(scene),
+      m_samples(samples),
       m_observer(observer),
       m_mirror(mirror),
       m_clip(100.f)
@@ -773,8 +907,12 @@ ImageRender::ImageRender(KX_Scene *scene,
   float mirrorMat[3][3];
   float left, right, top, bottom, back;
   // make sure this camera will delete its node
-  m_camera = new KX_Camera(scene, KX_Scene::m_callbacks, camdata, true, true);
+  m_camera = new KX_Camera();
+  m_camera->SetScene(scene);
+  m_camera->SetCameraData(camdata);
   m_camera->SetName("__mirror__cam__");
+  m_camera->MarkForDeletion();
+
   // don't add the camera to the scene object list, it doesn't need to be accessible
   m_owncamera = true;
   // locate the vertex assigned to mat and do following calculation in mesh coordinates

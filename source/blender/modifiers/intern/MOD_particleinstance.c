@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2005 by the Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2005 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup modifiers
@@ -51,6 +35,7 @@
 #include "UI_resources.h"
 
 #include "RNA_access.h"
+#include "RNA_prototypes.h"
 
 #include "DEG_depsgraph_build.h"
 #include "DEG_depsgraph_query.h"
@@ -74,7 +59,7 @@ static void requiredDataMask(Object *UNUSED(ob),
   ParticleInstanceModifierData *pimd = (ParticleInstanceModifierData *)md;
 
   if (pimd->index_layer_name[0] != '\0' || pimd->value_layer_name[0] != '\0') {
-    r_cddata_masks->lmask |= CD_MASK_MLOOPCOL;
+    r_cddata_masks->lmask |= CD_MASK_PROP_BYTE_COLOR;
   }
 }
 
@@ -182,7 +167,7 @@ static bool particle_skip(ParticleInstanceModifierData *pimd, ParticleSystem *ps
 
   totpart = psys->totpart + psys->totchild;
 
-  /* TODO make randomization optional? */
+  /* TODO: make randomization optional? */
   randp = (int)(psys_frand(psys, 3578 + p) * totpart) % totpart;
 
   minp = (int)(totpart * pimd->particle_offset) % (totpart + 1);
@@ -343,9 +328,9 @@ static Mesh *modifyMesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh *
   orig_mloop = mesh->mloop;
 
   MLoopCol *mloopcols_index = CustomData_get_layer_named(
-      &result->ldata, CD_MLOOPCOL, pimd->index_layer_name);
+      &result->ldata, CD_PROP_BYTE_COLOR, pimd->index_layer_name);
   MLoopCol *mloopcols_value = CustomData_get_layer_named(
-      &result->ldata, CD_MLOOPCOL, pimd->value_layer_name);
+      &result->ldata, CD_PROP_BYTE_COLOR, pimd->value_layer_name);
   int *vert_part_index = NULL;
   float *vert_part_value = NULL;
   if (mloopcols_index != NULL) {
@@ -383,7 +368,7 @@ static Mesh *modifyMesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh *
         vert_part_value[vindex] = p_random;
       }
 
-      /*change orientation based on object trackflag*/
+      /* Change orientation based on object trackflag. */
       copy_v3_v3(temp_co, mv->co);
       mv->co[axis] = temp_co[track];
       mv->co[(axis + 1) % 3] = temp_co[(track + 1) % 3];
@@ -442,7 +427,7 @@ static Mesh *modifyMesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh *
             mul_qt_qtqt(frame, frame, rot);
           }
 
-          /* note: direction is same as normal vector currently,
+          /* NOTE: direction is same as normal vector currently,
            * but best to keep this separate so the frame can be
            * rotated later if necessary
            */
@@ -490,7 +475,7 @@ static Mesh *modifyMesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh *
       mul_m4_v3(spacemat, mv->co);
     }
 
-    /* create edges and adjust edge vertex indices*/
+    /* Create edges and adjust edge vertex indices. */
     CustomData_copy_data(&mesh->edata, &result->edata, 0, p_skip * totedge, totedge);
     MEdge *me = &result->medge[p_skip * totedge];
     for (k = 0; k < totedge; k++, me++) {
@@ -545,8 +530,6 @@ static Mesh *modifyMesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh *
   MEM_SAFE_FREE(vert_part_index);
   MEM_SAFE_FREE(vert_part_value);
 
-  result->runtime.cd_dirty_vert |= CD_MASK_NORMAL;
-
   return result;
 }
 
@@ -570,7 +553,7 @@ static void panel_draw(const bContext *UNUSED(C), Panel *panel)
                    "particle_system",
                    &particle_obj_ptr,
                    "particle_systems",
-                   "Particle System",
+                   IFACE_("Particle System"),
                    ICON_NONE);
   }
   else {
@@ -661,7 +644,7 @@ static void panelRegister(ARegionType *region_type)
 }
 
 ModifierTypeInfo modifierType_ParticleInstance = {
-    /* name */ "ParticleInstance",
+    /* name */ N_("ParticleInstance"),
     /* structName */ "ParticleInstanceModifierData",
     /* structSize */ sizeof(ParticleInstanceModifierData),
     /* srna */ &RNA_ParticleInstanceModifier,
@@ -677,9 +660,7 @@ ModifierTypeInfo modifierType_ParticleInstance = {
     /* deformVertsEM */ NULL,
     /* deformMatricesEM */ NULL,
     /* modifyMesh */ modifyMesh,
-    /* modifyHair */ NULL,
     /* modifyGeometrySet */ NULL,
-    /* modifyVolume */ NULL,
 
     /* initData */ initData,
     /* requiredDataMask */ requiredDataMask,

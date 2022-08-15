@@ -26,7 +26,6 @@
 
 #pragma once
 
-
 #include <iostream>
 #include <map>
 
@@ -46,6 +45,9 @@ class BL_ActionManager {
 
   class KX_GameObject *m_obj;
   BL_ActionMap m_layers;
+
+  // Suspend action update?
+  bool m_suspended;
 
   /**
    * Check if an action exists
@@ -107,6 +109,10 @@ class BL_ActionManager {
    */
   bool IsActionDone(short layer);
 
+  void Suspend();
+  void Resume();
+  bool IsSuspended() const;
+
   /**
    * Update any running actions
    * \param curtime The current time used to compute the actions' frame.
@@ -115,4 +121,3 @@ class BL_ActionManager {
    */
   void Update(float curtime, bool applyToObject);
 };
-

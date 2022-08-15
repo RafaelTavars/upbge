@@ -37,12 +37,10 @@
 SCA_PythonKeyboard::SCA_PythonKeyboard(SCA_IInputDevice *keyboard)
     : EXP_PyObjectPlus(), m_keyboard(keyboard)
 {
-
 }
 
 SCA_PythonKeyboard::~SCA_PythonKeyboard()
 {
-
 }
 
 #ifdef WITH_PYTHON
@@ -64,7 +62,7 @@ static PyObject *gPySetClipboard(PyObject *args, PyObject *value)
   if (!PyArg_ParseTuple(value, "s:setClipboard", &buf))
     Py_RETURN_NONE;
 
-  GHOST_putClipboard((GHOST_TInt8 *)buf, 0);
+  GHOST_putClipboard((char *)buf, 0);
   Py_RETURN_NONE;
 }
 

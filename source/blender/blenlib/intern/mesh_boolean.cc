@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup bli
@@ -21,6 +7,7 @@
 #ifdef WITH_GMP
 
 #  include <algorithm>
+#  include <atomic>
 #  include <fstream>
 #  include <iostream>
 
@@ -28,15 +15,19 @@
 #  include "BLI_assert.h"
 #  include "BLI_delaunay_2d.h"
 #  include "BLI_hash.hh"
+#  include "BLI_kdopbvh.h"
 #  include "BLI_map.hh"
 #  include "BLI_math.h"
 #  include "BLI_math_boolean.hh"
+#  include "BLI_math_geom.h"
 #  include "BLI_math_mpq.hh"
+#  include "BLI_math_vec_mpq_types.hh"
+#  include "BLI_math_vector.hh"
 #  include "BLI_mesh_intersect.hh"
-#  include "BLI_mpq3.hh"
 #  include "BLI_set.hh"
 #  include "BLI_span.hh"
 #  include "BLI_stack.hh"
+#  include "BLI_task.hh"
 #  include "BLI_vector.hh"
 #  include "BLI_vector_set.hh"
 
@@ -44,7 +35,13 @@
 
 #  include "BLI_mesh_boolean.hh"
 
+#  ifdef WITH_TBB
+#    include <tbb/parallel_reduce.h>
+#    include <tbb/spin_mutex.h>
+#  endif
+
 // #  define PERFDEBUG
+
 namespace blender::meshintersect {
 
 /**
@@ -91,10 +88,7 @@ class Edge {
 
   uint64_t hash() const
   {
-    constexpr uint64_t h1 = 33;
-    uint64_t v0hash = DefaultHash<int>{}(v_[0]->id);
-    uint64_t v1hash = DefaultHash<int>{}(v_[1]->id);
-    return v0hash ^ (v1hash * h1);
+    return get_default_hash_2(v_[0]->id, v_[1]->id);
   }
 };
 
@@ -142,11 +136,9 @@ class TriMeshTopology : NonCopyable {
    * Else return NO_INDEX. */
   int other_tri_if_manifold(Edge e, int t) const
   {
-    if (edge_tri_.contains(e)) {
-      auto *p = edge_tri_.lookup(e);
-      if (p->size() == 2) {
-        return ((*p)[0] == t) ? (*p)[1] : (*p)[0];
-      }
+    const auto *p = edge_tri_.lookup_ptr(e);
+    if (p != nullptr && (*p)->size() == 2) {
+      return ((**p)[0] == t) ? (**p)[1] : (**p)[0];
     }
     return NO_INDEX;
   }
@@ -179,9 +171,9 @@ TriMeshTopology::TriMeshTopology(const IMesh &tm)
   /* If everything were manifold, `F+V-E=2` and `E=3F/2`.
    * So an likely overestimate, allowing for non-manifoldness, is `E=2F` and `V=F`. */
   const int estimate_num_edges = 2 * tm.face_size();
-  const int estimate_num_verts = tm.face_size();
+  const int estimate_verts_num = tm.face_size();
   edge_tri_.reserve(estimate_num_edges);
-  vert_edges_.reserve(estimate_num_verts);
+  vert_edges_.reserve(estimate_verts_num);
   for (int t : tm.face_index_range()) {
     const Face &tri = *tm.face(t);
     BLI_assert(tri.is_tri());
@@ -196,9 +188,14 @@ TriMeshTopology::TriMeshTopology(const IMesh &tm)
         BLI_assert(edges != nullptr);
       }
       edges->append_non_duplicates(e);
-      auto createf = [t](Vector<int> **pvec) { *pvec = new Vector<int>{t}; };
-      auto modifyf = [t](Vector<int> **pvec) { (*pvec)->append_non_duplicates(t); };
-      this->edge_tri_.add_or_modify(Edge(v, vnext), createf, modifyf);
+
+      auto *p = edge_tri_.lookup_ptr(Edge(v, vnext));
+      if (p == nullptr) {
+        edge_tri_.add_new(e, new Vector<int>{t});
+      }
+      else {
+        (*p)->append_non_duplicates(t);
+      }
     }
   }
   /* Debugging. */
@@ -223,9 +220,18 @@ TriMeshTopology::TriMeshTopology(const IMesh &tm)
 
 TriMeshTopology::~TriMeshTopology()
 {
-  for (const Vector<int> *vec : edge_tri_.values()) {
-    delete vec;
+  Vector<Vector<int> *> values;
+
+  /* Deconstructing is faster in parallel, so it is worth building an array of things to delete. */
+  for (auto *item : edge_tri_.values()) {
+    values.append(item);
   }
+
+  threading::parallel_for(values.index_range(), 256, [&](IndexRange range) {
+    for (int i : range) {
+      delete values[i];
+    }
+  });
 }
 
 /** A Patch is a maximal set of triangles that share manifold edges only. */
@@ -402,6 +408,7 @@ class Cell {
   void add_patch(int p)
   {
     patches_.add(p);
+    zero_volume_ = false; /* If it was true before, it no longer is. */
   }
 
   const Set<int> &patches() const
@@ -713,6 +720,18 @@ static PatchesInfo find_patches(const IMesh &tm, const TriMeshTopology &tmtopo)
   PatchesInfo pinfo(ntri);
   /* Algorithm: Grow patches across manifold edges as long as there are unassigned triangles. */
   Stack<int> cur_patch_grow;
+
+  /* Create an Array containing indices of adjacent faces. */
+  Array<std::array<int, 3>> t_others(tm.face_size());
+  threading::parallel_for(tm.face_index_range(), 2048, [&](IndexRange range) {
+    for (int t : range) {
+      const Face &tri = *tm.face(t);
+      for (int i = 0; i < 3; ++i) {
+        Edge e(tri[i], tri[(i + 1) % 3]);
+        t_others[t][i] = tmtopo.other_tri_if_manifold(e, t);
+      }
+    }
+  });
   for (int t : tm.face_index_range()) {
     if (pinfo.tri_patch(t) == -1) {
       cur_patch_grow.push(t);
@@ -733,7 +752,7 @@ static PatchesInfo find_patches(const IMesh &tm, const TriMeshTopology &tmtopo)
         const Face &tri = *tm.face(tcand);
         for (int i = 0; i < 3; ++i) {
           Edge e(tri[i], tri[(i + 1) % 3]);
-          int t_other = tmtopo.other_tri_if_manifold(e, tcand);
+          int t_other = t_others[tcand][i];
           if (dbg_level > 1) {
             std::cout << "  edge " << e << " generates t_other=" << t_other << "\n";
           }
@@ -947,12 +966,8 @@ static void sort_by_signed_triangle_index(Vector<int> &g,
  * To accommodate this:
  * If extra_tri is non-null, then an index of EXTRA_TRI_INDEX should use it for the triangle.
  */
-static Array<int> sort_tris_around_edge(const IMesh &tm,
-                                        const TriMeshTopology &tmtopo,
-                                        const Edge e,
-                                        const Span<int> tris,
-                                        const int t0,
-                                        const Face *extra_tri)
+static Array<int> sort_tris_around_edge(
+    const IMesh &tm, const Edge e, const Span<int> tris, const int t0, const Face *extra_tri)
 {
   /* Divide and conquer, quick-sort-like sort.
    * Pick a triangle t0, then partition into groups:
@@ -1017,14 +1032,14 @@ static Array<int> sort_tris_around_edge(const IMesh &tm,
     }
   }
   if (g3.size() > 1) {
-    Array<int> g3sorted = sort_tris_around_edge(tm, tmtopo, e, g3, t0, extra_tri);
+    Array<int> g3sorted = sort_tris_around_edge(tm, e, g3, t0, extra_tri);
     std::copy(g3sorted.begin(), g3sorted.end(), g3.begin());
     if (dbg_level > 1) {
       std::cout << "g3 sorted: " << g3 << "\n";
     }
   }
   if (g4.size() > 1) {
-    Array<int> g4sorted = sort_tris_around_edge(tm, tmtopo, e, g4, t0, extra_tri);
+    Array<int> g4sorted = sort_tris_around_edge(tm, e, g4, t0, extra_tri);
     std::copy(g4sorted.begin(), g4sorted.end(), g4.begin());
     if (dbg_level > 1) {
       std::cout << "g4 sorted: " << g4 << "\n";
@@ -1070,7 +1085,7 @@ static void find_cells_from_edge(const IMesh &tm,
   const Vector<int> *edge_tris = tmtopo.edge_tris(e);
   BLI_assert(edge_tris != nullptr);
   Array<int> sorted_tris = sort_tris_around_edge(
-      tm, tmtopo, e, Span<int>(*edge_tris), (*edge_tris)[0], nullptr);
+      tm, e, Span<int>(*edge_tris), (*edge_tris)[0], nullptr);
 
   int n_edge_tris = edge_tris->size();
   Array<int> edge_patches(n_edge_tris);
@@ -1332,34 +1347,49 @@ static bool patch_cell_graph_ok(const CellsInfo &cinfo, const PatchesInfo &pinfo
 static bool is_pwn(const IMesh &tm, const TriMeshTopology &tmtopo)
 {
   constexpr int dbg_level = 0;
+  std::atomic<bool> is_pwn = true;
+  Vector<std::pair<Edge, Vector<int> *>> tris;
+
   for (auto item : tmtopo.edge_tri_map_items()) {
-    const Edge &edge = item.key;
-    int tot_orient = 0;
-    /* For each face t attached to edge, add +1 if the edge
-     * is positively in t, and -1 if negatively in t. */
-    for (int t : *item.value) {
-      const Face &face = *tm.face(t);
-      BLI_assert(face.size() == 3);
-      for (int i : face.index_range()) {
-        if (face[i] == edge.v0()) {
-          if (face[(i + 1) % 3] == edge.v1()) {
-            ++tot_orient;
-          }
-          else {
-            BLI_assert(face[(i + 3 - 1) % 3] == edge.v1());
-            --tot_orient;
+    tris.append(std::pair<Edge, Vector<int> *>(item.key, item.value));
+  }
+
+  threading::parallel_for(tris.index_range(), 2048, [&](IndexRange range) {
+    if (!is_pwn.load()) {
+      /* Early out if mesh is already determined to be non-pwn. */
+      return;
+    }
+
+    for (int j : range) {
+      const Edge &edge = tris[j].first;
+      int tot_orient = 0;
+      /* For each face t attached to edge, add +1 if the edge
+       * is positively in t, and -1 if negatively in t. */
+      for (int t : *tris[j].second) {
+        const Face &face = *tm.face(t);
+        BLI_assert(face.size() == 3);
+        for (int i : face.index_range()) {
+          if (face[i] == edge.v0()) {
+            if (face[(i + 1) % 3] == edge.v1()) {
+              ++tot_orient;
+            }
+            else {
+              BLI_assert(face[(i + 3 - 1) % 3] == edge.v1());
+              --tot_orient;
+            }
           }
         }
       }
-    }
-    if (tot_orient != 0) {
-      if (dbg_level > 0) {
-        std::cout << "edge causing non-pwn: " << edge << "\n";
+      if (tot_orient != 0) {
+        if (dbg_level > 0) {
+          std::cout << "edge causing non-pwn: " << edge << "\n";
+        }
+        is_pwn = false;
+        break;
       }
-      return false;
     }
-  }
-  return true;
+  });
+  return is_pwn.load();
 }
 
 /**
@@ -1390,8 +1420,7 @@ static int find_cell_for_point_near_edge(mpq3 p,
   Array<int> edge_tris(etris->size() + 1);
   std::copy(etris->begin(), etris->end(), edge_tris.begin());
   edge_tris[edge_tris.size() - 1] = EXTRA_TRI_INDEX;
-  Array<int> sorted_tris = sort_tris_around_edge(
-      tm, tmtopo, e, edge_tris, edge_tris[0], dummy_tri);
+  Array<int> sorted_tris = sort_tris_around_edge(tm, e, edge_tris, edge_tris[0], dummy_tri);
   if (dbg_level > 0) {
     std::cout << "sorted tris = " << sorted_tris << "\n";
   }
@@ -1400,9 +1429,9 @@ static int find_cell_for_point_near_edge(mpq3 p,
   int dummy_index = p_sorted_dummy - sorted_tris.begin();
   int prev_tri = (dummy_index == 0) ? sorted_tris[sorted_tris.size() - 1] :
                                       sorted_tris[dummy_index - 1];
-  int next_tri = (dummy_index == sorted_tris.size() - 1) ? sorted_tris[0] :
-                                                           sorted_tris[dummy_index + 1];
   if (dbg_level > 0) {
+    int next_tri = (dummy_index == sorted_tris.size() - 1) ? sorted_tris[0] :
+                                                             sorted_tris[dummy_index + 1];
     std::cout << "prev tri to dummy = " << prev_tri << ";  next tri to dummy = " << next_tri
               << "\n";
   }
@@ -1446,39 +1475,66 @@ static int find_ambient_cell(const IMesh &tm,
   /* First find a vertex with the maximum x value. */
   /* Prefer not to populate the verts in the #IMesh just for this. */
   const Vert *v_extreme;
-  mpq_class extreme_x;
+  auto max_x_vert = [](const Vert *a, const Vert *b) {
+    return (a->co_exact.x > b->co_exact.x) ? a : b;
+  };
   if (component_patches == nullptr) {
-    v_extreme = (*tm.face(0))[0];
-    extreme_x = v_extreme->co_exact.x;
-    for (const Face *f : tm.faces()) {
-      for (const Vert *v : *f) {
-        const mpq_class &x = v->co_exact.x;
-        if (x > extreme_x) {
-          v_extreme = v;
-          extreme_x = x;
-        }
-      }
-    }
+    v_extreme = threading::parallel_reduce(
+        tm.face_index_range(),
+        2048,
+        (*tm.face(0))[0],
+        [&](IndexRange range, const Vert *init) {
+          const Vert *ans = init;
+          for (int i : range) {
+            const Face *f = tm.face(i);
+            for (const Vert *v : *f) {
+              if (v->co_exact.x > ans->co_exact.x) {
+                ans = v;
+              }
+            }
+          }
+          return ans;
+        },
+        max_x_vert);
   }
   else {
     if (dbg_level > 0) {
       std::cout << "restrict to patches " << *component_patches << "\n";
     }
     int p0 = (*component_patches)[0];
-    v_extreme = (*tm.face(pinfo.patch(p0).tri(0)))[0];
-    extreme_x = v_extreme->co_exact.x;
-    for (int p : *component_patches) {
-      for (int t : pinfo.patch(p).tris()) {
-        const Face *f = tm.face(t);
-        for (const Vert *v : *f) {
-          const mpq_class &x = v->co_exact.x;
-          if (x > extreme_x) {
-            v_extreme = v;
-            extreme_x = x;
+    v_extreme = threading::parallel_reduce(
+        component_patches->index_range(),
+        2048,
+        (*tm.face(pinfo.patch(p0).tri(0)))[0],
+        [&](IndexRange range, const Vert *init) {
+          const Vert *ans = init;
+          for (int pi : range) {
+            int p = (*component_patches)[pi];
+            const Vert *tris_ans = threading::parallel_reduce(
+                IndexRange(pinfo.patch(p).tot_tri()),
+                2048,
+                init,
+                [&](IndexRange tris_range, const Vert *t_init) {
+                  const Vert *v_ans = t_init;
+                  for (int i : tris_range) {
+                    int t = pinfo.patch(p).tri(i);
+                    const Face *f = tm.face(t);
+                    for (const Vert *v : *f) {
+                      if (v->co_exact.x > v_ans->co_exact.x) {
+                        v_ans = v;
+                      }
+                    }
+                  }
+                  return v_ans;
+                },
+                max_x_vert);
+            if (tris_ans->co_exact.x > ans->co_exact.x) {
+              ans = tris_ans;
+            }
           }
-        }
-      }
-    }
+          return ans;
+        },
+        max_x_vert);
   }
   if (dbg_level > 0) {
     std::cout << "v_extreme = " << v_extreme << "\n";
@@ -1487,7 +1543,8 @@ static int find_ambient_cell(const IMesh &tm,
    * when projected onto the XY plane. That edge is guaranteed to
    * be on the convex hull of the mesh. */
   const Vector<Edge> &edges = tmtopo.vert_edges(v_extreme);
-  const mpq_class extreme_y = v_extreme->co_exact.y;
+  const mpq_class &extreme_x = v_extreme->co_exact.x;
+  const mpq_class &extreme_y = v_extreme->co_exact.y;
   Edge ehull;
   mpq_class max_abs_slope = -1;
   for (Edge e : edges) {
@@ -1508,8 +1565,8 @@ static int find_ambient_cell(const IMesh &tm,
   if (dbg_level > 0) {
     std::cout << "ehull = " << ehull << " slope = " << max_abs_slope << "\n";
   }
-  /* Sort triangles around ehull, including a dummy triangle that include a known point in ambient
-   * cell. */
+  /* Sort triangles around ehull, including a dummy triangle that include a known point in
+   * ambient cell. */
   mpq3 p_in_ambient = v_extreme->co_exact;
   p_in_ambient.x += 1;
   int c_ambient = find_cell_for_point_near_edge(p_in_ambient, ehull, tm, tmtopo, pinfo, arena);
@@ -1561,13 +1618,13 @@ static Edge find_good_sorting_edge(const Vert *testp,
   ordinate[axis_next] = -abscissa[axis];
   ordinate[axis_next_next] = 0;
   /* By construction, dot(abscissa, ordinate) == 0, so they are perpendicular. */
-  mpq3 normal = mpq3::cross(abscissa, ordinate);
+  mpq3 normal = math::cross(abscissa, ordinate);
   if (dbg_level > 0) {
     std::cout << "abscissa = " << abscissa << "\n";
     std::cout << "ordinate = " << ordinate << "\n";
     std::cout << "normal = " << normal << "\n";
   }
-  mpq_class nlen2 = normal.length_squared();
+  mpq_class nlen2 = math::length_squared(normal);
   mpq_class max_abs_slope = -1;
   Edge esort;
   const Vector<Edge> &edges = tmtopo.vert_edges(closestp);
@@ -1576,12 +1633,12 @@ static Edge find_good_sorting_edge(const Vert *testp,
     const mpq3 &co_other = v_other->co_exact;
     mpq3 evec = co_other - co_closest;
     /* Get projection of evec onto plane of abscissa and ordinate. */
-    mpq3 proj_evec = evec - (mpq3::dot(evec, normal) / nlen2) * normal;
+    mpq3 proj_evec = evec - (math::dot(evec, normal) / nlen2) * normal;
     /* The projection calculations along the abscissa and ordinate should
      * be scaled by 1/abscissa and 1/ordinate respectively,
      * but we can skip: it won't affect which `evec` has the maximum slope. */
-    mpq_class evec_a = mpq3::dot(proj_evec, abscissa);
-    mpq_class evec_o = mpq3::dot(proj_evec, ordinate);
+    mpq_class evec_a = math::dot(proj_evec, abscissa);
+    mpq_class evec_o = math::dot(proj_evec, ordinate);
     if (dbg_level > 0) {
       std::cout << "e = " << e << "\n";
       std::cout << "v_other = " << v_other << "\n";
@@ -1618,7 +1675,7 @@ static Edge find_good_sorting_edge(const Vert *testp,
  * The algorithm is similar to the one for find_ambient_cell, except that
  * instead of an arbitrary point known to be outside the whole mesh, we
  * have a particular point (v) and we just want to determine the patches
- * that that point is between in sorting-around-an-edge order.
+ * that point is between in sorting-around-an-edge order.
  */
 static int find_containing_cell(const Vert *v,
                                 int t,
@@ -1687,9 +1744,24 @@ static int find_containing_cell(const Vert *v,
  * If the closest point is on an edge, return 0, 1, or 2
  * for edges ab, bc, or ca in *r_edge; else -1.
  * (Adapted from #closest_on_tri_to_point_v3()).
+ * The arguments ab, ac, ..., r are used as temporaries
+ * in this routine. Passing them in from the caller can
+ * avoid many allocs and frees of temporary mpq3 values
+ * and the mpq_class values within them.
  */
-static mpq_class closest_on_tri_to_point(
-    const mpq3 &p, const mpq3 &a, const mpq3 &b, const mpq3 &c, int *r_edge, int *r_vert)
+static mpq_class closest_on_tri_to_point(const mpq3 &p,
+                                         const mpq3 &a,
+                                         const mpq3 &b,
+                                         const mpq3 &c,
+                                         mpq3 &ab,
+                                         mpq3 &ac,
+                                         mpq3 &ap,
+                                         mpq3 &bp,
+                                         mpq3 &cp,
+                                         mpq3 &m,
+                                         mpq3 &r,
+                                         int *r_edge,
+                                         int *r_vert)
 {
   constexpr int dbg_level = 0;
   if (dbg_level > 0) {
@@ -1697,11 +1769,15 @@ static mpq_class closest_on_tri_to_point(
     std::cout << " a = " << a << ", b = " << b << ", c = " << c << "\n";
   }
   /* Check if p in vertex region outside a. */
-  mpq3 ab = b - a;
-  mpq3 ac = c - a;
-  mpq3 ap = p - a;
-  mpq_class d1 = mpq3::dot(ab, ap);
-  mpq_class d2 = mpq3::dot(ac, ap);
+  ab = b;
+  ab -= a;
+  ac = c;
+  ac -= a;
+  ap = p;
+  ap -= a;
+
+  mpq_class d1 = math::dot_with_buffer(ab, ap, m);
+  mpq_class d2 = math::dot_with_buffer(ac, ap, m);
   if (d1 <= 0 && d2 <= 0) {
     /* Barycentric coordinates (1,0,0). */
     *r_edge = -1;
@@ -1709,12 +1785,13 @@ static mpq_class closest_on_tri_to_point(
     if (dbg_level > 0) {
       std::cout << "  answer = a\n";
     }
-    return mpq3::distance_squared(p, a);
+    return math::distance_squared_with_buffer(p, a, m);
   }
   /* Check if p in vertex region outside b. */
-  mpq3 bp = p - b;
-  mpq_class d3 = mpq3::dot(ab, bp);
-  mpq_class d4 = mpq3::dot(ac, bp);
+  bp = p;
+  bp -= b;
+  mpq_class d3 = math::dot_with_buffer(ab, bp, m);
+  mpq_class d4 = math::dot_with_buffer(ac, bp, m);
   if (d3 >= 0 && d4 <= d3) {
     /* Barycentric coordinates (0,1,0). */
     *r_edge = -1;
@@ -1722,25 +1799,28 @@ static mpq_class closest_on_tri_to_point(
     if (dbg_level > 0) {
       std::cout << "  answer = b\n";
     }
-    return mpq3::distance_squared(p, b);
+    return math::distance_squared_with_buffer(p, b, m);
   }
   /* Check if p in region of ab. */
   mpq_class vc = d1 * d4 - d3 * d2;
   if (vc <= 0 && d1 >= 0 && d3 <= 0) {
     mpq_class v = d1 / (d1 - d3);
     /* Barycentric coordinates (1-v,v,0). */
-    mpq3 r = a + v * ab;
+    r = ab;
+    r *= v;
+    r += a;
     *r_vert = -1;
     *r_edge = 0;
     if (dbg_level > 0) {
       std::cout << "  answer = on ab at " << r << "\n";
     }
-    return mpq3::distance_squared(p, r);
+    return math::distance_squared_with_buffer(p, r, m);
   }
   /* Check if p in vertex region outside c. */
-  mpq3 cp = p - c;
-  mpq_class d5 = mpq3::dot(ab, cp);
-  mpq_class d6 = mpq3::dot(ac, cp);
+  cp = p;
+  cp -= c;
+  mpq_class d5 = math::dot_with_buffer(ab, cp, m);
+  mpq_class d6 = math::dot_with_buffer(ac, cp, m);
   if (d6 >= 0 && d5 <= d6) {
     /* Barycentric coordinates (0,0,1). */
     *r_edge = -1;
@@ -1748,49 +1828,67 @@ static mpq_class closest_on_tri_to_point(
     if (dbg_level > 0) {
       std::cout << "  answer = c\n";
     }
-    return mpq3::distance_squared(p, c);
+    return math::distance_squared_with_buffer(p, c, m);
   }
   /* Check if p in edge region of ac. */
   mpq_class vb = d5 * d2 - d1 * d6;
   if (vb <= 0 && d2 >= 0 && d6 <= 0) {
     mpq_class w = d2 / (d2 - d6);
     /* Barycentric coordinates (1-w,0,w). */
-    mpq3 r = a + w * ac;
+    r = ac;
+    r *= w;
+    r += a;
     *r_vert = -1;
     *r_edge = 2;
     if (dbg_level > 0) {
       std::cout << "  answer = on ac at " << r << "\n";
     }
-    return mpq3::distance_squared(p, r);
+    return math::distance_squared_with_buffer(p, r, m);
   }
   /* Check if p in edge region of bc. */
   mpq_class va = d3 * d6 - d5 * d4;
   if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
     mpq_class w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
     /* Barycentric coordinates (0,1-w,w). */
-    mpq3 r = c - b;
-    r = w * r;
-    r = r + b;
+    r = c;
+    r -= b;
+    r *= w;
+    r += b;
     *r_vert = -1;
     *r_edge = 1;
     if (dbg_level > 0) {
       std::cout << "  answer = on bc at " << r << "\n";
     }
-    return mpq3::distance_squared(p, r);
+    return math::distance_squared_with_buffer(p, r, m);
   }
   /* p inside face region. Compute barycentric coordinates (u,v,w). */
   mpq_class denom = 1 / (va + vb + vc);
   mpq_class v = vb * denom;
   mpq_class w = vc * denom;
-  ac = w * ac;
-  mpq3 r = a + v * ab;
-  r = r + ac;
+  ac *= w;
+  r = ab;
+  r *= v;
+  r += a;
+  r += ac;
   *r_vert = -1;
   *r_edge = -1;
   if (dbg_level > 0) {
     std::cout << "  answer = inside at " << r << "\n";
   }
-  return mpq3::distance_squared(p, r);
+  return math::distance_squared_with_buffer(p, r, m);
+}
+
+static float closest_on_tri_to_point_float_dist_squared(const float3 &p,
+                                                        const double3 &a,
+                                                        const double3 &b,
+                                                        const double3 &c)
+{
+  float3 fa, fb, fc, closest;
+  copy_v3fl_v3db(fa, a);
+  copy_v3fl_v3db(fb, b);
+  copy_v3fl_v3db(fc, c);
+  closest_on_tri_to_point_v3(closest, p, fa, fb, fc);
+  return len_squared_v3v3(p, closest);
 }
 
 struct ComponentContainer {
@@ -1816,6 +1914,7 @@ static Vector<ComponentContainer> find_component_containers(int comp,
                                                             const IMesh &tm,
                                                             const PatchesInfo &pinfo,
                                                             const TriMeshTopology &tmtopo,
+                                                            Array<BoundingBox> &comp_bb,
                                                             IMeshArena *arena)
 {
   constexpr int dbg_level = 0;
@@ -1829,6 +1928,11 @@ static Vector<ComponentContainer> find_component_containers(int comp,
   if (dbg_level > 0) {
     std::cout << "test vertex in comp: " << test_v << "\n";
   }
+  const double3 &test_v_d = test_v->co;
+  float3 test_v_f(test_v_d[0], test_v_d[1], test_v_d[2]);
+
+  mpq3 buf[7];
+
   for (int comp_other : components.index_range()) {
     if (comp == comp_other) {
       continue;
@@ -1836,10 +1940,17 @@ static Vector<ComponentContainer> find_component_containers(int comp,
     if (dbg_level > 0) {
       std::cout << "comp_other = " << comp_other << "\n";
     }
+    if (!bbs_might_intersect(comp_bb[comp], comp_bb[comp_other])) {
+      if (dbg_level > 0) {
+        std::cout << "bounding boxes don't overlap\n";
+      }
+      continue;
+    }
     int nearest_tri = NO_INDEX;
     int nearest_tri_close_vert = -1;
     int nearest_tri_close_edge = -1;
     mpq_class nearest_tri_dist_squared;
+    float nearest_tri_dist_squared_float = FLT_MAX;
     for (int p : components[comp_other]) {
       const Patch &patch = pinfo.patch(p);
       for (int t : patch.tris()) {
@@ -1849,10 +1960,23 @@ static Vector<ComponentContainer> find_component_containers(int comp,
         }
         int close_vert;
         int close_edge;
+        /* Try a cheap float test first. */
+        float d2_f = closest_on_tri_to_point_float_dist_squared(
+            test_v_f, tri[0]->co, tri[1]->co, tri[2]->co);
+        if (d2_f - FLT_EPSILON > nearest_tri_dist_squared_float) {
+          continue;
+        }
         mpq_class d2 = closest_on_tri_to_point(test_v->co_exact,
                                                tri[0]->co_exact,
                                                tri[1]->co_exact,
                                                tri[2]->co_exact,
+                                               buf[0],
+                                               buf[1],
+                                               buf[2],
+                                               buf[3],
+                                               buf[4],
+                                               buf[5],
+                                               buf[6],
                                                &close_edge,
                                                &close_vert);
         if (dbg_level > 1) {
@@ -1864,6 +1988,7 @@ static Vector<ComponentContainer> find_component_containers(int comp,
           nearest_tri_close_edge = close_edge;
           nearest_tri_close_vert = close_vert;
           nearest_tri_dist_squared = d2;
+          nearest_tri_dist_squared_float = d2_f;
         }
       }
     }
@@ -1892,6 +2017,51 @@ static Vector<ComponentContainer> find_component_containers(int comp,
     }
   }
   return ans;
+}
+
+/**
+ * Populate the per-component bounding boxes, expanding them
+ * by an appropriate epsilon so that we conservatively will say
+ * that components could intersect if the BBs overlap.
+ */
+static void populate_comp_bbs(const Vector<Vector<int>> &components,
+                              const PatchesInfo &pinfo,
+                              const IMesh &im,
+                              Array<BoundingBox> &comp_bb)
+{
+  const int comp_grainsize = 16;
+  /* To get a good expansion epsilon, we need to find the maximum
+   * absolute value of any coordinate. Do it first per component,
+   * then get the overall max. */
+  Array<double> max_abs(components.size(), 0.0);
+  threading::parallel_for(components.index_range(), comp_grainsize, [&](IndexRange comp_range) {
+    for (int c : comp_range) {
+      BoundingBox &bb = comp_bb[c];
+      double &maxa = max_abs[c];
+      for (int p : components[c]) {
+        const Patch &patch = pinfo.patch(p);
+        for (int t : patch.tris()) {
+          const Face &tri = *im.face(t);
+          for (const Vert *v : tri) {
+            bb.combine(v->co);
+            for (int i = 0; i < 3; ++i) {
+              maxa = max_dd(maxa, fabs(v->co[i]));
+            }
+          }
+        }
+      }
+    }
+  });
+  double all_max_abs = 0.0;
+  for (int c : components.index_range()) {
+    all_max_abs = max_dd(all_max_abs, max_abs[c]);
+  }
+  constexpr float pad_factor = 10.0f;
+  float pad = all_max_abs == 0.0 ? FLT_EPSILON : 2 * FLT_EPSILON * all_max_abs;
+  pad *= pad_factor;
+  for (int c : components.index_range()) {
+    comp_bb[c].expand(pad);
+  }
 }
 
 /**
@@ -1936,19 +2106,23 @@ static void finish_patch_cell_graph(const IMesh &tm,
   }
   int tot_components = components.size();
   Array<Vector<ComponentContainer>> comp_cont(tot_components);
-  for (int comp : components.index_range()) {
-    comp_cont[comp] = find_component_containers(
-        comp, components, ambient_cell, tm, pinfo, tmtopo, arena);
-  }
-  if (dbg_level > 0) {
-    std::cout << "component containers:\n";
-    for (int comp : comp_cont.index_range()) {
-      std::cout << comp << ": ";
-      for (const ComponentContainer &cc : comp_cont[comp]) {
-        std::cout << "[containing_comp=" << cc.containing_component
-                  << ", nearest_cell=" << cc.nearest_cell << ", d2=" << cc.dist_to_cell << "] ";
+  if (tot_components > 1) {
+    Array<BoundingBox> comp_bb(tot_components);
+    populate_comp_bbs(components, pinfo, tm, comp_bb);
+    for (int comp : components.index_range()) {
+      comp_cont[comp] = find_component_containers(
+          comp, components, ambient_cell, tm, pinfo, tmtopo, comp_bb, arena);
+    }
+    if (dbg_level > 0) {
+      std::cout << "component containers:\n";
+      for (int comp : comp_cont.index_range()) {
+        std::cout << comp << ": ";
+        for (const ComponentContainer &cc : comp_cont[comp]) {
+          std::cout << "[containing_comp=" << cc.containing_component
+                    << ", nearest_cell=" << cc.nearest_cell << ", d2=" << cc.dist_to_cell << "] ";
+        }
+        std::cout << "\n";
       }
-      std::cout << "\n";
     }
   }
   if (dbg_level > 1) {
@@ -2011,7 +2185,7 @@ static void finish_patch_cell_graph(const IMesh &tm,
  * There will be a vector of \a nshapes winding numbers in each cell, one per
  * input shape.
  * As one crosses a patch into a new cell, the original shape (mesh part)
- * that that patch was part of dictates which winding number changes.
+ * that patch was part of dictates which winding number changes.
  * The shape_fn(triangle_number) function should return the shape that the
  * triangle is part of.
  * Also, as soon as the winding numbers for a cell are set, use bool_optype
@@ -2328,124 +2502,319 @@ static const char *bool_optype_name(BoolOpType op)
   }
 }
 
-static mpq3 calc_point_inside_tri(const Face &tri)
+static double3 calc_point_inside_tri_db(const Face &tri)
 {
   const Vert *v0 = tri.vert[0];
   const Vert *v1 = tri.vert[1];
   const Vert *v2 = tri.vert[2];
-  mpq3 ans = v0->co_exact / 3 + v1->co_exact / 3 + v2->co_exact / 3;
+  double3 ans = v0->co / 3 + v1->co / 3 + v2->co / 3;
+  return ans;
+}
+class InsideShapeTestData {
+ public:
+  const IMesh &tm;
+  std::function<int(int)> shape_fn;
+  int nshapes;
+  /* A per-shape vector of parity of hits of that shape. */
+  Array<int> hit_parity;
+
+  InsideShapeTestData(const IMesh &tm, std::function<int(int)> shape_fn, int nshapes)
+      : tm(tm), shape_fn(shape_fn), nshapes(nshapes)
+  {
+  }
+};
+
+static void inside_shape_callback(void *userdata,
+                                  int index,
+                                  const BVHTreeRay *ray,
+                                  BVHTreeRayHit *UNUSED(hit))
+{
+  const int dbg_level = 0;
+  if (dbg_level > 0) {
+    std::cout << "inside_shape_callback, index = " << index << "\n";
+  }
+  InsideShapeTestData *data = static_cast<InsideShapeTestData *>(userdata);
+  const Face &tri = *data->tm.face(index);
+  int shape = data->shape_fn(tri.orig);
+  if (shape == -1) {
+    return;
+  }
+  float dist;
+  float fv0[3];
+  float fv1[3];
+  float fv2[3];
+  for (int i = 0; i < 3; ++i) {
+    fv0[i] = float(tri.vert[0]->co[i]);
+    fv1[i] = float(tri.vert[1]->co[i]);
+    fv2[i] = float(tri.vert[2]->co[i]);
+  }
+  if (dbg_level > 0) {
+    std::cout << "  fv0=(" << fv0[0] << "," << fv0[1] << "," << fv0[2] << ")\n";
+    std::cout << "  fv1=(" << fv1[0] << "," << fv1[1] << "," << fv1[2] << ")\n";
+    std::cout << "  fv2=(" << fv2[0] << "," << fv2[1] << "," << fv2[2] << ")\n";
+  }
+  if (isect_ray_tri_epsilon_v3(
+          ray->origin, ray->direction, fv0, fv1, fv2, &dist, nullptr, FLT_EPSILON)) {
+    /* Count parity as +1 if ray is in the same direction as tri's normal,
+     * and -1 if the directions are opposite. */
+    double3 o_db{double(ray->origin[0]), double(ray->origin[1]), double(ray->origin[2])};
+    int parity = orient3d(tri.vert[0]->co, tri.vert[1]->co, tri.vert[2]->co, o_db);
+    if (dbg_level > 0) {
+      std::cout << "origin at " << o_db << ", parity = " << parity << "\n";
+    }
+    data->hit_parity[shape] += parity;
+  }
+}
+
+/**
+ * Test the triangle with index \a t_index to see which shapes it is inside,
+ * and fill in \a in_shape with a confidence value between 0 and 1 that says
+ * how likely we think it is that it is inside.
+ * This is done by casting some rays from just on the positive side of a test
+ * face in various directions and summing the parity of crossing faces of each face.
+ *
+ * \param tree: Contains all the triangles of \a tm and can be used for fast ray-casting.
+ */
+static void test_tri_inside_shapes(const IMesh &tm,
+                                   std::function<int(int)> shape_fn,
+                                   int nshapes,
+                                   int test_t_index,
+                                   BVHTree *tree,
+                                   Array<float> &in_shape)
+{
+  const int dbg_level = 0;
+  if (dbg_level > 0) {
+    std::cout << "test_point_inside_shapes, t_index = " << test_t_index << "\n";
+  }
+  Face &tri_test = *tm.face(test_t_index);
+  int shape = shape_fn(tri_test.orig);
+  if (shape == -1) {
+    in_shape.fill(0.0f);
+    return;
+  }
+  double3 test_point = calc_point_inside_tri_db(tri_test);
+  /* Offset the test point a tiny bit in the tri_test normal direction. */
+  tri_test.populate_plane(false);
+  double3 norm = math::normalize(tri_test.plane->norm);
+  const double offset_amount = 1e-5;
+  double3 offset_test_point = test_point + offset_amount * norm;
+  if (dbg_level > 0) {
+    std::cout << "test tri is in shape " << shape << "\n";
+    std::cout << "test point = " << test_point << "\n";
+    std::cout << "offset_test_point = " << offset_test_point << "\n";
+  }
+  /* Try six test rays almost along orthogonal axes.
+   * Perturb their directions slightly to make it less likely to hit a seam.
+   * Ray-cast assumes they have unit length, so use r1 near 1 and
+   * ra near 0.5, and rb near .01, but normalized so `sqrt(r1^2 + ra^2 + rb^2) == 1`. */
+  constexpr int rays_num = 6;
+  constexpr float r1 = 0.9987025295199663f;
+  constexpr float ra = 0.04993512647599832f;
+  constexpr float rb = 0.009987025295199663f;
+  const float test_rays[rays_num][3] = {
+      {r1, ra, rb}, {-r1, -ra, -rb}, {rb, r1, ra}, {-rb, -r1, -ra}, {ra, rb, r1}, {-ra, -rb, -r1}};
+  InsideShapeTestData data(tm, shape_fn, nshapes);
+  data.hit_parity = Array<int>(nshapes, 0);
+  Array<int> count_insides(nshapes, 0);
+  const float co[3] = {
+      float(offset_test_point[0]), float(offset_test_point[1]), float(offset_test_point[2])};
+  for (int i = 0; i < rays_num; ++i) {
+    if (dbg_level > 0) {
+      std::cout << "shoot ray " << i << "(" << test_rays[i][0] << "," << test_rays[i][1] << ","
+                << test_rays[i][2] << ")\n";
+    }
+    BLI_bvhtree_ray_cast_all(tree, co, test_rays[i], 0.0f, FLT_MAX, inside_shape_callback, &data);
+    if (dbg_level > 0) {
+      std::cout << "ray " << i << " result:";
+      for (int j = 0; j < nshapes; ++j) {
+        std::cout << " " << data.hit_parity[j];
+      }
+      std::cout << "\n";
+    }
+    for (int j = 0; j < nshapes; ++j) {
+      if (j != shape && data.hit_parity[j] > 0) {
+        ++count_insides[j];
+      }
+    }
+    data.hit_parity.fill(0);
+  }
+  for (int j = 0; j < nshapes; ++j) {
+    if (j == shape) {
+      in_shape[j] = 1.0f; /* Let's say a shape is always inside itself. */
+    }
+    else {
+      in_shape[j] = float(count_insides[j]) / float(rays_num);
+    }
+    if (dbg_level > 0) {
+      std::cout << "shape " << j << " inside = " << in_shape[j] << "\n";
+    }
+  }
+}
+
+/**
+ * Return a BVH Tree that contains all of the triangles of \a tm.
+ * The caller must free it.
+ * (We could possible reuse the BVH tree(s) built in TriOverlaps,
+ * in the mesh intersect function. A future TODO.)
+ */
+static BVHTree *raycast_tree(const IMesh &tm)
+{
+  BVHTree *tree = BLI_bvhtree_new(tm.face_size(), FLT_EPSILON, 4, 6);
+  for (int i : tm.face_index_range()) {
+    const Face *f = tm.face(i);
+    float t_cos[9];
+    for (int j = 0; j < 3; ++j) {
+      const Vert *v = f->vert[j];
+      for (int k = 0; k < 3; ++k) {
+        t_cos[3 * j + k] = float(v->co[k]);
+      }
+    }
+    BLI_bvhtree_insert(tree, i, t_cos, 3);
+  }
+  BLI_bvhtree_balance(tree);
+  return tree;
+}
+
+/**
+ * Should a face with given shape and given winding array be removed for given boolean op?
+ * Also return true in *r_do_flip if it retained by normals need to be flipped.
+ */
+static bool raycast_test_remove(BoolOpType op, Array<int> &winding, int shape, bool *r_do_flip)
+{
+  constexpr int dbg_level = 0;
+  /* Find out the "in the output volume" flag for each of the cases of winding[shape] == 0
+   * and winding[shape] == 1. If the flags are different, this patch should be in the output.
+   * Also, if this is a Difference and the shape isn't the first one, need to flip the normals.
+   */
+  winding[shape] = 0;
+  bool in_output_volume_0 = apply_bool_op(op, winding);
+  winding[shape] = 1;
+  bool in_output_volume_1 = apply_bool_op(op, winding);
+  bool do_remove = in_output_volume_0 == in_output_volume_1;
+  bool do_flip = !do_remove && op == BoolOpType::Difference && shape != 0;
+  if (dbg_level > 0) {
+    std::cout << "winding = ";
+    for (int i = 0; i < winding.size(); ++i) {
+      std::cout << winding[i] << " ";
+    }
+    std::cout << "\niv0=" << in_output_volume_0 << ", iv1=" << in_output_volume_1 << "\n";
+    std::cout << " remove=" << do_remove << ", flip=" << do_flip << "\n";
+  }
+  *r_do_flip = do_flip;
+  return do_remove;
+}
+
+/** Add triangle a flipped version of tri to out_faces. */
+static void raycast_add_flipped(Vector<Face *> &out_faces, Face &tri, IMeshArena *arena)
+{
+
+  Array<const Vert *> flipped_vs = {tri[0], tri[2], tri[1]};
+  Array<int> flipped_e_origs = {tri.edge_orig[2], tri.edge_orig[1], tri.edge_orig[0]};
+  Array<bool> flipped_is_intersect = {
+      tri.is_intersect[2], tri.is_intersect[1], tri.is_intersect[0]};
+  Face *flipped_f = arena->add_face(flipped_vs, tri.orig, flipped_e_origs, flipped_is_intersect);
+  out_faces.append(flipped_f);
+}
+
+/**
+ * Use the RayCast method for deciding if a triangle of the
+ * mesh is supposed to be included or excluded in the boolean result,
+ * and return the mesh that is the boolean result.
+ * The reason this is done on a triangle-by-triangle basis is that
+ * when the input is not PWN, some patches can be both inside and outside
+ * some shapes (e.g., a plane cutting through Suzanne's open eyes).
+ */
+static IMesh raycast_tris_boolean(const IMesh &tm,
+                                  BoolOpType op,
+                                  int nshapes,
+                                  std::function<int(int)> shape_fn,
+                                  IMeshArena *arena)
+{
+  constexpr int dbg_level = 0;
+  if (dbg_level > 0) {
+    std::cout << "RAYCAST_TRIS_BOOLEAN\n";
+  }
+  IMesh ans;
+  BVHTree *tree = raycast_tree(tm);
+  Vector<Face *> out_faces;
+  out_faces.reserve(tm.face_size());
+#  ifdef WITH_TBB
+  tbb::spin_mutex mtx;
+#  endif
+  const int grainsize = 256;
+  threading::parallel_for(IndexRange(tm.face_size()), grainsize, [&](IndexRange range) {
+    Array<float> in_shape(nshapes, 0);
+    Array<int> winding(nshapes, 0);
+    for (int t : range) {
+      Face &tri = *tm.face(t);
+      int shape = shape_fn(tri.orig);
+      if (dbg_level > 0) {
+        std::cout << "process triangle " << t << " = " << &tri << "\n";
+        std::cout << "shape = " << shape << "\n";
+      }
+      test_tri_inside_shapes(tm, shape_fn, nshapes, t, tree, in_shape);
+      for (int other_shape = 0; other_shape < nshapes; ++other_shape) {
+        if (other_shape == shape) {
+          continue;
+        }
+        /* The in_shape array has a confidence value for "insideness".
+         * For most operations, even a hint of being inside
+         * gives good results, but when shape is a cutter in a Difference
+         * operation, we want to be pretty sure that the point is inside other_shape.
+         * E.g., T75827.
+         * Also, when the operation is intersection, we also want high confidence.
+         */
+        bool need_high_confidence = (op == BoolOpType::Difference && shape != 0) ||
+                                    op == BoolOpType::Intersect;
+        bool inside = in_shape[other_shape] >= (need_high_confidence ? 0.5f : 0.1f);
+        if (dbg_level > 0) {
+          std::cout << "test point is " << (inside ? "inside" : "outside") << " other_shape "
+                    << other_shape << " val = " << in_shape[other_shape] << "\n";
+        }
+        winding[other_shape] = inside;
+      }
+      bool do_flip;
+      bool do_remove = raycast_test_remove(op, winding, shape, &do_flip);
+      {
+#  ifdef WITH_TBB
+        tbb::spin_mutex::scoped_lock lock(mtx);
+#  endif
+        if (!do_remove) {
+          if (!do_flip) {
+            out_faces.append(&tri);
+          }
+          else {
+            raycast_add_flipped(out_faces, tri, arena);
+          }
+        }
+      }
+    }
+  });
+  BLI_bvhtree_free(tree);
+  ans.set_faces(out_faces);
   return ans;
 }
 
-/**
- * Return the Generalized Winding Number of point \a testp with respect to the
- * volume implied by the faces for which shape_fn returns the value shape.
- * See "Robust Inside-Outside Segmentation using Generalized Winding Numbers"
- * by Jacobson, Kavan, and Sorkine-Hornung.
- * This is like a winding number in that if it is positive, the point
- * is inside the volume. But it is tolerant of not-completely-watertight
- * volumes, still doing a passable job of classifying inside/outside
- * as we intuitively understand that to mean.
- *
- * TOOD: speed up this calculation using the hierarchical algorithm in that paper.
- */
-static double generalized_winding_number(const IMesh &tm,
-                                         std::function<int(int)> shape_fn,
-                                         const double3 &testp,
-                                         int shape)
+/* This is (sometimes much faster) version of raycast boolean
+ * that does it per patch rather than per triangle.
+ * It may fail in cases where raycast_tri_boolean will succeed,
+ * but the latter can be very slow on huge meshes. */
+static IMesh raycast_patches_boolean(const IMesh &tm,
+                                     BoolOpType op,
+                                     int nshapes,
+                                     std::function<int(int)> shape_fn,
+                                     const PatchesInfo &pinfo,
+                                     IMeshArena *arena)
 {
   constexpr int dbg_level = 0;
   if (dbg_level > 0) {
-    std::cout << "GENERALIZED_WINDING_NUMBER testp = " << testp << ", shape = " << shape << "\n";
-  }
-  double gwn = 0;
-  for (int t : tm.face_index_range()) {
-    const Face *f = tm.face(t);
-    const Face &tri = *f;
-    if (shape_fn(tri.orig) == shape) {
-      if (dbg_level > 0) {
-        std::cout << "accumulate for tri t = " << t << " = " << f << "\n";
-      }
-      const Vert *v0 = tri.vert[0];
-      const Vert *v1 = tri.vert[1];
-      const Vert *v2 = tri.vert[2];
-      double3 a = v0->co - testp;
-      double3 b = v1->co - testp;
-      double3 c = v2->co - testp;
-      /* Calculate the solid angle of abc relative to origin.
-       * See "The Solid Angle of a Plane Triangle" by Oosterom and Strackee
-       * for the derivation of the formula. */
-      double alen = a.length();
-      double blen = b.length();
-      double clen = c.length();
-      double3 bxc = double3::cross_high_precision(b, c);
-      double num = double3::dot(a, bxc);
-      double denom = alen * blen * clen + double3::dot(a, b) * clen + double3::dot(a, c) * blen +
-                     double3::dot(b, c) * alen;
-      if (denom == 0.0) {
-        if (dbg_level > 0) {
-          std::cout << "denom == 0, skipping this tri\n";
-        }
-        continue;
-      }
-      double x = atan2(num, denom);
-      double fgwn = 2.0 * x;
-      if (dbg_level > 0) {
-        std::cout << "tri contributes " << fgwn << "\n";
-      }
-      gwn += fgwn;
-    }
-  }
-  gwn = gwn / (M_PI * 4.0);
-  if (dbg_level > 0) {
-    std::cout << "final gwn = " << gwn << "\n";
-  }
-  return gwn;
-}
-
-/**
- * Return true if point \a testp is inside the volume implied by the
- * faces for which the shape_fn returns the value shape.
- * If \a high_confidence is true then we want a higher degree
- * of "insideness" than if it is false.
- */
-static bool point_is_inside_shape(const IMesh &tm,
-                                  std::function<int(int)> shape_fn,
-                                  const double3 &testp,
-                                  int shape,
-                                  bool high_confidence)
-{
-  double gwn = generalized_winding_number(tm, shape_fn, testp, shape);
-  /* Due to floating point error, an outside point should get a value
-   * of zero for gwn, but may have a very slightly positive value instead.
-   * It is not important to get this epsilon very small, because practical
-   * cases of interest will have gwn at least 0.2 if it is not zero. */
-  if (high_confidence) {
-    return (gwn > 0.9);
-  }
-
-  return (gwn > 0.01);
-}
-
-/**
- * Use the Generalized Winding Number method for deciding if a patch of the
- * mesh is supposed to be included or excluded in the boolean result,
- * and return the mesh that is the boolean result.
- */
-static IMesh gwn_boolean(const IMesh &tm,
-                         BoolOpType op,
-                         int nshapes,
-                         std::function<int(int)> shape_fn,
-                         const PatchesInfo &pinfo,
-                         IMeshArena *arena)
-{
-  constexpr int dbg_level = 0;
-  if (dbg_level > 0) {
-    std::cout << "GWN_BOOLEAN\n";
+    std::cout << "RAYCAST_PATCHES_BOOLEAN\n";
   }
   IMesh ans;
+  BVHTree *tree = raycast_tree(tm);
   Vector<Face *> out_faces;
   out_faces.reserve(tm.face_size());
+  Array<float> in_shape(nshapes, 0);
   Array<int> winding(nshapes, 0);
   for (int p : pinfo.index_range()) {
     const Patch &patch = pinfo.patch(p);
@@ -2463,49 +2832,22 @@ static IMesh gwn_boolean(const IMesh &tm,
     if (shape == -1) {
       continue;
     }
-    mpq3 test_point = calc_point_inside_tri(tri_test);
-    double3 test_point_db(test_point[0].get_d(), test_point[1].get_d(), test_point[2].get_d());
-    if (dbg_level > 0) {
-      std::cout << "test point = " << test_point_db << "\n";
-    }
+    test_tri_inside_shapes(tm, shape_fn, nshapes, test_t_index, tree, in_shape);
     for (int other_shape = 0; other_shape < nshapes; ++other_shape) {
       if (other_shape == shape) {
         continue;
       }
-      /* The point_is_inside_shape function has to approximate if the other
-       * shape is not PWN. For most operations, even a hint of being inside
-       * gives good results, but when shape is a cutter in a Difference
-       * operation, we want to be pretty sure that the point is inside other_shape.
-       * E.g., T75827.
-       */
-      bool need_high_confidence = (op == BoolOpType::Difference) && (shape != 0);
-      bool inside = point_is_inside_shape(
-          tm, shape_fn, test_point_db, other_shape, need_high_confidence);
+      bool need_high_confidence = (op == BoolOpType::Difference && shape != 0) ||
+                                  op == BoolOpType::Intersect;
+      bool inside = in_shape[other_shape] >= (need_high_confidence ? 0.5f : 0.1f);
       if (dbg_level > 0) {
         std::cout << "test point is " << (inside ? "inside" : "outside") << " other_shape "
-                  << other_shape << "\n";
+                  << other_shape << " val = " << in_shape[other_shape] << "\n";
       }
       winding[other_shape] = inside;
     }
-    /* Find out the "in the output volume" flag for each of the cases of winding[shape] == 0
-     * and winding[shape] == 1. If the flags are different, this patch should be in the output.
-     * Also, if this is a Difference and the shape isn't the first one, need to flip the normals.
-     */
-    winding[shape] = 0;
-    bool in_output_volume_0 = apply_bool_op(op, winding);
-    winding[shape] = 1;
-    bool in_output_volume_1 = apply_bool_op(op, winding);
-    bool do_remove = in_output_volume_0 == in_output_volume_1;
-    bool do_flip = !do_remove && op == BoolOpType::Difference && shape != 0;
-    if (dbg_level > 0) {
-      std::cout << "winding = ";
-      for (int i = 0; i < nshapes; ++i) {
-        std::cout << winding[i] << " ";
-      }
-      std::cout << "\niv0=" << in_output_volume_0 << ", iv1=" << in_output_volume_1 << "\n";
-      std::cout << "result for patch " << p << ": remove=" << do_remove << ", flip=" << do_flip
-                << "\n";
-    }
+    bool do_flip;
+    bool do_remove = raycast_test_remove(op, winding, shape, &do_flip);
     if (!do_remove) {
       for (int t : patch.tris()) {
         Face *f = tm.face(t);
@@ -2513,158 +2855,20 @@ static IMesh gwn_boolean(const IMesh &tm,
           out_faces.append(f);
         }
         else {
-          Face &tri = *f;
-          /* We need flipped version of f. */
-          Array<const Vert *> flipped_vs = {tri[0], tri[2], tri[1]};
-          Array<int> flipped_e_origs = {tri.edge_orig[2], tri.edge_orig[1], tri.edge_orig[0]};
-          Array<bool> flipped_is_intersect = {
-              tri.is_intersect[2], tri.is_intersect[1], tri.is_intersect[0]};
-          Face *flipped_f = arena->add_face(
-              flipped_vs, f->orig, flipped_e_origs, flipped_is_intersect);
-          out_faces.append(flipped_f);
+          raycast_add_flipped(out_faces, *f, arena);
         }
       }
     }
   }
+  BLI_bvhtree_free(tree);
+
   ans.set_faces(out_faces);
   return ans;
 }
-
-/**
- * Which CDT output edge index is for an edge between output verts
- * v1 and v2 (in either order)?
- * \return -1 if none.
- */
-static int find_cdt_edge(const CDT_result<mpq_class> &cdt_out, int v1, int v2)
-{
-  for (int e : cdt_out.edge.index_range()) {
-    const std::pair<int, int> &edge = cdt_out.edge[e];
-    if ((edge.first == v1 && edge.second == v2) || (edge.first == v2 && edge.second == v1)) {
-      return e;
-    }
-  }
-  return -1;
-}
-
-/**
- * Tessellate face f into triangles and return an array of `const Face *`
- * giving that triangulation.
- * Care is taken so that the original edge index associated with
- * each edge in the output triangles either matches the original edge
- * for the (identical) edge of f, or else is -1. So diagonals added
- * for triangulation can later be identified by having #NO_INDEX for original.
- */
-static Array<Face *> triangulate_poly(Face *f, IMeshArena *arena)
-{
-  int flen = f->size();
-  CDT_input<mpq_class> cdt_in;
-  cdt_in.vert = Array<mpq2>(flen);
-  cdt_in.face = Array<Vector<int>>(1);
-  cdt_in.face[0].reserve(flen);
-  for (int i : f->index_range()) {
-    cdt_in.face[0].append(i);
-  }
-  /* Project poly along dominant axis of normal to get 2d coords. */
-  if (!f->plane_populated()) {
-    f->populate_plane(false);
-  }
-  const double3 &poly_normal = f->plane->norm;
-  int axis = double3::dominant_axis(poly_normal);
-  /* If project down y axis as opposed to x or z, the orientation
-   * of the polygon will be reversed.
-   * Yet another reversal happens if the poly normal in the dominant
-   * direction is opposite that of the positive dominant axis. */
-  bool rev1 = (axis == 1);
-  bool rev2 = poly_normal[axis] < 0;
-  bool rev = rev1 ^ rev2;
-  for (int i = 0; i < flen; ++i) {
-    int ii = rev ? flen - i - 1 : i;
-    mpq2 &p2d = cdt_in.vert[ii];
-    int k = 0;
-    for (int j = 0; j < 3; ++j) {
-      if (j != axis) {
-        p2d[k++] = (*f)[ii]->co_exact[j];
-      }
-    }
-  }
-  CDT_result<mpq_class> cdt_out = delaunay_2d_calc(cdt_in, CDT_INSIDE);
-  int n_tris = cdt_out.face.size();
-  Array<Face *> ans(n_tris);
-  for (int t = 0; t < n_tris; ++t) {
-    int i_v_out[3];
-    const Vert *v[3];
-    int eo[3];
-    for (int i = 0; i < 3; ++i) {
-      i_v_out[i] = cdt_out.face[t][i];
-      v[i] = (*f)[cdt_out.vert_orig[i_v_out[i]][0]];
-    }
-    for (int i = 0; i < 3; ++i) {
-      int e_out = find_cdt_edge(cdt_out, i_v_out[i], i_v_out[(i + 1) % 3]);
-      BLI_assert(e_out != -1);
-      eo[i] = NO_INDEX;
-      for (int orig : cdt_out.edge_orig[e_out]) {
-        if (orig != NO_INDEX) {
-          eo[i] = orig;
-          break;
-        }
-      }
-    }
-    if (rev) {
-      ans[t] = arena->add_face(
-          {v[0], v[2], v[1]}, f->orig, {eo[2], eo[1], eo[0]}, {false, false, false});
-    }
-    else {
-      ans[t] = arena->add_face(
-          {v[0], v[1], v[2]}, f->orig, {eo[0], eo[1], eo[2]}, {false, false, false});
-    }
-  }
-  return ans;
-}
-
-/**
- * Return an #IMesh that is a triangulation of a mesh with general
- * polygonal faces, #IMesh.
- * Added diagonals will be distinguishable by having edge original
- * indices of #NO_INDEX.
- */
-static IMesh triangulate_polymesh(IMesh &imesh, IMeshArena *arena)
-{
-  Vector<Face *> face_tris;
-  constexpr int estimated_tris_per_face = 3;
-  face_tris.reserve(estimated_tris_per_face * imesh.face_size());
-  for (Face *f : imesh.faces()) {
-    /* Tessellate face f, following plan similar to #BM_face_calc_tesselation. */
-    int flen = f->size();
-    if (flen == 3) {
-      face_tris.append(f);
-    }
-    else if (flen == 4) {
-      const Vert *v0 = (*f)[0];
-      const Vert *v1 = (*f)[1];
-      const Vert *v2 = (*f)[2];
-      const Vert *v3 = (*f)[3];
-      int eo_01 = f->edge_orig[0];
-      int eo_12 = f->edge_orig[1];
-      int eo_23 = f->edge_orig[2];
-      int eo_30 = f->edge_orig[3];
-      Face *f0 = arena->add_face({v0, v1, v2}, f->orig, {eo_01, eo_12, -1}, {false, false, false});
-      Face *f1 = arena->add_face({v0, v2, v3}, f->orig, {-1, eo_23, eo_30}, {false, false, false});
-      face_tris.append(f0);
-      face_tris.append(f1);
-    }
-    else {
-      Array<Face *> tris = triangulate_poly(f, arena);
-      for (Face *tri : tris) {
-        face_tris.append(tri);
-      }
-    }
-  }
-  return IMesh(face_tris);
-}
-
 /**
  * If \a tri1 and \a tri2 have a common edge (in opposite orientation),
- * return the indices into \a tri1 and \a tri2 where that common edge starts. Else return (-1,-1).
+ * return the indices into \a tri1 and \a tri2 where that common edge starts. Else return
+ * (-1,-1).
  */
 static std::pair<int, int> find_tris_common_edge(const Face &tri1, const Face &tri2)
 {
@@ -2762,6 +2966,11 @@ static std::ostream &operator<<(std::ostream &os, const FaceMergeState &fms)
  * \a tris all have the same original face.
  * Find the 2d edge/triangle topology for these triangles, but only the ones facing in the
  * norm direction, and whether each edge is dissolvable or not.
+ * If we did the initial triangulation properly, and any Delaunay triangulations of intersections
+ * properly, then each triangle edge should have at most one neighbor.
+ * However, there can be anomalies. For example, if an input face is self-intersecting, we fall
+ * back on the floating point poly-fill triangulation, which, after which all bets are off.
+ * Hence, try to be tolerant of such unexpected topology.
  */
 static void init_face_merge_state(FaceMergeState *fms,
                                   const Vector<int> &tris,
@@ -2783,7 +2992,7 @@ static void init_face_merge_state(FaceMergeState *fms,
       std::cout << "process tri = " << &tri << "\n";
     }
     BLI_assert(tri.plane_populated());
-    if (double3::dot(norm, tri.plane->norm) <= 0.0) {
+    if (math::dot(norm, tri.plane->norm) <= 0.0) {
       if (dbg_level > 0) {
         std::cout << "triangle has wrong orientation, skipping\n";
       }
@@ -2808,7 +3017,7 @@ static void init_face_merge_state(FaceMergeState *fms,
       }
       if (me_index == -1) {
         double3 vec = new_me.v2->co - new_me.v1->co;
-        new_me.len_squared = vec.length_squared();
+        new_me.len_squared = math::length_squared(vec);
         new_me.orig = tri.edge_orig[i];
         new_me.is_intersect = tri.is_intersect[i];
         new_me.dissolvable = (new_me.orig == NO_INDEX && !new_me.is_intersect);
@@ -2849,16 +3058,35 @@ static void init_face_merge_state(FaceMergeState *fms,
           std::cout << "me.v1 == mf.vert[i] so set edge[" << me_index << "].left_face = " << f
                     << "\n";
         }
-        BLI_assert(me.left_face == -1);
-        fms->edge[me_index].left_face = f;
+        if (me.left_face != -1) {
+          /* Unexpected in the normal case: this means more than one triangle shares this
+           * edge in the same orientation. But be tolerant of this case. By making this
+           * edge not dissolvable, we'll avoid future problems due to this non-manifold topology.
+           */
+          if (dbg_level > 1) {
+            std::cout << "me.left_face was already occupied, so triangulation wasn't good\n";
+          }
+          me.dissolvable = false;
+        }
+        else {
+          fms->edge[me_index].left_face = f;
+        }
       }
       else {
         if (dbg_level > 1) {
           std::cout << "me.v1 != mf.vert[i] so set edge[" << me_index << "].right_face = " << f
                     << "\n";
         }
-        BLI_assert(me.right_face == -1);
-        fms->edge[me_index].right_face = f;
+        if (me.right_face != -1) {
+          /* Unexpected, analogous to the me.left_face != -1 case above. */
+          if (dbg_level > 1) {
+            std::cout << "me.right_face was already occupied, so triangulation wasn't good\n";
+          }
+          me.dissolvable = false;
+        }
+        else {
+          fms->edge[me_index].right_face = f;
+        }
       }
       fms->face[f].edge.append(me_index);
     }
@@ -3048,7 +3276,7 @@ static Vector<Face *> merge_tris_for_face(Vector<int> tris,
   bool done = false;
   double3 first_tri_normal = tm.face(tris[0])->plane->norm;
   double3 second_tri_normal = tm.face(tris[1])->plane->norm;
-  if (tris.size() == 2 && double3::dot(first_tri_normal, second_tri_normal) > 0.0) {
+  if (tris.size() == 2 && math::dot(first_tri_normal, second_tri_normal) > 0.0) {
     /* Is this a case where quad with one diagonal remained unchanged?
      * Worth special handling because this case will be very common. */
     Face &tri1 = *tm.face(tris[0]);
@@ -3109,6 +3337,14 @@ static Vector<Face *> merge_tris_for_face(Vector<int> tris,
   return ans;
 }
 
+static bool approx_in_line(const double3 &a, const double3 &b, const double3 &c)
+{
+  double3 vec1 = b - a;
+  double3 vec2 = c - b;
+  double cos_ang = math::dot(math::normalize(vec1), math::normalize(vec2));
+  return fabs(cos_ang - 1.0) < 1e-4;
+}
+
 /**
  * Return an array, paralleling imesh_out.vert, saying which vertices can be dissolved.
  * A vertex v can be dissolved if (a) it is not an input vertex; (b) it has valence 2;
@@ -3161,8 +3397,11 @@ static Array<bool> find_dissolve_verts(IMesh &imesh_out, int *r_count_dissolve)
       const std::pair<const Vert *, const Vert *> &nbrs = neighbors[v_out];
       if (nbrs.first != nullptr) {
         BLI_assert(nbrs.second != nullptr);
-        dissolve[v_out] = true;
-        ++count;
+        const Vert *v_v_out = imesh_out.vert(v_out);
+        if (approx_in_line(nbrs.first->co, v_v_out->co, nbrs.second->co)) {
+          dissolve[v_out] = true;
+          ++count;
+        }
       }
     }
   }
@@ -3185,19 +3424,19 @@ static void dissolve_verts(IMesh *imesh, const Array<bool> dissolve, IMeshArena 
   for (int f : imesh->face_index_range()) {
     const Face &face = *imesh->face(f);
     face_pos_erase.clear();
-    int num_erase = 0;
+    int erase_num = 0;
     for (const Vert *v : face) {
       int v_index = imesh->lookup_vert(v);
       BLI_assert(v_index != NO_INDEX);
       if (dissolve[v_index]) {
         face_pos_erase.append(true);
-        ++num_erase;
+        ++erase_num;
       }
       else {
         face_pos_erase.append(false);
       }
     }
-    if (num_erase > 0) {
+    if (erase_num > 0) {
       any_faces_erased |= imesh->erase_face_positions(f, face_pos_erase, arena);
     }
   }
@@ -3215,8 +3454,8 @@ static void dissolve_verts(IMesh *imesh, const Array<bool> dissolve, IMeshArena 
  * will have an original edge that is NO_INDEX.
  * Not all triangulation edges can be removed: if they ended up non-trivially overlapping a real
  * input edge, then we need to keep it. Also, some are necessary to make the output satisfy
- * the "valid #BMesh" property: we can't produce output faces that have repeated vertices in them,
- * or have several disconnected boundaries (e.g., faces with holes).
+ * the "valid #BMesh" property: we can't produce output faces that have repeated vertices in
+ * them, or have several disconnected boundaries (e.g., faces with holes).
  */
 static IMesh polymesh_from_trimesh_with_dissolve(const IMesh &tm_out,
                                                  const IMesh &imesh_in,
@@ -3227,9 +3466,13 @@ static IMesh polymesh_from_trimesh_with_dissolve(const IMesh &tm_out,
     std::cout << "\nPOLYMESH_FROM_TRIMESH_WITH_DISSOLVE\n";
   }
   /* For now: need plane normals for all triangles. */
-  for (Face *tri : tm_out.faces()) {
-    tri->populate_plane(false);
-  }
+  const int grainsize = 1024;
+  threading::parallel_for(tm_out.face_index_range(), grainsize, [&](IndexRange range) {
+    for (int i : range) {
+      Face *tri = tm_out.face(i);
+      tri->populate_plane(false);
+    }
+  });
   /* Gather all output triangles that are part of each input face.
    * face_output_tris[f] will be indices of triangles in tm_out
    * that have f as their original face. */
@@ -3256,8 +3499,8 @@ static IMesh polymesh_from_trimesh_with_dissolve(const IMesh &tm_out,
     if (dbg_level > 1) {
       std::cout << "merge tris for face " << in_f << "\n";
     }
-    int num_out_tris_for_face = face_output_tris.size();
-    if (num_out_tris_for_face == 0) {
+    int out_tris_for_face_num = face_output_tris.size();
+    if (out_tris_for_face_num == 0) {
       continue;
     }
     face_output_face[in_f] = merge_tris_for_face(face_output_tris[in_f], tm_out, imesh_in, arena);
@@ -3299,6 +3542,7 @@ IMesh boolean_trimesh(IMesh &tm_in,
                       int nshapes,
                       std::function<int(int)> shape_fn,
                       bool use_self,
+                      bool hole_tolerant,
                       IMeshArena *arena)
 {
   constexpr int dbg_level = 0;
@@ -3339,30 +3583,33 @@ IMesh boolean_trimesh(IMesh &tm_in,
   double topo_time = PIL_check_seconds_timer();
   std::cout << "  topology built, time = " << topo_time - intersect_time << "\n";
 #  endif
-  PatchesInfo pinfo = find_patches(tm_si, tm_si_topo);
+  bool pwn = is_pwn(tm_si, tm_si_topo);
 #  ifdef PERFDEBUG
-  double patch_time = PIL_check_seconds_timer();
-  std::cout << "  patches found, time = " << patch_time - topo_time << "\n";
+  double pwn_time = PIL_check_seconds_timer();
+  std::cout << "  pwn checked, time = " << pwn_time - topo_time << "\n";
 #  endif
   IMesh tm_out;
-  if (!is_pwn(tm_si, tm_si_topo)) {
-#  ifdef PERFDEBUG
-    double pwn_check_time = PIL_check_seconds_timer();
-    std::cout << "  pwn checked (not pwn), time = " << pwn_check_time - patch_time << "\n";
-#  endif
+  if (!pwn) {
     if (dbg_level > 0) {
-      std::cout << "Input is not PWN, using gwn method\n";
+      std::cout << "Input is not PWN, using raycast method\n";
     }
-    tm_out = gwn_boolean(tm_si, op, nshapes, shape_fn, pinfo, arena);
+    if (hole_tolerant) {
+      tm_out = raycast_tris_boolean(tm_si, op, nshapes, shape_fn, arena);
+    }
+    else {
+      PatchesInfo pinfo = find_patches(tm_si, tm_si_topo);
+      tm_out = raycast_patches_boolean(tm_si, op, nshapes, shape_fn, pinfo, arena);
+    }
 #  ifdef PERFDEBUG
-    double gwn_time = PIL_check_seconds_timer();
-    std::cout << "  gwn, time = " << gwn_time - pwn_check_time << "\n";
+    double raycast_time = PIL_check_seconds_timer();
+    std::cout << "  raycast_boolean done, time = " << raycast_time - pwn_time << "\n";
 #  endif
   }
   else {
+    PatchesInfo pinfo = find_patches(tm_si, tm_si_topo);
 #  ifdef PERFDEBUG
-    double pwn_time = PIL_check_seconds_timer();
-    std::cout << "  pwn checked (ok), time = " << pwn_time - patch_time << "\n";
+    double patch_time = PIL_check_seconds_timer();
+    std::cout << "  patches found, time = " << patch_time - pwn_time << "\n";
 #  endif
     CellsInfo cinfo = find_cells(tm_si, tm_si_topo, pinfo);
     if (dbg_level > 0) {
@@ -3438,15 +3685,12 @@ static void dump_test_spec(IMesh &imesh)
   }
 }
 
-/**
- * Do the boolean operation op on the polygon mesh imesh_in.
- * See the header file for a complete description.
- */
 IMesh boolean_mesh(IMesh &imesh,
                    BoolOpType op,
                    int nshapes,
                    std::function<int(int)> shape_fn,
                    bool use_self,
+                   bool hole_tolerant,
                    IMesh *imesh_triangulated,
                    IMeshArena *arena)
 {
@@ -3480,7 +3724,7 @@ IMesh boolean_mesh(IMesh &imesh,
   if (dbg_level > 1) {
     write_obj_mesh(*tm_in, "boolean_tm_in");
   }
-  IMesh tm_out = boolean_trimesh(*tm_in, op, nshapes, shape_fn, use_self, arena);
+  IMesh tm_out = boolean_trimesh(*tm_in, op, nshapes, shape_fn, use_self, hole_tolerant, arena);
 #  ifdef PERFDEBUG
   double bool_tri_time = PIL_check_seconds_timer();
   std::cout << "boolean_trimesh done, time = " << bool_tri_time - tri_time << "\n";

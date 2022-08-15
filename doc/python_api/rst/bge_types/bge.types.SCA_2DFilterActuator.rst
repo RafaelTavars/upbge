@@ -1,9 +1,11 @@
 SCA_2DFilterActuator(SCA_IActuator)
 ===================================
 
-base class --- :class:`SCA_IActuator`
+.. currentmodule:: bge.types
 
-.. class:: SCA_2DFilterActuator(SCA_IActuator)
+base class --- :class:`~bge.types.SCA_IActuator`
+
+.. class:: SCA_2DFilterActuator
 
    Create, enable and disable 2D filters.
 
@@ -20,6 +22,8 @@ base class --- :class:`SCA_IActuator`
       :type: string
 
    .. attribute:: disableMotionBlur
+
+   .. deprecated:: 0.3.0
 
       action on motion blur: 0=enable, 1=disable.
 
@@ -40,6 +44,8 @@ base class --- :class:`SCA_IActuator`
       :type: integer (0-100)
 
    .. attribute:: value
+
+   .. deprecated:: 0.3.0
 
       argument for motion blur filter.
 

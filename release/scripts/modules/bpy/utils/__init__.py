@@ -1,22 +1,4 @@
-# ##### BEGIN GPL LICENSE BLOCK #####
-#
-#  This program is free software; you can redistribute it and/or
-#  modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2
-#  of the License, or (at your option) any later version.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software Foundation,
-#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# ##### END GPL LICENSE BLOCK #####
-
-# <pep8-80 compliant>
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 """
 This module contains utility functions specific to blender but
@@ -26,6 +8,7 @@ not associated with blenders internal data.
 __all__ = (
     "blend_paths",
     "escape_identifier",
+    "flip_name",
     "unescape_identifier",
     "keyconfig_init",
     "keyconfig_set",
@@ -61,6 +44,7 @@ from _bpy import (
     _utils_units as units,
     blend_paths,
     escape_identifier,
+    flip_name,
     unescape_identifier,
     register_class,
     resource_path,
@@ -81,15 +65,40 @@ _script_module_dirs = "startup", "modules"
 _is_factory_startup = _bpy.app.factory_startup
 
 
-def execfile(filepath, mod=None):
-    # module name isn't used or added to 'sys.modules'.
-    # passing in 'mod' allows re-execution without having to reload.
+def execfile(filepath, *, mod=None):
+    """
+    Execute a file path as a Python script.
+
+    :arg filepath: Path of the script to execute.
+    :type filepath: string
+    :arg mod: Optional cached module, the result of a previous execution.
+    :type mod: Module or None
+    :return: The module which can be passed back in as ``mod``.
+    :rtype: ModuleType
+    """
 
     import importlib.util
-    mod_spec = importlib.util.spec_from_file_location("__main__", filepath)
+    mod_name = "__main__"
+    mod_spec = importlib.util.spec_from_file_location(mod_name, filepath)
     if mod is None:
         mod = importlib.util.module_from_spec(mod_spec)
-    mod_spec.loader.exec_module(mod)
+
+    # While the module name is not added to `sys.modules`, it's important to temporarily
+    # include this so statements such as `sys.modules[cls.__module__].__dict__` behave as expected.
+    # See: https://bugs.python.org/issue9499 for details.
+    modules = _sys.modules
+    mod_orig = modules.get(mod_name, None)
+    modules[mod_name] = mod
+
+    # No error suppression, just ensure `sys.modules[mod_name]` is properly restored in the case of an error.
+    try:
+        mod_spec.loader.exec_module(mod)
+    finally:
+        if mod_orig is None:
+            modules.pop(mod_name, None)
+        else:
+            modules[mod_name] = mod_orig
+
     return mod
 
 
@@ -121,15 +130,26 @@ def _test_import(module_name, loaded_modules):
     return mod
 
 
-# Reloading would add twice.
+# Check before adding paths as reloading would add twice.
+
+# Storing and restoring the full `sys.path` is risky as this may be intentionally modified
+# by technical users/developers.
+#
+# Instead, track which paths have been added, clearing them before refreshing.
+# This supports the case of loading a new preferences file which may reset scripts path.
+_sys_path_ensure_paths = set()
+
+
 def _sys_path_ensure_prepend(path):
     if path not in _sys.path:
         _sys.path.insert(0, path)
+        _sys_path_ensure_paths.add(path)
 
 
 def _sys_path_ensure_append(path):
     if path not in _sys.path:
         _sys.path.append(path)
+        _sys_path_ensure_paths.add(path)
 
 
 def modules_from_path(path, loaded_modules):
@@ -158,7 +178,7 @@ _global_loaded_modules = []  # store loaded module names for reloading.
 import bpy_types as _bpy_types  # keep for comparisons, never ever reload this.
 
 
-def load_scripts(reload_scripts=False, refresh_scripts=False):
+def load_scripts(*, reload_scripts=False, refresh_scripts=False):
     """
     Load scripts and run each modules register function.
 
@@ -322,7 +342,7 @@ def script_path_pref():
     return _os.path.normpath(path) if path else None
 
 
-def script_paths(subdir=None, user_pref=True, check_all=False, use_user=True):
+def script_paths(*, subdir=None, user_pref=True, check_all=False, use_user=True):
     """
     Returns a list of valid script paths.
 
@@ -391,6 +411,13 @@ def refresh_script_paths():
     Run this after creating new script paths to update sys.path
     """
 
+    for path in _sys_path_ensure_paths:
+        try:
+            _sys.path.remove(path)
+        except ValueError:
+            pass
+    _sys_path_ensure_paths.clear()
+
     for base_path in script_paths():
         for path_subdir in _script_module_dirs:
             path = _os.path.join(base_path, path_subdir)
@@ -404,16 +431,16 @@ def refresh_script_paths():
             _sys_path_ensure_append(path)
 
 
-def app_template_paths(subdir=None):
+def app_template_paths(*, path=None):
     """
     Returns valid application template paths.
 
-    :arg subdir: Optional subdir.
-    :type subdir: string
+    :arg path: Optional subdir.
+    :type path: string
     :return: app template paths.
     :rtype: generator
     """
-    subdir_args = (subdir,) if subdir is not None else ()
+    subdir_args = (path,) if path is not None else ()
     # Note: keep in sync with: Blender's 'BKE_appdir_app_template_any'.
     # Uses 'BLENDER_USER_SCRIPTS', 'BLENDER_SYSTEM_SCRIPTS'
     # ... in this case 'system' accounts for 'local' too.
@@ -421,9 +448,9 @@ def app_template_paths(subdir=None):
             (_user_resource, "bl_app_templates_user"),
             (system_resource, "bl_app_templates_system"),
     ):
-        path = resource_fn('SCRIPTS', _os.path.join("startup", module_name, *subdir_args))
-        if path and _os.path.isdir(path):
-            yield path
+        path_test = resource_fn('SCRIPTS', path=_os.path.join("startup", module_name, *subdir_args))
+        if path_test and _os.path.isdir(path_test):
+            yield path_test
 
 
 def preset_paths(subdir):
@@ -436,7 +463,7 @@ def preset_paths(subdir):
     :rtype: list
     """
     dirs = []
-    for path in script_paths("presets", check_all=True):
+    for path in script_paths(subdir="presets", check_all=True):
         directory = _os.path.join(path, subdir)
         if not directory.startswith(path):
             raise Exception("invalid subdir given %r" % subdir)
@@ -460,7 +487,7 @@ def is_path_builtin(path):
     :type path: str
     :rtype: bool
     """
-    # Note that this function is is not optimized for speed,
+    # Note that this function isn't optimized for speed,
     # it's intended to be used to check if it's OK to remove presets.
     #
     # If this is used in a draw-loop for example, we could cache some of the values.
@@ -490,7 +517,7 @@ def is_path_builtin(path):
     return False
 
 
-def smpte_from_seconds(time, fps=None, fps_base=None):
+def smpte_from_seconds(time, *, fps=None, fps_base=None):
     """
     Returns an SMPTE formatted string from the *time*:
     ``HH:MM:SS:FF``.
@@ -510,7 +537,7 @@ def smpte_from_seconds(time, fps=None, fps_base=None):
     )
 
 
-def smpte_from_frame(frame, fps=None, fps_base=None):
+def smpte_from_frame(frame, *, fps=None, fps_base=None):
     """
     Returns an SMPTE formatted string from the *frame*:
     ``HH:MM:SS:FF``.
@@ -543,7 +570,7 @@ def smpte_from_frame(frame, fps=None, fps_base=None):
         ))
 
 
-def time_from_frame(frame, fps=None, fps_base=None):
+def time_from_frame(frame, *, fps=None, fps_base=None):
     """
     Returns the time from a frame number .
 
@@ -568,7 +595,7 @@ def time_from_frame(frame, fps=None, fps_base=None):
     return timedelta(0, frame / fps)
 
 
-def time_to_frame(time, fps=None, fps_base=None):
+def time_to_frame(time, *, fps=None, fps_base=None):
     """
     Returns a float frame number from a time given in seconds or
     as a datetime.timedelta object.
@@ -597,7 +624,7 @@ def time_to_frame(time, fps=None, fps_base=None):
     return time * fps
 
 
-def preset_find(name, preset_path, display_name=False, ext=".py"):
+def preset_find(name, preset_path, *, display_name=False, ext=".py"):
     if not name:
         return None
 
@@ -606,7 +633,7 @@ def preset_find(name, preset_path, display_name=False, ext=".py"):
         if display_name:
             filename = ""
             for fn in _os.listdir(directory):
-                if fn.endswith(ext) and name == _bpy.path.display_name(fn):
+                if fn.endswith(ext) and name == _bpy.path.display_name(fn, title_case=False):
                     filename = fn
                     break
         else:
@@ -624,7 +651,7 @@ def keyconfig_init():
     active_config = _preferences.keymap.active_keyconfig
 
     # Load the default key configuration.
-    default_filepath = preset_find("blender", "keyconfig")
+    default_filepath = preset_find("Blender", "keyconfig")
     keyconfig_set(default_filepath)
 
     # Set the active key configuration if different
@@ -634,7 +661,7 @@ def keyconfig_init():
         keyconfig_set(filepath)
 
 
-def keyconfig_set(filepath, report=None):
+def keyconfig_set(filepath, *, report=None):
     from os.path import basename, splitext
 
     if _bpy.app.debug_python:
@@ -670,14 +697,14 @@ def keyconfig_set(filepath, report=None):
         return True
 
 
-def user_resource(resource_type, path="", create=False):
+def user_resource(resource_type, *, path="", create=False):
     """
     Return a user resource path (normally from the users home directory).
 
     :arg type: Resource type in ['DATAFILES', 'CONFIG', 'SCRIPTS', 'AUTOSAVE'].
     :type type: string
-    :arg subdir: Optional subdirectory.
-    :type subdir: string
+    :arg path: Optional subdirectory.
+    :type path: string
     :arg create: Treat the path as a directory and create
        it if its not existing.
     :type create: boolean
@@ -685,7 +712,7 @@ def user_resource(resource_type, path="", create=False):
     :rtype: string
     """
 
-    target_path = _user_resource(resource_type, path)
+    target_path = _user_resource(resource_type, path=path)
 
     if create:
         # should always be true.
@@ -711,12 +738,10 @@ def register_classes_factory(classes):
     which simply registers and unregisters a sequence of classes.
     """
     def register():
-        from bpy.utils import register_class
         for cls in classes:
             register_class(cls)
 
     def unregister():
-        from bpy.utils import unregister_class
         for cls in reversed(classes):
             unregister_class(cls)
 
@@ -817,7 +842,9 @@ def register_tool(tool_cls, *, after=None, separator=False, group=False):
             "description": getattr(tool_cls, "bl_description", tool_cls.__doc__),
             "icon": getattr(tool_cls, "bl_icon", None),
             "cursor": getattr(tool_cls, "bl_cursor", None),
+            "options": getattr(tool_cls, "bl_options", None),
             "widget": getattr(tool_cls, "bl_widget", None),
+            "widget_properties": getattr(tool_cls, "bl_widget_properties", None),
             "keymap": getattr(tool_cls, "bl_keymap", None),
             "data_block": getattr(tool_cls, "bl_data_block", None),
             "operator": getattr(tool_cls, "bl_operator", None),

@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup collada
@@ -40,7 +26,6 @@
 #include "GeometryExporter.h"
 #include "SceneExporter.h"
 
-/* write bone nodes */
 void ArmatureExporter::add_armature_bones(Object *ob_arm,
                                           ViewLayer *view_layer,
                                           SceneExporter *se,
@@ -144,7 +129,6 @@ void ArmatureExporter::find_objects_using_armature(Object *ob_arm,
 }
 #endif
 
-/* parent_mat is armature-space */
 void ArmatureExporter::add_bone_node(Bone *bone,
                                      Object *ob_arm,
                                      SceneExporter *se,
@@ -197,7 +181,7 @@ void ArmatureExporter::add_bone_node(Bone *bone,
 
     add_bone_transform(ob_arm, bone, node);
 
-    /* Write nodes of childobjects, remove written objects from list */
+    /* Write nodes of child-objects, remove written objects from list. */
     std::vector<Object *>::iterator iter = child_objects.begin();
 
     while (iter != child_objects.end()) {
@@ -219,7 +203,7 @@ void ArmatureExporter::add_bone_node(Bone *bone,
          * single matrix the tweak must be applied
          * to the result. */
         if (export_settings.get_open_sim()) {
-          /* Tweak objects parentinverse to match compatibility. */
+          /* Tweak objects parent-inverse to match compatibility. */
           float temp[4][4];
 
           copy_m4_m4(temp, bone->arm_mat);

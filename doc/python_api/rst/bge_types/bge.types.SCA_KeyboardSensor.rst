@@ -1,9 +1,11 @@
 SCA_KeyboardSensor(SCA_ISensor)
 ===============================
 
-base class --- :class:`SCA_ISensor`
+.. currentmodule:: bge.types
 
-.. class:: SCA_KeyboardSensor(SCA_ISensor)
+base class --- :class:`~bge.types.SCA_ISensor`
+
+.. class:: SCA_KeyboardSensor
 
    A keyboard sensor detects player key presses.
 
@@ -11,21 +13,21 @@ base class --- :class:`SCA_ISensor`
 
    .. attribute:: key
 
-      The key code this sensor is looking for.
+      The key code this sensor is looking for. Expects a keycode from :mod:`bge.events` module.
 
-      :type: keycode from :mod:`bge.events` module
+      :type: integer
 
    .. attribute:: hold1
 
-      The key code for the first modifier this sensor is looking for.
+      The key code for the first modifier this sensor is looking for. Expects a keycode from :mod:`bge.events` module.
 
-      :type: keycode from :mod:`bge.events` module
+      :type: integer
 
    .. attribute:: hold2
 
-      The key code for the second modifier this sensor is looking for.
+      The key code for the second modifier this sensor is looking for. Expects a keycode from :mod:`bge.events` module.
 
-      :type: keycode from :mod:`bge.events` module
+      :type: integer
 
    .. attribute:: toggleProperty
 
@@ -49,13 +51,15 @@ base class --- :class:`SCA_ISensor`
 
       A list of pressed input keys that have either been pressed, or just released, or are active this frame. (read-only).
 
-      :type: dictionary {:ref:`keycode<keyboard-keys>`::class:`SCA_InputEvent`, ...}
+      :type: dict[:ref:`keycode<keyboard-keys>`, :class:`~bge.types.SCA_InputEvent`]
 
    .. attribute:: events
 
       a list of pressed keys that have either been pressed, or just released, or are active this frame. (read-only).
 
-      .. deprecated:: use :data:`inputs`
+      .. deprecated:: 0.2.2
+
+         Use :data:`inputs`
 
       :type: list [[:ref:`keycode<keyboard-keys>`, :ref:`status<input-status>`], ...]
 

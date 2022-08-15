@@ -1,11 +1,11 @@
 KX_MeshProxy(EXP_Value)
-====================
+=======================
 
-.. module:: bge.types
+.. currentmodule:: bge.types
 
-base class --- :class:`EXP_Value`
+base class --- :class:`~bge.types.EXP_Value`
 
-.. class:: KX_MeshProxy(EXP_Value)
+.. class:: KX_MeshProxy
 
    A mesh object.
 
@@ -32,8 +32,8 @@ base class --- :class:`EXP_Value`
       #. Their normals are the same (both polygons are "Set Smooth")
       #. They are the same color, for example: a cube has 24 vertices: 6 faces with 4 vertices per face.
 
-   The correct method of iterating over every :class:`KX_VertexProxy` in a game object
-   
+   The correct method of iterating over every :class:`~bge.types.KX_VertexProxy` in a game object
+
    .. code-block:: python
 
       from bge import logic
@@ -51,7 +51,7 @@ base class --- :class:`EXP_Value`
 
    .. attribute:: materials
 
-      :type: list of :class:`KX_BlenderMaterial` type
+      :type: list of :class:`~bge.types.KX_BlenderMaterial` type
 
    .. attribute:: numPolygons
 
@@ -65,7 +65,7 @@ base class --- :class:`EXP_Value`
 
       Returns the list of polygons of this mesh.
 
-      :type: :class:`KX_PolyProxy` list (read only)
+      :type: :class:`~bge.types.KX_PolyProxy` list (read only)
 
    .. method:: getMaterialName(matid)
 
@@ -105,7 +105,7 @@ base class --- :class:`EXP_Value`
       :arg index: the index into the vertex array.
       :type index: integer
       :return: a vertex object.
-      :rtype: :class:`KX_VertexProxy`
+      :rtype: :class:`~bge.types.KX_VertexProxy`
 
    .. method:: getPolygon(index)
 
@@ -114,7 +114,7 @@ base class --- :class:`EXP_Value`
       :arg index: polygon number
       :type index: integer
       :return: a polygon object.
-      :rtype: :class:`KX_PolyProxy`
+      :rtype: :class:`~bge.types.KX_PolyProxy`
 
    .. method:: transform(matid, matrix)
 
@@ -145,7 +145,7 @@ base class --- :class:`EXP_Value`
       :arg matid: The material index.
       :type matid: integer
       :arg material: The material replacement.
-      :type material: :class:`KX_BlenderMaterial`
+      :type material: :class:`~bge.types.KX_BlenderMaterial`
 
       .. warning::
 

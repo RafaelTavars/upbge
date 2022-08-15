@@ -1,9 +1,10 @@
-/* Apache License, Version 2.0 */
+/* SPDX-License-Identifier: Apache-2.0 */
 
 #include "testing/testing.h"
 
 #include "FN_multi_function.hh"
 #include "FN_multi_function_builder.hh"
+#include "FN_multi_function_test_common.hh"
 
 namespace blender::fn::tests {
 namespace {
@@ -12,16 +13,23 @@ class AddFunction : public MultiFunction {
  public:
   AddFunction()
   {
-    MFSignatureBuilder builder = this->get_builder("Add");
-    builder.single_input<int>("A");
-    builder.single_input<int>("B");
-    builder.single_output<int>("Result");
+    static MFSignature signature = create_signature();
+    this->set_signature(&signature);
+  }
+
+  static MFSignature create_signature()
+  {
+    MFSignatureBuilder signature("Add");
+    signature.single_input<int>("A");
+    signature.single_input<int>("B");
+    signature.single_output<int>("Result");
+    return signature.build();
   }
 
   void call(IndexMask mask, MFParams params, MFContext UNUSED(context)) const override
   {
-    VSpan<int> a = params.readonly_single_input<int>(0, "A");
-    VSpan<int> b = params.readonly_single_input<int>(1, "B");
+    const VArray<int> &a = params.readonly_single_input<int>(0, "A");
+    const VArray<int> &b = params.readonly_single_input<int>(1, "B");
     MutableSpan<int> result = params.uninitialized_single_output<int>(2, "Result");
 
     for (int64_t i : mask) {
@@ -52,26 +60,6 @@ TEST(multi_function, AddFunction)
   EXPECT_EQ(output[2], 36);
 }
 
-class AddPrefixFunction : public MultiFunction {
- public:
-  AddPrefixFunction()
-  {
-    MFSignatureBuilder builder = this->get_builder("Add Prefix");
-    builder.single_input<std::string>("Prefix");
-    builder.single_mutable<std::string>("Strings");
-  }
-
-  void call(IndexMask mask, MFParams params, MFContext UNUSED(context)) const override
-  {
-    VSpan<std::string> prefixes = params.readonly_single_input<std::string>(0, "Prefix");
-    MutableSpan<std::string> strings = params.single_mutable<std::string>(1, "Strings");
-
-    for (int64_t i : mask) {
-      strings[i] = prefixes[i] + strings[i];
-    }
-  }
-};
-
 TEST(multi_function, AddPrefixFunction)
 {
   AddPrefixFunction fn;
@@ -99,36 +87,13 @@ TEST(multi_function, AddPrefixFunction)
   EXPECT_EQ(strings[3], "ABAnother much longer string to trigger an allocation");
 }
 
-class CreateRangeFunction : public MultiFunction {
- public:
-  CreateRangeFunction()
-  {
-    MFSignatureBuilder builder = this->get_builder("Create Range");
-    builder.single_input<uint>("Size");
-    builder.vector_output<uint>("Range");
-  }
-
-  void call(IndexMask mask, MFParams params, MFContext UNUSED(context)) const override
-  {
-    VSpan<uint> sizes = params.readonly_single_input<uint>(0, "Size");
-    GVectorArrayRef<uint> ranges = params.vector_output<uint>(1, "Range");
-
-    for (int64_t i : mask) {
-      uint size = sizes[i];
-      for (uint j : IndexRange(size)) {
-        ranges.append(i, j);
-      }
-    }
-  }
-};
-
 TEST(multi_function, CreateRangeFunction)
 {
   CreateRangeFunction fn;
 
-  GVectorArray ranges(CPPType::get<uint>(), 5);
-  GVectorArrayRef<uint> ranges_ref(ranges);
-  Array<uint> sizes = {3, 0, 6, 1, 4};
+  GVectorArray ranges(CPPType::get<int>(), 5);
+  GVectorArray_TypedMutableRef<int> ranges_ref{ranges};
+  Array<int> sizes = {3, 0, 6, 1, 4};
 
   MFParamsBuilder params(fn, ranges.size());
   params.add_readonly_single_input(sizes.as_span());
@@ -138,11 +103,11 @@ TEST(multi_function, CreateRangeFunction)
 
   fn.call({0, 1, 2, 3}, params, context);
 
-  EXPECT_EQ(ranges_ref[0].size(), 3);
-  EXPECT_EQ(ranges_ref[1].size(), 0);
-  EXPECT_EQ(ranges_ref[2].size(), 6);
-  EXPECT_EQ(ranges_ref[3].size(), 1);
-  EXPECT_EQ(ranges_ref[4].size(), 0);
+  EXPECT_EQ(ranges[0].size(), 3);
+  EXPECT_EQ(ranges[1].size(), 0);
+  EXPECT_EQ(ranges[2].size(), 6);
+  EXPECT_EQ(ranges[3].size(), 1);
+  EXPECT_EQ(ranges[4].size(), 0);
 
   EXPECT_EQ(ranges_ref[0][0], 0);
   EXPECT_EQ(ranges_ref[0][1], 1);
@@ -151,32 +116,12 @@ TEST(multi_function, CreateRangeFunction)
   EXPECT_EQ(ranges_ref[2][1], 1);
 }
 
-class GenericAppendFunction : public MultiFunction {
- public:
-  GenericAppendFunction(const CPPType &type)
-  {
-    MFSignatureBuilder builder = this->get_builder("Append");
-    builder.vector_mutable("Vector", type);
-    builder.single_input("Value", type);
-  }
-
-  void call(IndexMask mask, MFParams params, MFContext UNUSED(context)) const override
-  {
-    GVectorArray &vectors = params.vector_mutable(0, "Vector");
-    GVSpan values = params.readonly_single_input(1, "Value");
-
-    for (int64_t i : mask) {
-      vectors.append(i, values[i]);
-    }
-  }
-};
-
 TEST(multi_function, GenericAppendFunction)
 {
   GenericAppendFunction fn(CPPType::get<int32_t>());
 
   GVectorArray vectors(CPPType::get<int32_t>(), 4);
-  GVectorArrayRef<int> vectors_ref(vectors);
+  GVectorArray_TypedMutableRef<int> vectors_ref{vectors};
   vectors_ref.append(0, 1);
   vectors_ref.append(0, 2);
   vectors_ref.append(2, 6);
@@ -190,10 +135,10 @@ TEST(multi_function, GenericAppendFunction)
 
   fn.call(IndexRange(vectors.size()), params, context);
 
-  EXPECT_EQ(vectors_ref[0].size(), 3);
-  EXPECT_EQ(vectors_ref[1].size(), 1);
-  EXPECT_EQ(vectors_ref[2].size(), 2);
-  EXPECT_EQ(vectors_ref[3].size(), 1);
+  EXPECT_EQ(vectors[0].size(), 3);
+  EXPECT_EQ(vectors[1].size(), 1);
+  EXPECT_EQ(vectors[2].size(), 2);
+  EXPECT_EQ(vectors[3].size(), 1);
 
   EXPECT_EQ(vectors_ref[0][0], 1);
   EXPECT_EQ(vectors_ref[0][1], 2);
@@ -318,8 +263,7 @@ TEST(multi_function, CustomMF_Constant)
 TEST(multi_function, CustomMF_GenericConstant)
 {
   int value = 42;
-  CustomMF_GenericConstant fn{CPPType::get<int32_t>(), (const void *)&value};
-  EXPECT_EQ(fn.param_name(0), "42");
+  CustomMF_GenericConstant fn{CPPType::get<int32_t>(), (const void *)&value, false};
 
   Array<int> outputs(4, 0);
 
@@ -340,13 +284,12 @@ TEST(multi_function, CustomMF_GenericConstantArray)
 {
   std::array<int, 4> values = {3, 4, 5, 6};
   CustomMF_GenericConstantArray fn{GSpan(Span(values))};
-  EXPECT_EQ(fn.param_name(0), "[3, 4, 5, 6, ]");
 
-  GVectorArray g_vector_array{CPPType::get<int32_t>(), 4};
-  GVectorArrayRef<int> vector_array = g_vector_array;
+  GVectorArray vector_array{CPPType::get<int32_t>(), 4};
+  GVectorArray_TypedMutableRef<int> vector_array_ref{vector_array};
 
-  MFParamsBuilder params(fn, g_vector_array.size());
-  params.add_vector_output(g_vector_array);
+  MFParamsBuilder params(fn, vector_array.size());
+  params.add_vector_output(vector_array);
 
   MFContextBuilder context;
 
@@ -357,30 +300,38 @@ TEST(multi_function, CustomMF_GenericConstantArray)
   EXPECT_EQ(vector_array[2].size(), 4);
   EXPECT_EQ(vector_array[3].size(), 4);
   for (int i = 1; i < 4; i++) {
-    EXPECT_EQ(vector_array[i][0], 3);
-    EXPECT_EQ(vector_array[i][1], 4);
-    EXPECT_EQ(vector_array[i][2], 5);
-    EXPECT_EQ(vector_array[i][3], 6);
+    EXPECT_EQ(vector_array_ref[i][0], 3);
+    EXPECT_EQ(vector_array_ref[i][1], 4);
+    EXPECT_EQ(vector_array_ref[i][2], 5);
+    EXPECT_EQ(vector_array_ref[i][3], 6);
   }
 }
 
-TEST(multi_function, CustomMF_Convert)
+TEST(multi_function, IgnoredOutputs)
 {
-  CustomMF_Convert<float, int> fn;
+  OptionalOutputsFunction fn;
+  {
+    MFParamsBuilder params(fn, 10);
+    params.add_ignored_single_output("Out 1");
+    params.add_ignored_single_output("Out 2");
+    MFContextBuilder context;
+    fn.call(IndexRange(10), params, context);
+  }
+  {
+    Array<int> results_1(10);
+    Array<std::string> results_2(10, NoInitialization());
 
-  Array<float> inputs = {5.4f, 7.1f, 9.0f};
-  Array<int> outputs(inputs.size(), 0);
+    MFParamsBuilder params(fn, 10);
+    params.add_uninitialized_single_output(results_1.as_mutable_span(), "Out 1");
+    params.add_uninitialized_single_output(results_2.as_mutable_span(), "Out 2");
+    MFContextBuilder context;
+    fn.call(IndexRange(10), params, context);
 
-  MFParamsBuilder params(fn, inputs.size());
-  params.add_readonly_single_input(inputs.as_span());
-  params.add_uninitialized_single_output(outputs.as_mutable_span());
-
-  MFContextBuilder context;
-  fn.call({0, 2}, params, context);
-
-  EXPECT_EQ(outputs[0], 5);
-  EXPECT_EQ(outputs[1], 0);
-  EXPECT_EQ(outputs[2], 9);
+    EXPECT_EQ(results_1[0], 5);
+    EXPECT_EQ(results_1[3], 5);
+    EXPECT_EQ(results_1[9], 5);
+    EXPECT_EQ(results_2[0], "hello, this is a long string");
+  }
 }
 
 }  // namespace

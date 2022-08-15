@@ -1,28 +1,5 @@
-/* ***** BEGIN GPL LICENSE BLOCK *****
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2001-2002 by NaN Holding BV.
- * All rights reserved.
- *
- * The Original Code is: all of this file.
- *
- * Contributor(s): none yet.
- *
- * ***** END GPL LICENSE BLOCK *****
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2001-2002 NaN Holding BV. All rights reserved. */
 
 /** \file gameengine/SceneGraph/SG_Node.cpp
  *  \ingroup bgesg
@@ -30,8 +7,7 @@
 
 #include "SG_Node.h"
 
-#include <algorithm>
-
+#include "CM_List.h"
 #include "SG_Controller.h"
 #include "SG_Familly.h"
 
@@ -155,11 +131,12 @@ const SG_Node *SG_Node::GetRootSGParent() const
 
 bool SG_Node::IsAncessor(const SG_Node *child) const
 {
-  return (!child->m_SGparent) ? false :
-                                (child->m_SGparent == this) ? true : IsAncessor(child->m_SGparent);
+  return (!child->m_SGparent)        ? false :
+         (child->m_SGparent == this) ? true :
+                                       IsAncessor(child->m_SGparent);
 }
 
-NodeList &SG_Node::GetSGChildren()
+const NodeList &SG_Node::GetSGChildren() const
 {
   return m_children;
 }
@@ -224,7 +201,7 @@ void SG_Node::AddChild(SG_Node *child)
 
 void SG_Node::RemoveChild(SG_Node *child)
 {
-  m_children.erase(std::find(m_children.begin(), m_children.end(), child));
+  CM_ListRemoveIfFound(m_children, child);
 }
 
 void SG_Node::UpdateWorldData(double time, bool parentUpdated)
@@ -347,7 +324,7 @@ void SG_Node::AddSGController(SG_Controller *cont)
 void SG_Node::RemoveSGController(SG_Controller *cont)
 {
   m_mutex.Lock();
-  m_SGcontrollers.erase(std::find(m_SGcontrollers.begin(), m_SGcontrollers.end(), cont));
+  CM_ListRemoveIfFound(m_SGcontrollers, cont);
   m_mutex.Unlock();
 }
 

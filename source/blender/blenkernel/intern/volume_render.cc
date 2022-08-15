@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup bke
@@ -21,8 +7,8 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_array.hh"
-#include "BLI_float3.hh"
 #include "BLI_math_matrix.h"
+#include "BLI_math_vec_types.hh"
 #include "BLI_math_vector.h"
 #include "BLI_vector.hh"
 
@@ -77,7 +63,6 @@ static void extract_dense_float_voxels(const VolumeGridType grid_type,
     case VOLUME_GRID_VECTOR_INT:
       return extract_dense_voxels<openvdb::Vec3IGrid, openvdb::Vec3f>(
           grid, bbox, reinterpret_cast<openvdb::Vec3f *>(r_voxels));
-    case VOLUME_GRID_STRING:
     case VOLUME_GRID_POINTS:
     case VOLUME_GRID_UNKNOWN:
       /* Zero channels to copy. */
@@ -104,7 +89,7 @@ static void create_texture_to_object_matrix(const openvdb::Mat4d &grid_transform
 #endif
 
 bool BKE_volume_grid_dense_floats(const Volume *volume,
-                                  VolumeGrid *volume_grid,
+                                  const VolumeGrid *volume_grid,
                                   DenseFloatVolumeGrid *r_dense_grid)
 {
 #ifdef WITH_OPENVDB
@@ -334,7 +319,7 @@ static void boxes_to_cube_mesh(blender::Span<openvdb::CoordBBox> boxes,
 #endif
 
 void BKE_volume_grid_wireframe(const Volume *volume,
-                               VolumeGrid *volume_grid,
+                               const VolumeGrid *volume_grid,
                                BKE_volume_wireframe_cb cb,
                                void *cb_userdata)
 {
@@ -411,7 +396,7 @@ static void grow_triangles(blender::MutableSpan<blender::float3> verts,
 #endif /* WITH_OPENVDB */
 
 void BKE_volume_grid_selection_surface(const Volume *volume,
-                                       VolumeGrid *volume_grid,
+                                       const VolumeGrid *volume_grid,
                                        BKE_volume_selection_surface_cb cb,
                                        void *cb_userdata)
 {

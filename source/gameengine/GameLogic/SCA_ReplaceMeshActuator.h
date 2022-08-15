@@ -34,7 +34,6 @@
 
 #pragma once
 
-
 #include "RAS_MeshObject.h"
 #include "SCA_IActuator.h"
 #include "SCA_LogicManager.h"
@@ -64,7 +63,7 @@ class SCA_ReplaceMeshActuator : public SCA_IActuator {
 
   void InstantReplaceMesh();
 
-#ifdef WITH_PYTHON
+
 
   /* --------------------------------------------------------------------- */
   /* Python interface ---------------------------------------------------- */
@@ -72,7 +71,9 @@ class SCA_ReplaceMeshActuator : public SCA_IActuator {
 
   virtual void Replace_IScene(SCA_IScene *val);
 
-  static PyObject *pyattr_get_mesh(EXP_PyObjectPlus *self, const struct EXP_PYATTRIBUTE_DEF *attrdef);
+#ifdef WITH_PYTHON
+  static PyObject *pyattr_get_mesh(EXP_PyObjectPlus *self,
+                                   const struct EXP_PYATTRIBUTE_DEF *attrdef);
   static int pyattr_set_mesh(EXP_PyObjectPlus *self,
                              const struct EXP_PYATTRIBUTE_DEF *attrdef,
                              PyObject *value);
@@ -81,4 +82,3 @@ class SCA_ReplaceMeshActuator : public SCA_IActuator {
 
 #endif /* WITH_PYTHON */
 };
-

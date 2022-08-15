@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 #pragma once
 
@@ -48,20 +34,16 @@
  * Ideally this could be could be even closer to Python's enumerate(). We might get that in the
  * future with newer C++ versions.
  *
- * One other important feature is the as_span method. This method returns an Span<int64_t>
+ * One other important feature is the as_span method. This method returns a Span<int64_t>
  * that contains the interval as individual numbers.
  */
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <iostream>
 
 #include "BLI_utildefines.h"
-
-/* Forward declare tbb::blocked_range for conversion operations. */
-namespace tbb {
-template<typename Value> class blocked_range;
-}
 
 namespace blender {
 
@@ -86,18 +68,19 @@ class IndexRange {
     BLI_assert(size >= 0);
   }
 
-  template<typename T>
-  constexpr IndexRange(const tbb::blocked_range<T> &range)
-      : start_(range.begin()), size_(range.size())
-  {
-  }
-
   class Iterator {
+   public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = int64_t;
+    using pointer = const int64_t *;
+    using reference = const int64_t &;
+    using difference_type = std::ptrdiff_t;
+
    private:
     int64_t current_;
 
    public:
-    constexpr Iterator(int64_t current) : current_(current)
+    constexpr explicit Iterator(int64_t current) : current_(current)
     {
     }
 
@@ -107,9 +90,21 @@ class IndexRange {
       return *this;
     }
 
-    constexpr bool operator!=(const Iterator &iterator) const
+    constexpr Iterator operator++(int)
     {
-      return current_ != iterator.current_;
+      Iterator copied_iterator = *this;
+      ++(*this);
+      return copied_iterator;
+    }
+
+    constexpr friend bool operator!=(const Iterator &a, const Iterator &b)
+    {
+      return a.current_ != b.current_;
+    }
+
+    constexpr friend bool operator==(const Iterator &a, const Iterator &b)
+    {
+      return a.current_ == b.current_;
     }
 
     constexpr int64_t operator*() const
@@ -155,6 +150,14 @@ class IndexRange {
   }
 
   /**
+   * Returns true if the size is zero.
+   */
+  constexpr bool is_empty() const
+  {
+    return size_ == 0;
+  }
+
+  /**
    * Create a new range starting at the end of the current one.
    */
   constexpr IndexRange after(int64_t n) const
@@ -183,13 +186,25 @@ class IndexRange {
   }
 
   /**
-   * Get the last element in the range.
-   * Asserts when the range is empty.
+   * Get the nth last element in the range.
+   * Asserts when the range is empty or when n is negative.
    */
-  constexpr int64_t last() const
+  constexpr int64_t last(const int64_t n = 0) const
   {
+    BLI_assert(n >= 0);
+    BLI_assert(n < size_);
     BLI_assert(this->size() > 0);
-    return start_ + size_ - 1;
+    return start_ + size_ - 1 - n;
+  }
+
+  /**
+   * Get the element one before the beginning. The returned value is undefined when the range is
+   * empty, and the range must start after zero already.
+   */
+  constexpr int64_t one_before_start() const
+  {
+    BLI_assert(start_ > 0);
+    return start_ - 1;
   }
 
   /**
@@ -233,6 +248,59 @@ class IndexRange {
   }
 
   /**
+   * Returns a new IndexRange with n elements removed from the beginning of the range.
+   * This invokes undefined behavior when n is negative.
+   */
+  constexpr IndexRange drop_front(int64_t n) const
+  {
+    BLI_assert(n >= 0);
+    const int64_t new_size = std::max<int64_t>(0, size_ - n);
+    return IndexRange(start_ + n, new_size);
+  }
+
+  /**
+   * Returns a new IndexRange with n elements removed from the end of the range.
+   * This invokes undefined behavior when n is negative.
+   */
+  constexpr IndexRange drop_back(int64_t n) const
+  {
+    BLI_assert(n >= 0);
+    const int64_t new_size = std::max<int64_t>(0, size_ - n);
+    return IndexRange(start_, new_size);
+  }
+
+  /**
+   * Returns a new IndexRange that only contains the first n elements. This invokes undefined
+   * behavior when n is negative.
+   */
+  constexpr IndexRange take_front(int64_t n) const
+  {
+    BLI_assert(n >= 0);
+    const int64_t new_size = std::min<int64_t>(size_, n);
+    return IndexRange(start_, new_size);
+  }
+
+  /**
+   * Returns a new IndexRange that only contains the last n elements. This invokes undefined
+   * behavior when n is negative.
+   */
+  constexpr IndexRange take_back(int64_t n) const
+  {
+    BLI_assert(n >= 0);
+    const int64_t new_size = std::min<int64_t>(size_, n);
+    return IndexRange(start_ + size_ - new_size, new_size);
+  }
+
+  /**
+   * Move the range forward or backward within the larger array. The amount may be negative,
+   * but its absolute value cannot be greater than the existing start of the range.
+   */
+  constexpr IndexRange shift(int64_t n) const
+  {
+    return IndexRange(start_ + n, size_);
+  }
+
+  /**
    * Get read-only access to a memory buffer that contains the range as actual numbers.
    */
   Span<int64_t> as_span() const;
@@ -242,6 +310,12 @@ class IndexRange {
     stream << "[" << range.start() << ", " << range.one_after_last() << ")";
     return stream;
   }
+
+ private:
+  static std::atomic<int64_t> s_current_array_size;
+  static std::atomic<int64_t *> s_current_array;
+
+  Span<int64_t> as_span_internal() const;
 };
 
 }  // namespace blender

@@ -31,7 +31,6 @@
 
 #pragma once
 
-
 #include <vector>
 
 #include "CM_RefCount.h"
@@ -40,7 +39,6 @@
 
 class RAS_MaterialBucket;
 class RAS_IDisplayArray;
-class RAS_MaterialShader;
 class RAS_MeshObject;
 class RAS_MeshMaterial;
 
@@ -89,4 +87,3 @@ class RAS_DisplayArrayBucket {
 };
 
 typedef std::vector<RAS_DisplayArrayBucket *> RAS_DisplayArrayBucketList;
-

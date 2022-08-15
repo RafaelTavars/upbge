@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2017, Blender Foundation
- * This is a new part of Blender
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2017 Blender Foundation. */
 
 /** \file
  * \ingroup modifiers
@@ -42,14 +26,11 @@
 #include "BKE_gpencil_geom.h"
 #include "BKE_gpencil_modifier.h"
 #include "BKE_lattice.h"
-#include "BKE_layer.h"
 #include "BKE_lib_query.h"
 #include "BKE_main.h"
 #include "BKE_modifier.h"
 #include "BKE_scene.h"
 #include "BKE_screen.h"
-
-#include "MEM_guardedalloc.h"
 
 #include "UI_interface.h"
 #include "UI_resources.h"
@@ -139,37 +120,40 @@ static void bakeModifier(Main *UNUSED(bmain),
   bGPdata *gpd = ob->data;
   int oldframe = (int)DEG_get_ctime(depsgraph);
 
-  if (mmd->object == NULL) {
+  if ((mmd->object == NULL) || (mmd->object->type != OB_LATTICE)) {
     return;
   }
 
   LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
     LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
-      /* apply lattice effects on this frame
-       * NOTE: this assumes that we don't want lattice animation on non-keyframed frames
+      /* Apply lattice effects on this frame
+       * NOTE: this assumes that we don't want lattice animation on non-keyframed frames.
        */
-      CFRA = gpf->framenum;
+      scene->r.cfra = gpf->framenum;
       BKE_scene_graph_update_for_newframe(depsgraph);
 
-      /* recalculate lattice data */
-      BKE_gpencil_lattice_init(ob);
+      /* Recalculate lattice data. */
+      if (mmd->cache_data) {
+        BKE_lattice_deform_data_destroy(mmd->cache_data);
+      }
+      mmd->cache_data = BKE_lattice_deform_data_create(mmd->object, ob);
 
-      /* compute lattice effects on this frame */
+      /* Compute lattice effects on this frame. */
       LISTBASE_FOREACH (bGPDstroke *, gps, &gpf->strokes) {
         deformStroke(md, depsgraph, ob, gpl, gpf, gps);
       }
     }
   }
 
-  /* free lingering data */
+  /* Free lingering data. */
   ldata = (struct LatticeDeformData *)mmd->cache_data;
   if (ldata) {
     BKE_lattice_deform_data_destroy(ldata);
     mmd->cache_data = NULL;
   }
 
-  /* return frame state and DB to original state */
-  CFRA = oldframe;
+  /* Return frame state and DB to original state. */
+  scene->r.cfra = oldframe;
   BKE_scene_graph_update_for_newframe(depsgraph);
 }
 
@@ -195,7 +179,9 @@ static bool isDisabled(GpencilModifierData *md, int UNUSED(userRenderParams))
   return !mmd->object || mmd->object->type != OB_LATTICE;
 }
 
-static void updateDepsgraph(GpencilModifierData *md, const ModifierUpdateDepsgraphContext *ctx)
+static void updateDepsgraph(GpencilModifierData *md,
+                            const ModifierUpdateDepsgraphContext *ctx,
+                            const int UNUSED(mode))
 {
   LatticeGpencilModifierData *lmd = (LatticeGpencilModifierData *)md;
   if (lmd->object != NULL) {
@@ -261,11 +247,11 @@ static void panelRegister(ARegionType *region_type)
 }
 
 GpencilModifierTypeInfo modifierType_Gpencil_Lattice = {
-    /* name */ "Lattice",
+    /* name */ N_("Lattice"),
     /* structName */ "LatticeGpencilModifierData",
     /* structSize */ sizeof(LatticeGpencilModifierData),
     /* type */ eGpencilModifierTypeType_Gpencil,
-    /* flags */ eGpencilModifierTypeFlag_Single | eGpencilModifierTypeFlag_SupportsEditmode,
+    /* flags */ eGpencilModifierTypeFlag_SupportsEditmode,
 
     /* copyData */ copyData,
 

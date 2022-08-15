@@ -1,9 +1,11 @@
 SCA_ParentActuator(SCA_IActuator)
-================================
+=================================
 
-base class --- :class:`SCA_IActuator`
+.. currentmodule:: bge.types
 
-.. class:: SCA_ParentActuator(SCA_IActuator)
+base class --- :class:`~bge.types.SCA_IActuator`
+
+.. class:: SCA_ParentActuator
 
    The parent actuator can set or remove an objects parent object.
 
@@ -11,7 +13,7 @@ base class --- :class:`SCA_IActuator`
 
       the object this actuator sets the parent too.
 
-      :type: :class:`KX_GameObject` or None
+      :type: :class:`~bge.types.KX_GameObject` or None
 
    .. attribute:: mode
 

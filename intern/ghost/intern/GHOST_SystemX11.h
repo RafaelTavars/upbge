@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2001-2002 by NaN Holding BV.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2001-2002 NaN Holding BV. All rights reserved. */
 
 /** \file
  * \ingroup GHOST
@@ -24,7 +8,7 @@
 
 #pragma once
 
-#include <X11/XKBlib.h> /* Allow detectable auto-repeate. */
+#include <X11/XKBlib.h> /* Allow detectable auto-repeat. */
 #include <X11/Xlib.h>
 
 #include "../GHOST_Types.h"
@@ -34,9 +18,9 @@
 #ifdef WITH_X11_XINPUT
 #  include <X11/extensions/XInput.h>
 
-/* Disable xinput warp, currently not implemented by Xorg for multi-head display.
- * (see comment in xserver "Xi/xiwarppointer.c" -> "FIXME: panoramix stuff is missing" ~ v1.13.4)
- * If this is supported we can add back xinput for warping (fixing T48901).
+/* Disable XINPUT warp, currently not implemented by Xorg for multi-head display.
+ * (see comment in XSERVER `Xi/xiwarppointer.c` -> `FIXME: panoramix stuff is missing` ~ v1.13.4)
+ * If this is supported we can add back XINPUT for warping (fixing T48901).
  * For now disable (see T50383). */
 // #  define USE_X11_XINPUT_WARP
 #endif
@@ -98,25 +82,25 @@ class GHOST_SystemX11 : public GHOST_System {
    * Returns the number of milliseconds since the start of the system process.
    * \return The number of milliseconds.
    */
-  GHOST_TUns64 getMilliSeconds() const;
+  uint64_t getMilliSeconds() const;
 
   /**
    * Returns the number of displays on this system.
    * \return The number of displays.
    */
-  GHOST_TUns8 getNumDisplays() const;
+  uint8_t getNumDisplays() const;
 
   /**
    * Returns the dimensions of the main display on this system.
    * \return The dimension of the main display.
    */
-  void getMainDisplayDimensions(GHOST_TUns32 &width, GHOST_TUns32 &height) const;
+  void getMainDisplayDimensions(uint32_t &width, uint32_t &height) const;
 
   /**
    * Returns the dimensions of all displays on this system.
    * \return The dimension of the main display.
    */
-  void getAllDisplayDimensions(GHOST_TUns32 &width, GHOST_TUns32 &height) const;
+  void getAllDisplayDimensions(uint32_t &width, uint32_t &height) const;
 
   /**
    * Create a new window.
@@ -136,10 +120,10 @@ class GHOST_SystemX11 : public GHOST_System {
    * \return The new window (or 0 if creation failed).
    */
   GHOST_IWindow *createWindow(const char *title,
-                              GHOST_TInt32 left,
-                              GHOST_TInt32 top,
-                              GHOST_TUns32 width,
-                              GHOST_TUns32 height,
+                              int32_t left,
+                              int32_t top,
+                              uint32_t width,
+                              uint32_t height,
                               GHOST_TWindowState state,
                               GHOST_TDrawingContextType type,
                               GHOST_GLSettings glSettings,
@@ -148,8 +132,8 @@ class GHOST_SystemX11 : public GHOST_System {
                               const GHOST_IWindow *parentWindow = 0);
 
   /**
-   * Create a new offscreen context.
-   * Never explicitly delete the context, use disposeContext() instead.
+   * Create a new off-screen context.
+   * Never explicitly delete the context, use #disposeContext() instead.
    * \return The new context (or 0 if creation failed).
    */
   GHOST_IContext *createOffscreenContext(GHOST_GLSettings glSettings);
@@ -168,9 +152,9 @@ class GHOST_SystemX11 : public GHOST_System {
    */
   bool processEvents(bool waitForEvent);
 
-  GHOST_TSuccess getCursorPosition(GHOST_TInt32 &x, GHOST_TInt32 &y) const;
+  GHOST_TSuccess getCursorPosition(int32_t &x, int32_t &y) const;
 
-  GHOST_TSuccess setCursorPosition(GHOST_TInt32 x, GHOST_TInt32 y);
+  GHOST_TSuccess setCursorPosition(int32_t x, int32_t y);
 
   /**
    * Returns the state of all modifier keys.
@@ -222,14 +206,14 @@ class GHOST_SystemX11 : public GHOST_System {
    * \param selection: Get selection, X11 only feature.
    * \return Returns the Clipboard indicated by Flag.
    */
-  GHOST_TUns8 *getClipboard(bool selection) const;
+  char *getClipboard(bool selection) const;
 
   /**
    * Puts buffer to system clipboard
    * \param buffer: The buffer to copy to the clipboard.
    * \param selection: Set the selection into the clipboard, X11 only feature.
    */
-  void putClipboard(GHOST_TInt8 *buffer, bool selection) const;
+  void putClipboard(const char *buffer, bool selection) const;
 
   /**
    * Show a system message box
@@ -269,7 +253,7 @@ class GHOST_SystemX11 : public GHOST_System {
   /**
    * \see GHOST_ISystem
    */
-  int toggleConsole(int /*action*/)
+  int setConsoleWindowState(GHOST_TConsoleWindowState /*action*/)
   {
     return 0;
   }
@@ -351,7 +335,7 @@ class GHOST_SystemX11 : public GHOST_System {
   std::vector<GHOST_WindowX11 *> m_dirty_windows;
 
   /** Start time at initialization. */
-  GHOST_TUns64 m_start_time;
+  uint64_t m_start_time;
 
   /** A vector of keyboard key masks. */
   char m_keyboard_vector[32];

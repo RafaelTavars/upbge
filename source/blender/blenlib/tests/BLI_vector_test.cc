@@ -1,4 +1,4 @@
-/* Apache License, Version 2.0 */
+/* SPDX-License-Identifier: Apache-2.0 */
 
 #include "BLI_exception_safety_test_utils.hh"
 #include "BLI_strict_flags.h"
@@ -248,6 +248,15 @@ TEST(vector, Append)
   EXPECT_EQ(vec[2], 7);
 }
 
+TEST(vector, AppendAs)
+{
+  Vector<StringRef> vec;
+  vec.append_as("hello", 2);
+  vec.append_as("world", 3);
+  EXPECT_EQ(vec[0], "he");
+  EXPECT_EQ(vec[1], "wor");
+}
+
 TEST(vector, AppendAndGetIndex)
 {
   Vector<int> vec;
@@ -255,7 +264,8 @@ TEST(vector, AppendAndGetIndex)
   EXPECT_EQ(vec.append_and_get_index(10), 1);
   EXPECT_EQ(vec.append_and_get_index(10), 2);
   vec.append(10);
-  EXPECT_EQ(vec.append_and_get_index(10), 4);
+  int value = 10;
+  EXPECT_EQ(vec.append_and_get_index(value), 4);
 }
 
 TEST(vector, AppendNonDuplicates)
@@ -438,6 +448,9 @@ TEST(vector, Last)
 {
   Vector<int> a{3, 5, 7};
   EXPECT_EQ(a.last(), 7);
+  EXPECT_EQ(a.last(0), 7);
+  EXPECT_EQ(a.last(1), 5);
+  EXPECT_EQ(a.last(2), 3);
 }
 
 TEST(vector, AppendNTimes)
@@ -467,6 +480,7 @@ TEST(vector, UniquePtrValue)
   vec.remove_and_reorder(0);
   vec.remove(0);
   EXPECT_EQ(vec.size(), 1);
+  EXPECT_EQ(vec.append_and_get_index(std::make_unique<int>(4)), 1);
 
   UNUSED_VARS(a, b);
 }
@@ -697,6 +711,17 @@ TEST(vector, Prepend)
   vec.prepend({7, 8});
   EXPECT_EQ(vec.size(), 5);
   EXPECT_EQ_ARRAY(vec.data(), Span({7, 8, 1, 2, 3}).data(), 5);
+}
+
+TEST(vector, PrependString)
+{
+  std::string s = "test";
+  Vector<std::string> vec;
+  vec.prepend(s);
+  vec.prepend(std::move(s));
+  EXPECT_EQ(vec.size(), 2);
+  EXPECT_EQ(vec[0], "test");
+  EXPECT_EQ(vec[1], "test");
 }
 
 TEST(vector, ReverseIterator)

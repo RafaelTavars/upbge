@@ -29,11 +29,11 @@ Examples
    For more examples of Bullet physics and how to use them
    see the `pybullet forum <https://pybullet.org/Bullet/phpBB3/viewforum.php?f=17>`__.
 
-.. include:: __/examples/bge.constraints.py
+.. include:: ../examples/bge.constraints.py
    :start-line: 1
    :end-line: 4
 
-.. literalinclude:: __/examples/bge.constraints.py
+.. literalinclude:: ../examples/bge.constraints.py
    :lines: 6-
 
 
@@ -294,57 +294,85 @@ Debug mode to be used with :func:`setDebugMode`.
 
    No debug.
 
+   :type: integer
+
 .. data:: DBG_DRAWWIREFRAME
 
    Draw wireframe in debug.
+
+   :type: integer
 
 .. data:: DBG_DRAWAABB
 
    Draw Axis Aligned Bounding Box in debug.
 
+   :type: integer
+
 .. data:: DBG_DRAWFREATURESTEXT
 
    Draw features text in debug.
+
+   :type: integer
 
 .. data:: DBG_DRAWCONTACTPOINTS
 
    Draw contact points in debug.
 
+   :type: integer
+
 .. data:: DBG_NOHELPTEXT
 
    Debug without help text.
+
+   :type: integer
 
 .. data:: DBG_DRAWTEXT
 
    Draw text in debug.
 
+   :type: integer
+
 .. data:: DBG_PROFILETIMINGS
 
    Draw profile timings in debug.
+
+   :type: integer
 
 .. data:: DBG_ENABLESATCOMPARISION
 
    Enable sat comparision in debug.
 
+   :type: integer
+
 .. data:: DBG_DISABLEBULLETLCP
 
    Disable Bullet LCP.
+
+   :type: integer
 
 .. data:: DBG_ENABLECCD
 
    Enable Continous Collision Detection in debug.
 
+   :type: integer
+
 .. data:: DBG_DRAWCONSTRAINTS
 
    Draw constraints in debug.
+
+   :type: integer
 
 .. data:: DBG_DRAWCONSTRAINTLIMITS
 
    Draw constraint limits in debug.
 
+   :type: integer
+
 .. data:: DBG_FASTWIREFRAME
 
    Draw a fast wireframe in debug.
+
+   :type: integer
 
 
 Create Constraint Constants
@@ -357,22 +385,35 @@ Constraint type to be used with :func:`createConstraint`.
 
    .. to do
 
+   :type: integer
+
 .. data:: LINEHINGE_CONSTRAINT
 
    .. to do
+
+   :type: integer
 
 .. data:: ANGULAR_CONSTRAINT
 
    .. to do
 
+   :type: integer
+
 .. data:: CONETWIST_CONSTRAINT
 
    .. to do
+
+   :type: integer
 
 .. data:: VEHICLE_CONSTRAINT
 
    .. to do
 
+   :type: integer
+
 .. data:: GENERIC_6DOF_CONSTRAINT
 
    .. to do
+
+   :type: integer
+

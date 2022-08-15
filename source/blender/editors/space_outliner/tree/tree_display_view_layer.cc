@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup spoutliner
@@ -22,6 +8,7 @@
 
 #include "DNA_collection_types.h"
 #include "DNA_scene_types.h"
+#include "DNA_space_types.h"
 
 #include "BKE_layer.h"
 
@@ -32,12 +19,13 @@
 
 #include "BLT_translation.h"
 
-#include "../outliner_intern.h"
+#include "../outliner_intern.hh"
+#include "common.hh"
 #include "tree_display.hh"
+#include "tree_element.hh"
 
 namespace blender::ed::outliner {
 
-/* Convenience/readability. */
 template<typename T> using List = ListBaseWrapper<T>;
 
 class ObjectsChildrenBuilder {
@@ -60,7 +48,6 @@ class ObjectsChildrenBuilder {
 
 /* -------------------------------------------------------------------- */
 /** \name Tree-Display for a View Layer.
- *
  * \{ */
 
 TreeDisplayViewLayer::TreeDisplayViewLayer(SpaceOutliner &space_outliner)
@@ -68,20 +55,50 @@ TreeDisplayViewLayer::TreeDisplayViewLayer(SpaceOutliner &space_outliner)
 {
 }
 
+bool TreeDisplayViewLayer::supportsModeColumn() const
+{
+  return true;
+}
+
 ListBase TreeDisplayViewLayer::buildTree(const TreeSourceData &source_data)
 {
   ListBase tree = {nullptr};
-
-  view_layer_ = source_data.view_layer;
+  Scene *scene = source_data.scene;
   show_objects_ = !(space_outliner_.filter & SO_FILTER_NO_OBJECT);
 
+  for (auto *view_layer : ListBaseWrapper<ViewLayer>(scene->view_layers)) {
+    view_layer_ = view_layer;
+
+    if (space_outliner_.filter & SO_FILTER_NO_VIEW_LAYERS) {
+      if (view_layer != source_data.view_layer) {
+        continue;
+      }
+
+      add_view_layer(*scene, tree, (TreeElement *)nullptr);
+    }
+    else {
+      TreeElement &te_view_layer = *outliner_add_element(
+          &space_outliner_, &tree, scene, nullptr, TSE_R_LAYER, 0);
+      TREESTORE(&te_view_layer)->flag &= ~TSE_CLOSED;
+      te_view_layer.name = view_layer->name;
+      te_view_layer.directdata = view_layer;
+
+      add_view_layer(*scene, te_view_layer.subtree, &te_view_layer);
+    }
+  }
+
+  return tree;
+}
+
+void TreeDisplayViewLayer::add_view_layer(Scene &scene, ListBase &tree, TreeElement *parent)
+{
   const bool show_children = (space_outliner_.filter & SO_FILTER_NO_CHILDREN) == 0;
 
   if (space_outliner_.filter & SO_FILTER_NO_COLLECTION) {
     /* Show objects in the view layer. */
     for (Base *base : List<Base>(view_layer_->object_bases)) {
       TreeElement *te_object = outliner_add_element(
-          &space_outliner_, &tree, base->object, nullptr, 0, 0);
+          &space_outliner_, &tree, base->object, parent, TSE_SOME_ID, 0);
       te_object->directdata = base;
     }
 
@@ -92,30 +109,23 @@ ListBase TreeDisplayViewLayer::buildTree(const TreeSourceData &source_data)
   else {
     /* Show collections in the view layer. */
     TreeElement &ten = *outliner_add_element(
-        &space_outliner_, &tree, source_data.scene, nullptr, TSE_VIEW_COLLECTION_BASE, 0);
+        &space_outliner_, &tree, &scene, parent, TSE_VIEW_COLLECTION_BASE, 0);
     ten.name = IFACE_("Scene Collection");
     TREESTORE(&ten)->flag &= ~TSE_CLOSED;
 
-    add_view_layer(ten.subtree, ten);
+    /* First layer collection is for master collection, don't show it. */
+    LayerCollection *lc = static_cast<LayerCollection *>(view_layer_->layer_collections.first);
+    if (lc == nullptr) {
+      return;
+    }
+
+    add_layer_collections_recursive(ten.subtree, lc->layer_collections, ten);
+    if (show_objects_) {
+      add_layer_collection_objects(ten.subtree, *lc, ten);
+    }
     if (show_children) {
       add_layer_collection_objects_children(ten);
     }
-  }
-
-  return tree;
-}
-
-void TreeDisplayViewLayer::add_view_layer(ListBase &tree, TreeElement &parent)
-{
-  /* First layer collection is for master collection, don't show it. */
-  LayerCollection *lc = static_cast<LayerCollection *>(view_layer_->layer_collections.first);
-  if (lc == nullptr) {
-    return;
-  }
-
-  add_layer_collections_recursive(tree, lc->layer_collections, parent);
-  if (show_objects_) {
-    add_layer_collection_objects(tree, *lc, parent);
   }
 }
 
@@ -143,10 +153,6 @@ void TreeDisplayViewLayer::add_layer_collections_recursive(ListBase &tree,
       if (!(tselem->used || ID_IS_LINKED(id) || ID_IS_OVERRIDE_LIBRARY(id))) {
         tselem->flag &= ~TSE_CLOSED;
       }
-
-      if (exclude || (lc->runtime_flag & LAYER_COLLECTION_VISIBLE_VIEW_LAYER) == 0) {
-        ten->flag |= TE_DISABLED;
-      }
     }
 
     add_layer_collections_recursive(ten->subtree, lc->layer_collections, *ten);
@@ -163,12 +169,8 @@ void TreeDisplayViewLayer::add_layer_collection_objects(ListBase &tree,
   for (CollectionObject *cob : List<CollectionObject>(lc.collection->gobject)) {
     Base *base = BKE_view_layer_base_find(view_layer_, cob->ob);
     TreeElement *te_object = outliner_add_element(
-        &space_outliner_, &tree, base->object, &ten, 0, 0);
+        &space_outliner_, &tree, base->object, &ten, TSE_SOME_ID, 0);
     te_object->directdata = base;
-
-    if (!(base->flag & BASE_VISIBLE_VIEWLAYER)) {
-      te_object->flag |= TE_DISABLED;
-    }
   }
 }
 
@@ -212,7 +214,7 @@ void ObjectsChildrenBuilder::object_tree_elements_lookup_create_recursive(TreeEl
       continue;
     }
 
-    if (tselem->type == 0 && te->idcode == ID_OB) {
+    if ((tselem->type == TSE_SOME_ID) && (te->idcode == ID_OB)) {
       Object *ob = (Object *)tselem->id;
       /* Lookup children or add new, empty children vector. */
       Vector<TreeElement *> &tree_elements = object_tree_elements_map_.lookup_or_add(ob, {});
@@ -269,10 +271,14 @@ void ObjectsChildrenBuilder::make_object_parent_hierarchy_collections()
 
       if (!found) {
         /* We add the child in the tree even if it is not in the collection.
-         * We deliberately clear its sub-tree though, to make it less prominent. */
-        TreeElement *child_ob_tree_element = outliner_add_element(
-            &outliner_, &parent_ob_tree_element->subtree, child, parent_ob_tree_element, 0, 0);
-        outliner_free_tree(&child_ob_tree_element->subtree);
+         * We don't expand its sub-tree though, to make it less prominent. */
+        TreeElement *child_ob_tree_element = outliner_add_element(&outliner_,
+                                                                  &parent_ob_tree_element->subtree,
+                                                                  child,
+                                                                  parent_ob_tree_element,
+                                                                  TSE_SOME_ID,
+                                                                  0,
+                                                                  false);
         child_ob_tree_element->flag |= TE_CHILD_NOT_IN_COLLECTION;
         child_ob_tree_elements.append(child_ob_tree_element);
       }

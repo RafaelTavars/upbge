@@ -31,8 +31,6 @@
 
 #include "DummyPhysicsEnvironment.h"
 
-
-
 DummyPhysicsEnvironment::DummyPhysicsEnvironment()
 {
   // create physicsengine data
@@ -95,7 +93,8 @@ PHY_IConstraint *DummyPhysicsEnvironment::CreateConstraint(class PHY_IPhysicsCon
                                                            float axis2X,
                                                            float axis2Y,
                                                            float axis2Z,
-                                                           int flag)
+                                                           int flag,
+                                                           bool replicate_dupli)
 {
   return nullptr;
 }

@@ -22,7 +22,6 @@
 
 #pragma once
 
-
 #include "LinearMath/btTransform.h"
 #include "btBulletDynamicsCommon.h"
 
@@ -31,7 +30,6 @@
 #include "PHY_IMotionState.h"
 
 class CcdPhysicsEnvironment;
-class btCollisionObject;
 
 /// CcdGraphicController is a graphic object that supports view frustrum culling and occlusion
 class CcdGraphicController : public PHY_IGraphicController {
@@ -94,4 +92,3 @@ class CcdGraphicController : public PHY_IGraphicController {
   btBroadphaseProxy *m_handle;
   void *m_newClientInfo;
 };
-

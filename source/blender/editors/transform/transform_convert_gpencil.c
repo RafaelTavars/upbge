@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2001-2002 by NaN Holding BV.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2001-2002 NaN Holding BV. All rights reserved. */
 
 /** \file
  * \ingroup edtransform
@@ -37,13 +21,13 @@
 #include "BKE_gpencil_geom.h"
 
 #include "ED_gpencil.h"
+#include "ED_keyframing.h"
 
 #include "transform.h"
 #include "transform_convert.h"
 
 /* -------------------------------------------------------------------- */
 /** \name Gpencil Transform Creation
- *
  * \{ */
 
 static void createTransGPencil_center_get(bGPDstroke *gps, float r_center[3])
@@ -78,14 +62,12 @@ static short get_bezt_sel_triple_flag(BezTriple *bezt, const bool handles_visibl
     flag = ((bezt->f1 & SELECT) ? SEL_F1 : 0) | ((bezt->f2 & SELECT) ? SEL_F2 : 0) |
            ((bezt->f3 & SELECT) ? SEL_F3 : 0);
   }
-  else {
-    if (bezt->f2 & SELECT) {
-      flag = SEL_ALL;
-    }
+  else if (bezt->f2 & SELECT) {
+    flag = SEL_ALL;
   }
 
   /* Special case for auto & aligned handles */
-  if (flag != SEL_ALL && flag & SEL_F2) {
+  if ((flag != SEL_ALL) && (flag & SEL_F2)) {
     if (ELEM(bezt->h1, HD_AUTO, HD_ALIGN) && ELEM(bezt->h2, HD_AUTO, HD_ALIGN)) {
       flag = SEL_ALL;
     }
@@ -115,6 +97,7 @@ static void createTransGPencil_curves(bContext *C,
 #define SEL_F3 (1 << 2)
 
   View3D *v3d = t->view;
+  Scene *scene = CTX_data_scene(C);
   const bool handle_only_selected_visible = (v3d->overlay.handle_display == CURVE_HANDLE_SELECTED);
   const bool handle_all_visible = (v3d->overlay.handle_display == CURVE_HANDLE_ALL);
 
@@ -135,7 +118,7 @@ static void createTransGPencil_curves(bContext *C,
               continue;
             }
             /* Check if the color is editable. */
-            if (ED_gpencil_stroke_color_use(obact, gpl, gps) == false) {
+            if (ED_gpencil_stroke_material_editable(obact, gpl, gps) == false) {
               continue;
             }
             /* Check if stroke has an editcurve */
@@ -177,7 +160,7 @@ static void createTransGPencil_curves(bContext *C,
           }
         }
 
-        /* If not multiedit out of loop. */
+        /* If not multi-edit out of loop. */
         if (!is_multiedit) {
           break;
         }
@@ -231,7 +214,9 @@ static void createTransGPencil_curves(bContext *C,
       }
 
       if ((gpf->framenum != cfra) && (!is_multiedit)) {
-        gpf = BKE_gpencil_frame_addcopy(gpl, cfra);
+        if (IS_AUTOKEY_ON(scene)) {
+          gpf = BKE_gpencil_frame_addcopy(gpl, cfra);
+        }
         /* in some weird situations (framelock enabled) return NULL */
         if (gpf == NULL) {
           continue;
@@ -242,7 +227,7 @@ static void createTransGPencil_curves(bContext *C,
       }
 
       /* Calculate difference matrix. */
-      BKE_gpencil_parent_matrix_get(depsgraph, obact, gpl, diff_mat);
+      BKE_gpencil_layer_transform_matrix_get(depsgraph, obact, gpl, diff_mat);
       copy_m3_m4(mtx, diff_mat);
       pseudoinverse_m3_m3(smtx, mtx, PSEUDOINVERSE_EPSILON);
 
@@ -263,7 +248,7 @@ static void createTransGPencil_curves(bContext *C,
               continue;
             }
             /* Check if the color is editable. */
-            if (ED_gpencil_stroke_color_use(obact, gpl, gps) == false) {
+            if (ED_gpencil_stroke_material_editable(obact, gpl, gps) == false) {
               continue;
             }
             /* Check if stroke has an editcurve */
@@ -313,7 +298,7 @@ static void createTransGPencil_curves(bContext *C,
                     }
                   }
                   else if (handles_visible) {
-                    if (BEZT_ISSEL_IDX(bezt, j)) {
+                    if (sel) {
                       td->flag = TD_SELECTED;
                     }
                     else {
@@ -381,7 +366,7 @@ static void createTransGPencil_curves(bContext *C,
           }
         }
 
-        /* If not multiedit out of loop. */
+        /* If not multi-edit out of loop. */
         if (!is_multiedit) {
           break;
         }
@@ -406,6 +391,7 @@ static void createTransGPencil_strokes(bContext *C,
                                        const bool is_prop_edit_connected,
                                        const bool is_scale_thickness)
 {
+  Scene *scene = CTX_data_scene(C);
   TransData *td = NULL;
   float mtx[3][3], smtx[3][3];
 
@@ -436,7 +422,7 @@ static void createTransGPencil_strokes(bContext *C,
               continue;
             }
             /* Check if the color is editable. */
-            if (ED_gpencil_stroke_color_use(obact, gpl, gps) == false) {
+            if (ED_gpencil_stroke_material_editable(obact, gpl, gps) == false) {
               continue;
             }
 
@@ -468,7 +454,7 @@ static void createTransGPencil_strokes(bContext *C,
             }
           }
         }
-        /* If not multiedit out of loop. */
+        /* If not multi-edit out of loop. */
         if (!is_multiedit) {
           break;
         }
@@ -494,8 +480,8 @@ static void createTransGPencil_strokes(bContext *C,
     if (BKE_gpencil_layer_is_editable(gpl) && (gpl->actframe != NULL)) {
       const int cfra = (gpl->flag & GP_LAYER_FRAMELOCK) ? gpl->actframe->framenum : cfra_scene;
       bGPDframe *gpf = gpl->actframe;
-      float diff_mat[4][4];
-      float inverse_diff_mat[4][4];
+      float diff_mat[3][3];
+      float inverse_diff_mat[3][3];
 
       bGPDframe *init_gpf = (is_multiedit) ? gpl->frames.first : gpl->actframe;
       /* Init multiframe falloff options. */
@@ -507,9 +493,14 @@ static void createTransGPencil_strokes(bContext *C,
       }
 
       /* Calculate difference matrix. */
-      BKE_gpencil_parent_matrix_get(depsgraph, obact, gpl, diff_mat);
-      /* Undo matrix. */
-      invert_m4_m4(inverse_diff_mat, diff_mat);
+      {
+        float diff_mat_tmp[4][4];
+        BKE_gpencil_layer_transform_matrix_get(depsgraph, obact, gpl, diff_mat_tmp);
+        copy_m3_m4(diff_mat, diff_mat_tmp);
+      }
+
+      /* Use safe invert for cases where the input matrix has zero axes. */
+      invert_m3_m3_safe_ortho(inverse_diff_mat, diff_mat);
 
       /* Make a new frame to work on if the layer's frame
        * and the current scene frame don't match up.
@@ -518,7 +509,9 @@ static void createTransGPencil_strokes(bContext *C,
        *   spent too much time editing the wrong frame...
        */
       if ((gpf->framenum != cfra) && (!is_multiedit)) {
-        gpf = BKE_gpencil_frame_addcopy(gpl, cfra);
+        if (IS_AUTOKEY_ON(scene)) {
+          gpf = BKE_gpencil_frame_addcopy(gpl, cfra);
+        }
         /* in some weird situations (framelock enabled) return NULL */
         if (gpf == NULL) {
           continue;
@@ -551,7 +544,7 @@ static void createTransGPencil_strokes(bContext *C,
               continue;
             }
             /* check if the color is editable */
-            if (ED_gpencil_stroke_color_use(obact, gpl, gps) == false) {
+            if (ED_gpencil_stroke_material_editable(obact, gpl, gps) == false) {
               continue;
             }
             /* What we need to include depends on proportional editing settings... */
@@ -647,9 +640,9 @@ static void createTransGPencil_strokes(bContext *C,
                     }
                   }
                   /* apply parent transformations */
-                  copy_m3_m4(td->smtx, inverse_diff_mat); /* final position */
-                  copy_m3_m4(td->mtx, diff_mat);          /* display position */
-                  copy_m3_m4(td->axismtx, diff_mat);      /* axis orientation */
+                  copy_m3_m3(td->smtx, inverse_diff_mat); /* final position */
+                  copy_m3_m3(td->mtx, diff_mat);          /* display position */
+                  copy_m3_m3(td->axismtx, diff_mat);      /* axis orientation */
 
                   /* Triangulation must be calculated again,
                    * so save the stroke for recalc function */
@@ -670,7 +663,7 @@ static void createTransGPencil_strokes(bContext *C,
             }
           }
         }
-        /* if not multiedit out of loop */
+        /* If not multi-edit out of loop. */
         if (!is_multiedit) {
           break;
         }
@@ -679,7 +672,7 @@ static void createTransGPencil_strokes(bContext *C,
   }
 }
 
-void createTransGPencil(bContext *C, TransInfo *t)
+static void createTransGPencil(bContext *C, TransInfo *t)
 {
   if (t->data_container_len == 0) {
     return;
@@ -688,11 +681,11 @@ void createTransGPencil(bContext *C, TransInfo *t)
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
   const Scene *scene = CTX_data_scene(C);
   ToolSettings *ts = scene->toolsettings;
-  Object *obact = CTX_data_active_object(C);
+  Object *obact = OBACT(t->view_layer);
   bGPdata *gpd = obact->data;
   BLI_assert(gpd != NULL);
 
-  const int cfra_scene = CFRA;
+  const int cfra_scene = scene->r.cfra;
 
   const bool is_multiedit = (bool)GPENCIL_MULTIEDIT_SESSIONS_ON(gpd);
   const bool use_multiframe_falloff = (ts->gp_sculpt.flag & GP_SCULPT_SETT_FLAG_FRAME_FALLOFF) !=
@@ -744,8 +737,7 @@ void createTransGPencil(bContext *C, TransInfo *t)
   }
 }
 
-/* force recalculation of triangles during transformation */
-void recalcData_gpencil_strokes(TransInfo *t)
+static void recalcData_gpencil_strokes(TransInfo *t)
 {
   TransDataContainer *tc = TRANS_DATA_CONTAINER_FIRST_SINGLE(t);
   GHash *strokes = BLI_ghash_ptr_new(__func__);
@@ -770,3 +762,10 @@ void recalcData_gpencil_strokes(TransInfo *t)
 }
 
 /** \} */
+
+TransConvertTypeInfo TransConvertType_GPencil = {
+    /* flags */ (T_EDIT | T_POINTS),
+    /* createTransData */ createTransGPencil,
+    /* recalcData */ recalcData_gpencil_strokes,
+    /* special_aftertrans_update */ NULL,
+};

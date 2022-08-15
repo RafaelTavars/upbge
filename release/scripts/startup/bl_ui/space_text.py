@@ -1,22 +1,4 @@
-# ##### BEGIN GPL LICENSE BLOCK #####
-#
-#  This program is free software; you can redistribute it and/or
-#  modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2
-#  of the License, or (at your option) any later version.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software Foundation,
-#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# ##### END GPL LICENSE BLOCK #####
-
-# <pep8-80 compliant>
+# SPDX-License-Identifier: GPL-2.0-or-later
 import bpy
 from bpy.types import Header, Menu, Panel
 from bpy.app.translations import pgettext_iface as iface_
@@ -268,10 +250,7 @@ class TEXT_MT_text(Menu):
                 layout.operator("text.make_internal")
 
             layout.separator()
-            row = layout.row()
-            row.active = text.name.endswith(".py")
-            row.prop(text, "use_module")
-            row = layout.row()
+            layout.prop(text, "use_module")
 
             layout.prop(st, "use_live_edit")
 
@@ -284,7 +263,7 @@ class TEXT_MT_templates_py(Menu):
 
     def draw(self, _context):
         self.path_menu(
-            bpy.utils.script_paths("templates_py"),
+            bpy.utils.script_paths(subdir="templates_py"),
             "text.open",
             props_default={"internal": True},
             filter_ext=lambda ext: (ext.lower() == ".py")
@@ -295,7 +274,7 @@ class TEXT_MT_templates_py_components(Menu):
 
     def draw(self, _context):
         self.path_menu(
-            bpy.utils.script_paths("templates_py_components"),
+            bpy.utils.script_paths(subdir="templates_py_components"),
             "text.open",
             props_default={"internal": True},
             filter_ext=lambda ext: (ext.lower() == ".py")
@@ -307,7 +286,7 @@ class TEXT_MT_templates_osl(Menu):
 
     def draw(self, _context):
         self.path_menu(
-            bpy.utils.script_paths("templates_osl"),
+            bpy.utils.script_paths(subdir="templates_osl"),
             "text.open",
             props_default={"internal": True},
             filter_ext=lambda ext: (ext.lower() == ".osl")
@@ -319,7 +298,7 @@ class TEXT_MT_templates_glsl(Menu):
 
     def draw(self, _context):
         self.path_menu(
-            bpy.utils.script_paths("templates_glsl"),
+            bpy.utils.script_paths(subdir="templates_glsl"),
             "text.open",
             props_default={"internal": True},
             filter_ext=lambda ext: (ext.lower() == ".glsl")

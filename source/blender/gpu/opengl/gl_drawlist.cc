@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2016 by Mike Erwin.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2016 by Mike Erwin. All rights reserved. */
 
 /** \file
  * \ingroup gpu
@@ -27,9 +11,6 @@
 #include "BLI_assert.h"
 
 #include "GPU_batch.h"
-#include "GPU_capabilities.h"
-
-#include "glew-mx.h"
 
 #include "gpu_context_private.hh"
 #include "gpu_drawlist_private.hh"
@@ -68,8 +49,8 @@ GLDrawList::GLDrawList(int length)
   batch_ = nullptr;
   buffer_id_ = 0;
   command_len_ = 0;
+  base_index_ = 0;
   command_offset_ = 0;
-  data_offset_ = 0;
   data_size_ = 0;
   data_ = nullptr;
 
@@ -81,6 +62,8 @@ GLDrawList::GLDrawList(int length)
     /* Indicates MDI is not supported. */
     buffer_size_ = 0;
   }
+  /* Force buffer specification on first init. */
+  data_offset_ = buffer_size_;
 }
 
 GLDrawList::~GLDrawList()
@@ -104,10 +87,11 @@ void GLDrawList::init()
 
   glBindBuffer(GL_DRAW_INDIRECT_BUFFER, buffer_id_);
   /* If buffer is full, orphan buffer data and start fresh. */
-  // if (command_offset_ >= data_size_) {
-  glBufferData(GL_DRAW_INDIRECT_BUFFER, buffer_size_, nullptr, GL_DYNAMIC_DRAW);
-  data_offset_ = 0;
-  // }
+  size_t command_size = MDI_INDEXED ? sizeof(GLDrawCommandIndexed) : sizeof(GLDrawCommand);
+  if (data_offset_ + command_size > buffer_size_) {
+    glBufferData(GL_DRAW_INDIRECT_BUFFER, buffer_size_, nullptr, GL_DYNAMIC_DRAW);
+    data_offset_ = 0;
+  }
   /* Map the remaining range. */
   GLbitfield flag = GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_FLUSH_EXPLICIT_BIT;
   data_size_ = buffer_size_ - data_offset_;
@@ -151,7 +135,6 @@ void GLDrawList::append(GPUBatch *gpu_batch, int i_first, int i_count)
     cmd->i_count = i_count;
     cmd->base_index = base_index_;
     cmd->i_first = i_first;
-    command_offset_ += sizeof(GLDrawCommandIndexed);
   }
   else {
     GLDrawCommand *cmd = reinterpret_cast<GLDrawCommand *>(data_ + command_offset_);
@@ -159,12 +142,15 @@ void GLDrawList::append(GPUBatch *gpu_batch, int i_first, int i_count)
     cmd->v_count = v_count_;
     cmd->i_count = i_count;
     cmd->i_first = i_first;
-    command_offset_ += sizeof(GLDrawCommand);
   }
 
+  size_t command_size = MDI_INDEXED ? sizeof(GLDrawCommandIndexed) : sizeof(GLDrawCommand);
+
+  command_offset_ += command_size;
   command_len_++;
 
-  if (command_offset_ >= data_size_) {
+  /* Check if we can fit at least one other command. */
+  if (command_offset_ + command_size > data_size_) {
     this->submit();
   }
 }
@@ -179,10 +165,12 @@ void GLDrawList::submit()
   BLI_assert(data_);
   BLI_assert(GLContext::get()->shader != nullptr);
 
+  size_t command_size = MDI_INDEXED ? sizeof(GLDrawCommandIndexed) : sizeof(GLDrawCommand);
+
   /* Only do multi-draw indirect if doing more than 2 drawcall. This avoids the overhead of
    * buffer mapping if scene is not very instance friendly. BUT we also need to take into
    * account the case where only a few instances are needed to finish filling a call buffer. */
-  const bool is_finishing_a_buffer = (command_offset_ >= data_size_);
+  const bool is_finishing_a_buffer = (command_offset_ + command_size > data_size_);
   if (command_len_ > 2 || is_finishing_a_buffer) {
     GLenum prim = to_gl(batch_->prim_type);
     void *offset = (void *)data_offset_;
@@ -229,5 +217,3 @@ void GLDrawList::submit()
   /* Avoid keeping reference to the batch. */
   batch_ = nullptr;
 }
-
-/** \} */

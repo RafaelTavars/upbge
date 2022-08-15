@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) Blender Foundation
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup bke
@@ -42,6 +26,7 @@
 #include "BKE_cloth.h"
 #include "BKE_effect.h"
 #include "BKE_global.h"
+#include "BKE_lib_id.h"
 #include "BKE_mesh.h"
 #include "BKE_mesh_runtime.h"
 #include "BKE_modifier.h"
@@ -96,7 +81,7 @@ static BVHTree *bvhtree_build_from_cloth(ClothModifierData *clmd, float epsilon)
     return NULL;
   }
 
-  /* create quadtree with k=26 */
+  /* Create quad-tree with k=26. */
   BVHTree *bvhtree = BLI_bvhtree_new(cloth->primitive_num, epsilon, 4, 26);
 
   /* fill tree */
@@ -262,17 +247,19 @@ static bool do_init_cloth(Object *ob, ClothModifierData *clmd, Mesh *result, int
 static int do_step_cloth(
     Depsgraph *depsgraph, Object *ob, ClothModifierData *clmd, Mesh *result, int framenr)
 {
+  /* simulate 1 frame forward */
   ClothVertex *verts = NULL;
   Cloth *cloth;
   ListBase *effectors = NULL;
   MVert *mvert;
   unsigned int i = 0;
   int ret = 0;
+  bool vert_mass_changed = false;
 
-  /* simulate 1 frame forward */
   cloth = clmd->clothObject;
   verts = cloth->verts;
   mvert = result->mvert;
+  vert_mass_changed = verts->mass != clmd->sim_parms->mass;
 
   /* force any pinned verts to their constrained location. */
   for (i = 0; i < clmd->clothObject->mvert_num; i++, verts++) {
@@ -283,9 +270,14 @@ static int do_step_cloth(
     /* Get the current position. */
     copy_v3_v3(verts->xconst, mvert[i].co);
     mul_m4_v3(ob->obmat, verts->xconst);
+
+    if (vert_mass_changed) {
+      verts->mass = clmd->sim_parms->mass;
+      SIM_mass_spring_set_implicit_vertex_mass(cloth->implicit, i, verts->mass);
+    }
   }
 
-  effectors = BKE_effectors_create(depsgraph, ob, NULL, clmd->sim_parms->effector_weights);
+  effectors = BKE_effectors_create(depsgraph, ob, NULL, clmd->sim_parms->effector_weights, false);
 
   if (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH) {
     cloth_update_verts(ob, clmd, result);
@@ -318,6 +310,7 @@ static int do_step_cloth(
 /************************************************
  * clothModifier_do - main simulation function
  ************************************************/
+
 void clothModifier_do(ClothModifierData *clmd,
                       Depsgraph *depsgraph,
                       Scene *scene,
@@ -425,7 +418,6 @@ void clothModifier_do(ClothModifierData *clmd,
   clmd->clothObject->last_frame = framenr;
 }
 
-/* frees all */
 void cloth_free_modifier(ClothModifierData *clmd)
 {
   Cloth *cloth = NULL;
@@ -440,11 +432,7 @@ void cloth_free_modifier(ClothModifierData *clmd)
     SIM_cloth_solver_free(clmd);
 
     /* Free the verts. */
-    if (cloth->verts != NULL) {
-      MEM_freeN(cloth->verts);
-    }
-
-    cloth->verts = NULL;
+    MEM_SAFE_FREE(cloth->verts);
     cloth->mvert_num = 0;
 
     /* Free the springs. */
@@ -500,7 +488,6 @@ void cloth_free_modifier(ClothModifierData *clmd)
   }
 }
 
-/* frees all */
 void cloth_free_modifier_extern(ClothModifierData *clmd)
 {
   Cloth *cloth = NULL;
@@ -522,11 +509,7 @@ void cloth_free_modifier_extern(ClothModifierData *clmd)
     SIM_cloth_solver_free(clmd);
 
     /* Free the verts. */
-    if (cloth->verts != NULL) {
-      MEM_freeN(cloth->verts);
-    }
-
-    cloth->verts = NULL;
+    MEM_SAFE_FREE(cloth->verts);
     cloth->mvert_num = 0;
 
     /* Free the springs. */
@@ -597,7 +580,7 @@ static void cloth_to_object(Object *ob, ClothModifierData *clmd, float (*vertexC
   Cloth *cloth = clmd->clothObject;
 
   if (clmd->clothObject) {
-    /* inverse matrix is not uptodate... */
+    /* Inverse matrix is not up to date. */
     invert_m4_m4(ob->imat, ob->obmat);
 
     for (i = 0; i < cloth->mvert_num; i++) {
@@ -649,7 +632,7 @@ static void cloth_apply_vgroup(ClothModifierData *clmd, Mesh *mesh)
       verts->flags &= ~(CLOTH_VERT_FLAG_PINNED | CLOTH_VERT_FLAG_NOSELFCOLL |
                         CLOTH_VERT_FLAG_NOOBJCOLL);
 
-      MDeformVert *dvert = CustomData_get(&mesh->vdata, i, CD_MDEFORMVERT);
+      const MDeformVert *dvert = CustomData_get(&mesh->vdata, i, CD_MDEFORMVERT);
       if (dvert) {
         for (int j = 0; j < dvert->totweight; j++) {
           if (dvert->dw[j].def_nr == (clmd->sim_parms->vgroup_mass - 1)) {
@@ -732,7 +715,7 @@ static bool cloth_from_object(
   int i = 0;
   MVert *mvert = NULL;
   ClothVertex *verts = NULL;
-  float(*shapekey_rest)[3] = NULL;
+  const float(*shapekey_rest)[3] = NULL;
   const float tnull[3] = {0, 0, 0};
 
   /* If we have a clothObject, free it. */
@@ -991,7 +974,7 @@ static void cloth_hair_update_bending_targets(ClothModifierData *clmd)
     return;
   }
 
-  /* XXX Note: we need to propagate frames from the root up,
+  /* XXX NOTE: we need to propagate frames from the root up,
    * but structural hair springs are stored in reverse order.
    * The bending springs however are then inserted in the same
    * order as vertices again ...
@@ -1049,7 +1032,7 @@ static void cloth_hair_update_bending_rest_targets(ClothModifierData *clmd)
     return;
   }
 
-  /* XXX Note: we need to propagate frames from the root up,
+  /* XXX NOTE: we need to propagate frames from the root up,
    * but structural hair springs are stored in reverse order.
    * The bending springs however are then inserted in the same
    * order as vertices again ...
@@ -1144,7 +1127,7 @@ static void cloth_update_springs(ClothModifierData *clmd)
       spring->lin_stiffness = (v1->bend_stiff + v2->bend_stiff) / 2.0f;
     }
     else if (spring->type == CLOTH_SPRING_TYPE_GOAL) {
-      /* Warning: Appending NEW goal springs does not work
+      /* WARNING: Appending NEW goal springs does not work
        * because implicit solver would need reset! */
 
       /* Activate / Deactivate existing springs */
@@ -1188,6 +1171,7 @@ static Mesh *cloth_make_rest_mesh(ClothModifierData *clmd, Mesh *mesh)
   for (unsigned i = 0; i < mesh->totvert; i++, verts++) {
     copy_v3_v3(mvert[i].co, verts->xrest);
   }
+  BKE_mesh_tag_coords_changed(new_mesh);
 
   return new_mesh;
 }
@@ -1401,8 +1385,7 @@ static bool find_internal_spring_target_vertex(BVHTreeFromMesh *treedata,
   float radius;
 
   copy_v3_v3(co, treedata->vert[v_idx].co);
-  normal_short_to_float_v3(no, treedata->vert[v_idx].no);
-  negate_v3(no);
+  negate_v3_v3(no, treedata->vert_normals[v_idx]);
 
   float vec_len = sin(max_diversion);
   float offset[3];
@@ -1525,7 +1508,6 @@ static bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
     if (clmd->sim_parms->shapekey_rest &&
         !(clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH)) {
       tmp_mesh = cloth_make_rest_mesh(clmd, mesh);
-      BKE_mesh_calc_normals(tmp_mesh);
     }
 
     EdgeSet *existing_vert_pairs = BLI_edgeset_new("cloth_sewing_edges_graph");
@@ -1575,7 +1557,7 @@ static bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
           BLI_edgeset_free(existing_vert_pairs);
           free_bvhtree_from_mesh(&treedata);
           if (tmp_mesh) {
-            BKE_mesh_free(tmp_mesh);
+            BKE_id_free(NULL, &tmp_mesh->id);
           }
           return false;
         }
@@ -1584,7 +1566,7 @@ static bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
     BLI_edgeset_free(existing_vert_pairs);
     free_bvhtree_from_mesh(&treedata);
     if (tmp_mesh) {
-      BKE_mesh_free(tmp_mesh);
+      BKE_id_free(NULL, &tmp_mesh->id);
     }
     BLI_rng_free(rng);
   }
@@ -1843,7 +1825,7 @@ static bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
     else {
       /* bending springs for hair strands
        * The current algorithm only goes through the edges in order of the mesh edges list
-       * and makes springs between the outer vert of edges sharing a vertice. This works just
+       * and makes springs between the outer vert of edges sharing a vertex. This works just
        * fine for hair, but not for user generated string meshes. This could/should be later
        * extended to work with non-ordered edges so that it can be used for general "rope
        * dynamics" without the need for the vertices or edges to be ordered through the length
@@ -1883,7 +1865,7 @@ static bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
     cloth_hair_update_bending_rest_targets(clmd);
   }
 
-  /* note: the edges may already exist so run reinsert */
+  /* NOTE: the edges may already exist so run reinsert. */
 
   /* insert other near springs in edgeset AFTER bending springs are calculated (for selfcolls) */
   for (int i = 0; i < numedges; i++) { /* struct springs */

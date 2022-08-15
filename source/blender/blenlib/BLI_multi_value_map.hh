@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 #pragma once
 
@@ -38,6 +24,9 @@
 namespace blender {
 
 template<typename Key, typename Value> class MultiValueMap {
+ public:
+  using size_type = int64_t;
+
  private:
   using MapType = Map<Key, Vector<Value>>;
   MapType map_;
@@ -68,6 +57,12 @@ template<typename Key, typename Value> class MultiValueMap {
   {
     Vector<Value> &vector = map_.lookup_or_add_default_as(std::forward<ForwardKey>(key));
     vector.append(std::forward<ForwardValue>(value));
+  }
+
+  void add_non_duplicates(const Key &key, const Value &value)
+  {
+    Vector<Value> &vector = map_.lookup_or_add_default_as(key);
+    vector.append_non_duplicates(value);
   }
 
   /**
@@ -104,7 +99,23 @@ template<typename Key, typename Value> class MultiValueMap {
   }
 
   /**
-   * Note: This signature will change when the implementation changes.
+   * Get a mutable span to all the values that are stored for the given key.
+   */
+  MutableSpan<Value> lookup(const Key &key)
+  {
+    return this->lookup_as(key);
+  }
+  template<typename ForwardKey> MutableSpan<Value> lookup_as(const ForwardKey &key)
+  {
+    Vector<Value> *vector = map_.lookup_ptr_as(key);
+    if (vector != nullptr) {
+      return vector->as_mutable_span();
+    }
+    return {};
+  }
+
+  /**
+   * NOTE: This signature will change when the implementation changes.
    */
   typename MapType::ItemIterator items() const
   {
@@ -112,7 +123,7 @@ template<typename Key, typename Value> class MultiValueMap {
   }
 
   /**
-   * Note: This signature will change when the implementation changes.
+   * NOTE: This signature will change when the implementation changes.
    */
   typename MapType::KeyIterator keys() const
   {
@@ -120,7 +131,7 @@ template<typename Key, typename Value> class MultiValueMap {
   }
 
   /**
-   * Note: This signature will change when the implementation changes.
+   * NOTE: This signature will change when the implementation changes.
    */
   typename MapType::ValueIterator values() const
   {

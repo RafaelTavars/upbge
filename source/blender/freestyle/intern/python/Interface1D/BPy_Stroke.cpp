@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup freestyle
@@ -30,6 +16,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+using namespace Freestyle;
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
@@ -501,43 +489,39 @@ PyTypeObject Stroke_Type = {
     sizeof(BPy_Stroke),                         /* tp_basicsize */
     0,                                          /* tp_itemsize */
     nullptr,                                    /* tp_dealloc */
-#if PY_VERSION_HEX >= 0x03080000
-    0, /* tp_vectorcall_offset */
-#else
-    nullptr, /* tp_print */
-#endif
-    nullptr,                                  /* tp_getattr */
-    nullptr,                                  /* tp_setattr */
-    nullptr,                                  /* tp_reserved */
-    nullptr,                                  /* tp_repr */
-    nullptr,                                  /* tp_as_number */
-    &BPy_Stroke_as_sequence,                  /* tp_as_sequence */
-    nullptr,                                  /* tp_as_mapping */
-    nullptr,                                  /* tp_hash  */
-    nullptr,                                  /* tp_call */
-    nullptr,                                  /* tp_str */
-    nullptr,                                  /* tp_getattro */
-    nullptr,                                  /* tp_setattro */
-    nullptr,                                  /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-    Stroke_doc,                               /* tp_doc */
-    nullptr,                                  /* tp_traverse */
-    nullptr,                                  /* tp_clear */
-    nullptr,                                  /* tp_richcompare */
-    0,                                        /* tp_weaklistoffset */
-    (getiterfunc)Stroke_iter,                 /* tp_iter */
-    nullptr,                                  /* tp_iternext */
-    BPy_Stroke_methods,                       /* tp_methods */
-    nullptr,                                  /* tp_members */
-    BPy_Stroke_getseters,                     /* tp_getset */
-    &Interface1D_Type,                        /* tp_base */
-    nullptr,                                  /* tp_dict */
-    nullptr,                                  /* tp_descr_get */
-    nullptr,                                  /* tp_descr_set */
-    0,                                        /* tp_dictoffset */
-    (initproc)Stroke_init,                    /* tp_init */
-    nullptr,                                  /* tp_alloc */
-    nullptr,                                  /* tp_new */
+    0,                                          /* tp_vectorcall_offset */
+    nullptr,                                    /* tp_getattr */
+    nullptr,                                    /* tp_setattr */
+    nullptr,                                    /* tp_reserved */
+    nullptr,                                    /* tp_repr */
+    nullptr,                                    /* tp_as_number */
+    &BPy_Stroke_as_sequence,                    /* tp_as_sequence */
+    nullptr,                                    /* tp_as_mapping */
+    nullptr,                                    /* tp_hash */
+    nullptr,                                    /* tp_call */
+    nullptr,                                    /* tp_str */
+    nullptr,                                    /* tp_getattro */
+    nullptr,                                    /* tp_setattro */
+    nullptr,                                    /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,   /* tp_flags */
+    Stroke_doc,                                 /* tp_doc */
+    nullptr,                                    /* tp_traverse */
+    nullptr,                                    /* tp_clear */
+    nullptr,                                    /* tp_richcompare */
+    0,                                          /* tp_weaklistoffset */
+    (getiterfunc)Stroke_iter,                   /* tp_iter */
+    nullptr,                                    /* tp_iternext */
+    BPy_Stroke_methods,                         /* tp_methods */
+    nullptr,                                    /* tp_members */
+    BPy_Stroke_getseters,                       /* tp_getset */
+    &Interface1D_Type,                          /* tp_base */
+    nullptr,                                    /* tp_dict */
+    nullptr,                                    /* tp_descr_get */
+    nullptr,                                    /* tp_descr_set */
+    0,                                          /* tp_dictoffset */
+    (initproc)Stroke_init,                      /* tp_init */
+    nullptr,                                    /* tp_alloc */
+    nullptr,                                    /* tp_new */
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////

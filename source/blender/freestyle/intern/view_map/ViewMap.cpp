@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup freestyle
@@ -332,8 +318,6 @@ static bool ViewEdgeComp(ViewVertex::directedViewEdge &dve1, ViewVertex::directe
   }
 
   return (v1.x() < v2.x());
-
-  return false;
 }
 
 void TVertex::setFrontEdgeA(ViewEdge *iFrontEdgeA, bool incoming)
@@ -414,7 +398,7 @@ void TVertex::setBackEdgeB(ViewEdge *iBackEdgeB, bool incoming)
 
 void TVertex::Replace(ViewEdge *iOld, ViewEdge *iNew)
 {
-  // theoritically, we only replace edges for which this
+  // theoretically, we only replace edges for which this
   // view vertex is the B vertex
   if ((iOld == _FrontEdgeA.first) && (_FrontEdgeA.first->B() == this)) {
     _FrontEdgeA.first = iNew;
@@ -434,7 +418,7 @@ void TVertex::Replace(ViewEdge *iOld, ViewEdge *iNew)
   }
 }
 
-/*! iterators access */
+/** iterators access */
 ViewVertex::edge_iterator TVertex::edges_begin()
 {
   // return edge_iterator(_FrontEdgeA, _FrontEdgeB, _BackEdgeA, _BackEdgeB, _FrontEdgeA);
@@ -586,7 +570,7 @@ void NonTVertex::AddIncomingViewEdge(ViewEdge *iVEdge)
   }
 }
 
-/*! iterators access */
+/** iterators access */
 ViewVertex::edge_iterator NonTVertex::edges_begin()
 {
   return edge_iterator(_ViewEdges.begin(), _ViewEdges.end(), _ViewEdges.begin());

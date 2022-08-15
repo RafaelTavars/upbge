@@ -31,24 +31,15 @@
 
 #pragma once
 
-
 #include "KX_GameObject.h"
 
 class KX_FontObject : public KX_GameObject {
- public:
-  Py_Header KX_FontObject(void *sgReplicationInfo,
-                          SG_Callbacks callbacks,
-                          RAS_Rasterizer *rasterizer,
-                          Object *ob);
+  Py_Header
 
+      public : KX_FontObject();
   virtual ~KX_FontObject();
 
-  /**
-   * Inherited from EXP_Value -- return a new copy of this
-   * instance allocated on the heap. Ownership of the new
-   * object belongs with the caller.
-   */
-  virtual EXP_Value *GetReplica();
+  virtual KX_PythonProxy *NewInstance();
   virtual void ProcessReplica();
   virtual int GetGameObjectType() const
   {
@@ -62,6 +53,18 @@ class KX_FontObject : public KX_GameObject {
   /// Update text from property.
   void UpdateTextFromProperty();
 
+  void SetRasterizer(RAS_Rasterizer *rasterizer);
+
+  virtual void SetBlenderObject(Object *obj);
+
+#ifdef WITH_PYTHON
+  /**
+   * \section Python interface functions.
+   */
+
+  static PyObject *game_object_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
+#endif
+
  protected:
   std::string m_text;
   std::vector<std::string> m_texts;
@@ -71,4 +74,3 @@ class KX_FontObject : public KX_GameObject {
   /// needed for drawing routine
   class RAS_Rasterizer *m_rasterizer;
 };
-

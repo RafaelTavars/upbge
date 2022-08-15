@@ -1,25 +1,11 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup eduv
  *
  * Utilities for manipulating UV islands.
  *
- * \note This is similar to `uvedit_parametrizer.c`,
+ * \note This is similar to `GEO_uv_parametrizer.h`,
  * however the data structures there don't support arbitrary topology
  * such as an edge with 3 or more faces using it.
  * This API uses #BMesh data structures and doesn't have limitations for manifold meshes.
@@ -29,6 +15,7 @@
 
 #include "DNA_meshdata_types.h"
 #include "DNA_scene_types.h"
+#include "DNA_space_types.h"
 
 #include "BLI_boxpack_2d.h"
 #include "BLI_convexhull_2d.h"
@@ -36,7 +23,9 @@
 #include "BLI_math.h"
 #include "BLI_rect.h"
 
+#include "BKE_customdata.h"
 #include "BKE_editmesh.h"
+#include "BKE_image.h"
 
 #include "DEG_depsgraph.h"
 
@@ -231,23 +220,95 @@ static void bm_face_array_uv_scale_y(BMFace **faces,
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name Calculate UV Islands
- *
- * \note Currently this is a private API/type, it could be made public.
+/** \name UDIM packing helper functions
  * \{ */
 
-struct FaceIsland {
-  struct FaceIsland *next, *prev;
-  BMFace **faces;
-  int faces_len;
-  rctf bounds_rect;
-  /**
-   * \note While this is duplicate information,
-   * it allows islands from multiple meshes to be stored in the same list.
-   */
-  uint cd_loop_uv_offset;
-  float aspect_y;
-};
+bool uv_coords_isect_udim(const Image *image, const int udim_grid[2], const float coords[2])
+{
+  const float coords_floor[2] = {floorf(coords[0]), floorf(coords[1])};
+  const bool is_tiled_image = image && (image->source == IMA_SRC_TILED);
+
+  if (coords[0] < udim_grid[0] && coords[0] > 0 && coords[1] < udim_grid[1] && coords[1] > 0) {
+    return true;
+  }
+  /* Check if selection lies on a valid UDIM image tile. */
+  if (is_tiled_image) {
+    LISTBASE_FOREACH (const ImageTile *, tile, &image->tiles) {
+      const int tile_index = tile->tile_number - 1001;
+      const int target_x = (tile_index % 10);
+      const int target_y = (tile_index / 10);
+      if (coords_floor[0] == target_x && coords_floor[1] == target_y) {
+        return true;
+      }
+    }
+  }
+  /* Probably not required since UDIM grid checks for 1001. */
+  else if (image && !is_tiled_image) {
+    if (is_zero_v2(coords_floor)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Calculates distance to nearest UDIM image tile in UV space and its UDIM tile number.
+ */
+static float uv_nearest_image_tile_distance(const Image *image,
+                                            const float coords[2],
+                                            float nearest_tile_co[2])
+{
+  BKE_image_find_nearest_tile_with_offset(image, coords, nearest_tile_co);
+
+  /* Add 0.5 to get tile center coordinates. */
+  float nearest_tile_center_co[2] = {nearest_tile_co[0], nearest_tile_co[1]};
+  add_v2_fl(nearest_tile_center_co, 0.5f);
+
+  return len_squared_v2v2(coords, nearest_tile_center_co);
+}
+
+/**
+ * Calculates distance to nearest UDIM grid tile in UV space and its UDIM tile number.
+ */
+static float uv_nearest_grid_tile_distance(const int udim_grid[2],
+                                           float coords[2],
+                                           float nearest_tile_co[2])
+{
+  const float coords_floor[2] = {floorf(coords[0]), floorf(coords[1])};
+
+  if (coords[0] > udim_grid[0]) {
+    nearest_tile_co[0] = udim_grid[0] - 1;
+  }
+  else if (coords[0] < 0) {
+    nearest_tile_co[0] = 0;
+  }
+  else {
+    nearest_tile_co[0] = coords_floor[0];
+  }
+
+  if (coords[1] > udim_grid[1]) {
+    nearest_tile_co[1] = udim_grid[1] - 1;
+  }
+  else if (coords[1] < 0) {
+    nearest_tile_co[1] = 0;
+  }
+  else {
+    nearest_tile_co[1] = coords_floor[1];
+  }
+
+  /* Add 0.5 to get tile center coordinates. */
+  float nearest_tile_center_co[2] = {nearest_tile_co[0], nearest_tile_co[1]};
+  add_v2_fl(nearest_tile_center_co, 0.5f);
+
+  return len_squared_v2v2(coords, nearest_tile_center_co);
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Calculate UV Islands
+ * \{ */
 
 struct SharedUVLoopData {
   uint cd_loop_uv_offset;
@@ -270,14 +331,14 @@ static bool bm_loop_uv_shared_edge_check(const BMLoop *l_a, const BMLoop *l_b, v
 /**
  * Calculate islands and add them to \a island_list returning the number of items added.
  */
-static int bm_mesh_calc_uv_islands(const Scene *scene,
-                                   BMesh *bm,
-                                   ListBase *island_list,
-                                   const bool only_selected_faces,
-                                   const bool only_selected_uvs,
-                                   const bool use_seams,
-                                   const float aspect_y,
-                                   const uint cd_loop_uv_offset)
+int bm_mesh_calc_uv_islands(const Scene *scene,
+                            BMesh *bm,
+                            ListBase *island_list,
+                            const bool only_selected_faces,
+                            const bool only_selected_uvs,
+                            const bool use_seams,
+                            const float aspect_y,
+                            const uint cd_loop_uv_offset)
 {
   int island_added = 0;
   BM_mesh_elem_table_ensure(bm, BM_FACE);
@@ -358,6 +419,7 @@ static int bm_mesh_calc_uv_islands(const Scene *scene,
 void ED_uvedit_pack_islands_multi(const Scene *scene,
                                   Object **objects,
                                   const uint objects_len,
+                                  const struct UVMapUDIM_Params *udim_params,
                                   const struct UVPackIsland_Params *params)
 {
   /* Align to the Y axis, could make this configurable. */
@@ -406,7 +468,26 @@ void ED_uvedit_pack_islands_multi(const Scene *scene,
   BoxPack *boxarray = MEM_mallocN(sizeof(*boxarray) * island_list_len, __func__);
 
   int index;
+  /* Coordinates of bounding box containing all selected UVs. */
+  float selection_min_co[2], selection_max_co[2];
+  INIT_MINMAX2(selection_min_co, selection_max_co);
+
   LISTBASE_FOREACH_INDEX (struct FaceIsland *, island, &island_list, index) {
+
+    /* Skip calculation if using specified UDIM option. */
+    if (udim_params && (udim_params->use_target_udim == false)) {
+      float bounds_min[2], bounds_max[2];
+      INIT_MINMAX2(bounds_min, bounds_max);
+      for (int i = 0; i < island->faces_len; i++) {
+        BMFace *f = island->faces[i];
+        BM_face_uv_minmax(f, bounds_min, bounds_max, island->cd_loop_uv_offset);
+      }
+
+      selection_min_co[0] = MIN2(bounds_min[0], selection_min_co[0]);
+      selection_min_co[1] = MIN2(bounds_min[1], selection_min_co[1]);
+      selection_max_co[0] = MAX2(bounds_max[0], selection_max_co[0]);
+      selection_max_co[1] = MAX2(bounds_max[1], selection_max_co[1]);
+    }
 
     if (params->rotate) {
       if (island->aspect_y != 1.0f) {
@@ -440,6 +521,13 @@ void ED_uvedit_pack_islands_multi(const Scene *scene,
     }
   }
 
+  /* Center of bounding box containing all selected UVs. */
+  float selection_center[2];
+  if (udim_params && (udim_params->use_target_udim == false)) {
+    selection_center[0] = (selection_min_co[0] + selection_max_co[0]) / 2.0f;
+    selection_center[1] = (selection_min_co[1] + selection_max_co[1]) / 2.0f;
+  }
+
   if (margin > 0.0f) {
     /* Logic matches behavior from #param_pack,
      * use area so multiply the margin by the area to give
@@ -463,6 +551,53 @@ void ED_uvedit_pack_islands_multi(const Scene *scene,
 
   const float scale[2] = {1.0f / boxarray_size[0], 1.0f / boxarray_size[1]};
 
+  /* Tile offset. */
+  float base_offset[2] = {0.0f, 0.0f};
+
+  /* CASE: ignore UDIM. */
+  if (udim_params == NULL) {
+    /* pass */
+  }
+  /* CASE: Active/specified(smart uv project) UDIM. */
+  else if (udim_params->use_target_udim) {
+
+    /* Calculate offset based on specified_tile_index. */
+    base_offset[0] = (udim_params->target_udim - 1001) % 10;
+    base_offset[1] = (udim_params->target_udim - 1001) / 10;
+  }
+
+  /* CASE: Closest UDIM. */
+  else {
+    const Image *image = udim_params->image;
+    const int *udim_grid = udim_params->grid_shape;
+    /* Check if selection lies on a valid UDIM grid tile. */
+    bool is_valid_udim = uv_coords_isect_udim(image, udim_grid, selection_center);
+    if (is_valid_udim) {
+      base_offset[0] = floorf(selection_center[0]);
+      base_offset[1] = floorf(selection_center[1]);
+    }
+    /* If selection doesn't lie on any UDIM then find the closest UDIM grid or image tile. */
+    else {
+      float nearest_image_tile_co[2] = {FLT_MAX, FLT_MAX};
+      float nearest_image_tile_dist = FLT_MAX, nearest_grid_tile_dist = FLT_MAX;
+      if (image) {
+        nearest_image_tile_dist = uv_nearest_image_tile_distance(
+            image, selection_center, nearest_image_tile_co);
+      }
+
+      float nearest_grid_tile_co[2] = {0.0f, 0.0f};
+      nearest_grid_tile_dist = uv_nearest_grid_tile_distance(
+          udim_grid, selection_center, nearest_grid_tile_co);
+
+      base_offset[0] = (nearest_image_tile_dist < nearest_grid_tile_dist) ?
+                           nearest_image_tile_co[0] :
+                           nearest_grid_tile_co[0];
+      base_offset[1] = (nearest_image_tile_dist < nearest_grid_tile_dist) ?
+                           nearest_image_tile_co[1] :
+                           nearest_grid_tile_co[1];
+    }
+  }
+
   for (int i = 0; i < island_list_len; i++) {
     struct FaceIsland *island = island_array[boxarray[i].index];
     const float pivot[2] = {
@@ -470,8 +605,8 @@ void ED_uvedit_pack_islands_multi(const Scene *scene,
         island->bounds_rect.ymin,
     };
     const float offset[2] = {
-        (boxarray[i].x * scale[0]) - island->bounds_rect.xmin,
-        (boxarray[i].y * scale[1]) - island->bounds_rect.ymin,
+        ((boxarray[i].x * scale[0]) - island->bounds_rect.xmin) + base_offset[0],
+        ((boxarray[i].y * scale[1]) - island->bounds_rect.ymin) + base_offset[1],
     };
     for (int j = 0; j < island->faces_len; j++) {
       BMFace *efa = island->faces[j];

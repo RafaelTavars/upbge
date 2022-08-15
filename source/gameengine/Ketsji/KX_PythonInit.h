@@ -31,7 +31,6 @@
 
 #pragma once
 
-
 #include <string>
 
 #include "DEV_JoystickDefines.h"  // For JOYINDEX_MAX
@@ -48,8 +47,14 @@ PyMODINIT_FUNC initGameKeysPythonBinding(void);
 PyMODINIT_FUNC initRasterizerPythonBinding(void);
 PyMODINIT_FUNC initVideoTexturePythonBinding(void);
 void initGamePlayerPythonScripting(int argc, char **argv, struct bContext *C);
-void postInitGamePlayerPythonScripting(struct Main *maggie, int argc, char **argv, struct bContext *C, bool *audioDeviceIsInitialized);
-void initGamePythonScripting(struct Main *maggie, bool *audioDeviceIsInitialized);
+void postInitGamePlayerPythonScripting(struct Main *maggie,
+                                       int argc,
+                                       char **argv,
+                                       struct bContext *C,
+                                       bool *audioDeviceIsInitialized);
+void initGamePythonScripting(struct Main *maggie,
+                             struct bContext *C,
+                             bool *audioDeviceIsInitialized);
 
 // Add a python include path.
 void appendPythonPath(const std::string &path);
@@ -87,4 +92,3 @@ struct PyNextFrameState {
   PyNextFrameFunc func;
 };
 extern struct PyNextFrameState pynextframestate;
-

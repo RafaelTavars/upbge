@@ -44,6 +44,7 @@ set(INC
   ../../blender/blenlib
   ../../blender/blenloader
   ../../blender/blentranslation
+  ../../blender/depsgraph
   ../../blender/draw
   ../../blender/draw/intern
   ../../blender/draw/engines/eevee
@@ -93,35 +94,32 @@ set(SRC
   KX_FontObject.cpp
   KX_GameObject.cpp
   KX_Globals.cpp
-  KX_IPO_SGController.cpp
+  KX_IpoController.cpp
   KX_KetsjiEngine.cpp
   KX_LibLoadStatus.cpp
   KX_Light.cpp
   KX_LightIpoSGController.cpp
   KX_LodLevel.cpp
   KX_LodManager.cpp
-  KX_MaterialIpoController.cpp
   KX_MaterialShader.cpp
   KX_MeshProxy.cpp
   KX_MotionState.cpp
   KX_NavMeshObject.cpp
   KX_ObColorIpoSGController.cpp
   KX_ObstacleSimulation.cpp
-  KX_OrientationInterpolator.cpp
   KX_PolyProxy.cpp
-  KX_PositionInterpolator.cpp
   KX_PyConstraintBinding.cpp
   KX_PyMath.cpp
   KX_PythonComponent.cpp
-  KX_PythonComponentManager.cpp
+  KX_PythonProxyManager.cpp
   KX_PythonInit.cpp
   KX_PythonInitTypes.cpp
   KX_PythonMain.cpp
+  KX_PythonProxy.cpp
   KX_RayCast.cpp
   KX_BoneParentNodeRelationship.cpp
   KX_NodeRelationships.cpp
   KX_ScalarInterpolator.cpp
-  KX_ScalingInterpolator.cpp
   KX_Scene.cpp
   KX_TimeCategoryLogger.cpp
   KX_TimeLogger.cpp
@@ -148,8 +146,8 @@ set(SRC
   KX_GameObject.h
   KX_Globals.h
   KX_IInterpolator.h
-  KX_IPOTransform.h
-  KX_IPO_SGController.h
+  KX_IpoTransform.h
+  KX_IpoController.h
   KX_IScalarInterpolator.h
   KX_ISystem.h
   KX_KetsjiEngine.h
@@ -158,29 +156,26 @@ set(SRC
   KX_LightIpoSGController.h
   KX_LodLevel.h
   KX_LodManager.h
-  KX_MaterialIpoController.h
   KX_MaterialShader.h
   KX_MeshProxy.h
   KX_MotionState.h
   KX_NavMeshObject.h
   KX_ObColorIpoSGController.h
   KX_ObstacleSimulation.h
-  KX_OrientationInterpolator.h
   KX_PhysicsEngineEnums.h
   KX_PolyProxy.h
-  KX_PositionInterpolator.h
   KX_PyConstraintBinding.h
   KX_PyMath.h
   KX_PythonComponent.h
-  KX_PythonComponentManager.h
+  KX_PythonProxyManager.h
   KX_PythonInit.h
   KX_PythonInitTypes.h
   KX_PythonMain.h
+  KX_PythonProxy.h
   KX_RayCast.h
   KX_BoneParentNodeRelationship.h
   KX_NodeRelationships.h
   KX_ScalarInterpolator.h
-  KX_ScalingInterpolator.h
   KX_Scene.h
   KX_TimeCategoryLogger.h
   KX_TimeLogger.h
@@ -252,6 +247,10 @@ if(WITH_MOD_FLUID)
     bf_intern_mantaflow
   )
   add_definitions(-DWITH_FLUID)
+endif()
+
+if(WITH_XR_OPENXR)
+  add_definitions(-DWITH_XR_OPENXR)
 endif()
 
 blender_add_lib(ge_ketsji "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")

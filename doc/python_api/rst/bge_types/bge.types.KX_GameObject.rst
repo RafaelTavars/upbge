@@ -1,9 +1,11 @@
 KX_GameObject(SCA_IObject)
 ==========================
 
-base class --- :class:`SCA_IObject`
+.. currentmodule:: bge.types
 
-.. class:: KX_GameObject(SCA_IObject)
+base class --- :class:`~bge.types.SCA_IObject`
+
+.. class:: KX_GameObject
 
    All game objects are derived from this class.
 
@@ -12,7 +14,7 @@ base class --- :class:`SCA_IObject`
    .. note::
 
       Calling ANY method or attribute on an object that has been removed from a scene will raise a SystemError,
-      if an object may have been removed since last accessing it use the :data:`invalid` attribute to check.
+      if an object may have been removed since last accessing it use the :attr:`~bge.types.EXP_PyObjectPlus.invalid` attribute to check.
 
    KX_GameObject can be subclassed to extend functionality. For example:
 
@@ -57,7 +59,7 @@ base class --- :class:`SCA_IObject`
             cont.owner.update()
 
    When subclassing objects other than empties and meshes, the specific type
-   should be used - e.g. inherit from :class:`BL_ArmatureObject` when the object
+   should be used - e.g. inherit from :class:`~bge.types.BL_ArmatureObject` when the object
    to mutate is an armature.
 
    .. attribute:: name
@@ -75,6 +77,16 @@ base class --- :class:`SCA_IObject`
       .. note::
 
          The object must have a physics controller for the mass to be applied, otherwise the mass value will be returned as 0.0.
+
+   .. attribute:: friction
+
+      The object's friction
+
+      :type: float
+
+      .. note::
+
+         The object must have a physics controller for the friction to be applied, otherwise the friction value will be returned as 0.0.
 
    .. attribute:: isSuspendDynamics
 
@@ -141,7 +153,7 @@ base class --- :class:`SCA_IObject`
 
       Enforces the object keeps rotating at a minimum velocity. A value of 0.0 disables this.
 
-      :type: non-negative float
+      :type: float (non-negative)
 
       .. note::
 
@@ -154,7 +166,7 @@ base class --- :class:`SCA_IObject`
       Clamp the maximum angular velocity to prevent objects rotating beyond a set speed.
       A value of 0.0 disables clamping; it does not stop rotation.
 
-      :type: non-negative float
+      :type: float (non-negative)
 
       .. note::
 
@@ -170,31 +182,31 @@ base class --- :class:`SCA_IObject`
 
       The object's parent object. (read-only).
 
-      :type: :class:`KX_GameObject` or None
+      :type: :class:`~bge.types.KX_GameObject` or None
 
    .. attribute:: groupMembers
 
       Returns the list of group members if the object is a group object (dupli group instance), otherwise None is returned.
 
-      :type: :class:`EXP_ListValue` of :class:`KX_GameObject` or None
+      :type: :class:`~bge.types.EXP_ListValue` of :class:`~bge.types.KX_GameObject` or None
 
    .. attribute:: groupObject
 
       Returns the group object (dupli group instance) that the object belongs to or None if the object is not part of a group.
 
-      :type: :class:`KX_GameObject` or None
+      :type: :class:`~bge.types.KX_GameObject` or None
 
    .. attribute:: collisionGroup
 
       The object's collision group.
 
-      :type: bitfield
+      :type: integer (bit mask)
 
    .. attribute:: collisionMask
 
       The object's collision mask.
 
-      :type: bitfield
+      :type: integer (bit mask)
 
    .. attribute:: collisionCallbacks
 
@@ -252,7 +264,7 @@ base class --- :class:`SCA_IObject`
 
       The object's scene. (read-only).
 
-      :type: :class:`KX_Scene` or None
+      :type: :class:`~bge.types.KX_Scene` or None
 
    .. attribute:: visible
 
@@ -266,23 +278,29 @@ base class --- :class:`SCA_IObject`
 
    .. attribute:: layer
 
+   .. deprecated:: 0.3.0
+
       The layer mask used for shadow and real-time cube map render.
 
-      :type: bitfield
+      :type: integer (bit mask)
 
    .. attribute:: cullingBox
 
-      The object's bounding volume box used for culling.
+   .. deprecated:: 0.3.0
 
-      :type: :class:`KX_BoundingBox`
+      (You can use bpy.types.Object.bound_box instead) The object's bounding volume box used for culling.
+
+      :type: :class:`~bge.types.KX_BoundingBox`
 
    .. attribute:: culled
+
+   .. deprecated:: 0.3.0
 
       Returns True if the object is culled, else False.
 
       .. warning::
 
-         This variable returns an invalid value if it is called outside the scene's callbacks :data:`KX_Scene.pre_draw` and :data:`KX_Scene.post_draw`.
+         This variable returns an invalid value if it is called outside the scene's callbacks :attr:`KX_Scene.pre_draw <~bge.types.KX_Scene.pre_draw>` and :attr:`KX_Scene.post_draw <~bge.types.KX_Scene.post_draw>`.
 
       :type: boolean (read only)
 
@@ -292,7 +310,35 @@ base class --- :class:`SCA_IObject`
 
       :type: :class:`mathutils.Vector`
 
+   .. attribute:: physicsCulling
+
+      True if the object suspends its physics depending on its nearest distance to any camera.
+
+      :type: boolean
+
+   .. attribute:: logicCulling
+
+      True if the object suspends its logic and animation depending on its nearest distance to any camera.
+
+      :type: boolean
+
+   .. attribute:: physicsCullingRadius
+
+      Suspend object's physics if this radius is smaller than its nearest distance to any camera
+      and :data:`physicsCulling` set to `True`.
+
+      :type: float
+
+   .. attribute:: logicCullingRadius
+
+      Suspend object's logic and animation if this radius is smaller than its nearest distance to any camera
+      and :data:`logicCulling` set to `True`.
+
+      :type: float
+
    .. attribute:: occlusion
+
+   .. deprecated:: 0.3.0
 
       occlusion capability flag.
 
@@ -302,7 +348,9 @@ base class --- :class:`SCA_IObject`
 
       The object's position. [x, y, z] On write: local position, on read: world position
 
-      .. deprecated:: use :data:`localPosition` and :data:`worldPosition`.
+      .. deprecated:: 0.0.1
+
+         Use :attr:`localPosition` and :attr:`worldPosition`.
 
       :type: :class:`mathutils.Vector`
 
@@ -310,7 +358,9 @@ base class --- :class:`SCA_IObject`
 
       The object's orientation. 3x3 Matrix. You can also write a Quaternion or Euler vector. On write: local orientation, on read: world orientation
 
-      .. deprecated:: use :data:`localOrientation` and :data:`worldOrientation`.
+      .. deprecated:: 0.0.1
+
+         Use :attr:`localOrientation` and :attr:`worldOrientation`.
 
       :type: :class:`mathutils.Matrix`
 
@@ -318,7 +368,9 @@ base class --- :class:`SCA_IObject`
 
       The object's scaling factor. [sx, sy, sz] On write: local scaling, on read: world scaling
 
-      .. deprecated:: use :data:`localScale` and :data:`worldScale`.
+      .. deprecated:: 0.0.1
+
+         Use :attr:`localScale` and :attr:`worldScale`.
 
       :type: :class:`mathutils.Vector`
 
@@ -410,7 +462,7 @@ base class --- :class:`SCA_IObject`
 
       This KX_GameObject's Object.
 
-      :type: :class:`bpy.types.Object`, (readonly)
+      :type: :class:`~bpy.types.Object`, (readonly)
 
    .. attribute:: state
 
@@ -422,7 +474,7 @@ base class --- :class:`SCA_IObject`
 
       a list meshes for this object.
 
-      :type: list of :class:`KX_MeshProxy`
+      :type: list of :class:`~bge.types.KX_MeshProxy`
 
       .. note::
 
@@ -434,13 +486,15 @@ base class --- :class:`SCA_IObject`
 
    .. attribute:: batchGroup
 
+   .. deprecated:: 0.3.0
+
       The object batch group containing the batched mesh.
 
-      :type: :class:`KX_BatchGroup`
+      :type: :class:`~bge.types.KX_BatchGroup`
 
    .. attribute:: sensors
 
-      a sequence of :class:`SCA_ISensor` objects with string/index lookups and iterator support.
+      a sequence of :class:`~bge.types.SCA_ISensor` objects with string/index lookups and iterator support.
 
       :type: list
 
@@ -454,9 +508,9 @@ base class --- :class:`SCA_IObject`
 
    .. attribute:: controllers
 
-      a sequence of :class:`SCA_IController` objects with string/index lookups and iterator support.
+      a sequence of :class:`~bge.types.SCA_IController` objects with string/index lookups and iterator support.
 
-      :type: list of :class:`SCA_ISensor`
+      :type: list of :class:`~bge.types.SCA_ISensor`
 
       .. note::
 
@@ -468,7 +522,7 @@ base class --- :class:`SCA_IObject`
 
    .. attribute:: actuators
 
-      a list of :class:`SCA_IActuator` with string/index lookups and iterator support.
+      a list of :class:`~bge.types.SCA_IActuator` with string/index lookups and iterator support.
 
       :type: list
 
@@ -490,23 +544,23 @@ base class --- :class:`SCA_IObject`
 
       All python components.
 
-      :type: :class:`EXP_ListValue` of :class:`KX_PythonComponent`'s
+      :type: :class:`~bge.types.EXP_ListValue` of :class:`~bge.types.KX_PythonComponent`'s
 
    .. attribute:: children
 
       direct children of this object, (read-only).
 
-      :type: :class:`EXP_ListValue` of :class:`KX_GameObject`'s
+      :type: :class:`~bge.types.EXP_ListValue` of :class:`~bge.types.KX_GameObject`'s
 
    .. attribute:: childrenRecursive
 
       all children of this object including children's children, (read-only).
 
-      :type: :class:`EXP_ListValue` of :class:`KX_GameObject`'s
+      :type: :class:`~bge.types.EXP_ListValue` of :class:`~bge.types.KX_GameObject`'s
 
    .. attribute:: life
 
-      The number of frames until the object ends, assumes one frame is 1/50 second (read-only).
+      The number of frames until the object ends, assumes one frame is 1/60 second (read-only).
 
       :type: float
 
@@ -521,7 +575,7 @@ base class --- :class:`SCA_IObject`
       If true, the object's and children's debug properties will be displayed on screen.
 
       :type: boolean
-      
+
    .. attribute:: currentLodLevel
 
       The index of the level of detail (LOD) currently used by this object (read-only).
@@ -535,28 +589,50 @@ base class --- :class:`SCA_IObject`
       The lod manager is shared between instance objects and can be changed to use the lod levels of an other object.
       If the lod manager is set to `None` the object's mesh backs to the mesh of the previous first lod level.
 
-      :type: :class:`KX_LodManager`
+      :type: :class:`~bge.types.KX_LodManager`
 
    .. attribute:: onRemove
 
       A list of callables to run when the KX_GameObject is destroyed.
 
-         .. code-block:: python
-            @gameobj.onRemove.append
-            def callback(gameobj):
-                print('exiting %s...' % gameobj.name)
+      .. code-block:: python
+
+         @gameobj.onRemove.append
+         def callback(gameobj):
+            print('exiting %s...' % gameobj.name)
+
       or
-         .. code-block:: python
-            cont = bge.logic.getCurrentController()
-            gameobj = cont.owner
 
-            def callback():
-                print('exiting' %s...' % gameobj.name)
+      .. code-block:: python
 
-            gameobj.onRemove.append(callback)
+         cont = bge.logic.getCurrentController()
+         gameobj = cont.owner
+
+         def callback():
+            print('exiting' %s...' % gameobj.name)
+
+         gameobj.onRemove.append(callback)
+
       :type: list
 
+   .. property:: logger
 
+      A logger instance that can be used to log messages related to this object (read-only).
+
+      :type: :class:`logging.Logger`
+
+   .. property:: loggerName
+
+      A name used to create the logger instance. By default, it takes the form *Type[Name]*
+      and can be optionally overridden as below:
+
+      .. code-block:: python
+
+         @property
+         def loggerName():
+            return "MyObject"
+
+      :type: str
 
    .. method:: endObject()
 
@@ -569,7 +645,7 @@ base class --- :class:`SCA_IObject`
       Replace the mesh of this object with a new mesh. This works the same was as the actuator.
 
       :arg mesh: mesh to replace or the meshes name.
-      :type mesh: :class:`MeshProxy` or string
+      :type mesh: :class:`~bge.types.KX_MeshProxy` or string
       :arg useDisplayMesh: when enabled the display mesh will be replaced (optional argument).
       :type useDisplayMesh: boolean
       :arg usePhysicsMesh: when enabled the physics mesh will be replaced (optional argument).
@@ -585,6 +661,8 @@ base class --- :class:`SCA_IObject`
       :type recursive: boolean
 
    .. method:: setOcclusion(occlusion[, recursive])
+
+   .. deprecated:: 0.3.0
 
       Sets the game object's occlusion capability.
 
@@ -607,7 +685,7 @@ base class --- :class:`SCA_IObject`
          * 2: Z axis
 
       :type axis: integer
-      :arg factor: Only rotate a feaction of the distance to the target vector (0.0 - 1.0)
+      :arg factor: Only rotate a fraction of the distance to the target vector (0.0 - 1.0)
       :type factor: float
 
    .. method:: getAxisVect(vect)
@@ -629,7 +707,7 @@ base class --- :class:`SCA_IObject`
       :arg local:
          * False: you get the "global" movement ie: relative to world orientation.
          * True: you get the "local" movement ie: relative to object orientation.
-         Default to False if not passed.
+         * Default to False if not passed.
       :arg local: boolean
 
    .. method:: applyRotation(rotation[, local])
@@ -641,7 +719,7 @@ base class --- :class:`SCA_IObject`
       :arg local:
          * False: you get the "global" rotation ie: relative to world orientation.
          * True: you get the "local" rotation ie: relative to object orientation.
-         Default to False if not passed.
+         * Default to False if not passed.
       :arg local: boolean
 
    .. method:: applyForce(force[, local])
@@ -655,7 +733,7 @@ base class --- :class:`SCA_IObject`
       :arg local:
          * False: you get the "global" force ie: relative to world orientation.
          * True: you get the "local" force ie: relative to object orientation.
-         Default to False if not passed.
+         * Default to False if not passed.
       :type local: boolean
 
    .. method:: applyTorque(torque[, local])
@@ -669,7 +747,7 @@ base class --- :class:`SCA_IObject`
       :arg local:
          * False: you get the "global" torque ie: relative to world orientation.
          * True: you get the "local" torque ie: relative to object orientation.
-         Default to False if not passed.
+         * Default to False if not passed.
       :type local: boolean
 
    .. method:: getLinearVelocity([local])
@@ -681,7 +759,7 @@ base class --- :class:`SCA_IObject`
       :arg local:
          * False: you get the "global" velocity ie: relative to world orientation.
          * True: you get the "local" velocity ie: relative to object orientation.
-         Default to False if not passed.
+         * Default to False if not passed.
       :type local: boolean
       :return: the object's linear velocity.
       :rtype: Vector((vx, vy, vz))
@@ -700,7 +778,7 @@ base class --- :class:`SCA_IObject`
       :arg local:
          * False: you get the "global" velocity ie: relative to world orientation.
          * True: you get the "local" velocity ie: relative to object orientation.
-         Default to False if not passed.
+         * Default to False if not passed.
       :type local: boolean
 
    .. method:: getAngularVelocity([local])
@@ -710,7 +788,7 @@ base class --- :class:`SCA_IObject`
       :arg local:
          * False: you get the "global" velocity ie: relative to world orientation.
          * True: you get the "local" velocity ie: relative to object orientation.
-         Default to False if not passed.
+         * Default to False if not passed.
       :type local: boolean
       :return: the object's angular velocity.
       :rtype: Vector((vx, vy, vz))
@@ -726,7 +804,7 @@ base class --- :class:`SCA_IObject`
       :arg local:
          * False: you get the "global" velocity ie: relative to world orientation.
          * True: you get the "local" velocity ie: relative to object orientation.
-         Default to False if not passed.
+         * Default to False if not passed.
 
    .. method:: getVelocity([point])
 
@@ -742,6 +820,8 @@ base class --- :class:`SCA_IObject`
 
    .. method:: getReactionForce()
 
+   .. deprecated:: 0.0.0
+
       Gets the game object's reaction force.
 
       The reaction force is the force applied to this object over the last simulation timestep.
@@ -752,7 +832,7 @@ base class --- :class:`SCA_IObject`
 
       .. note::
 
-         This is not implimented at the moment.
+         This is not implemented at the moment. (Removed when switching from Sumo to Bullet)
 
    .. method:: applyImpulse(point, impulse[, local])
 
@@ -769,7 +849,7 @@ base class --- :class:`SCA_IObject`
       :arg local:
          * False: you get the "global" impulse ie: relative to world coordinates with world orientation.
          * True: you get the "local" impulse ie: relative to local coordinates with object orientation.
-         Default to False if not passed.
+         * Default to False if not passed.
       :type local: boolean
 
    .. method:: setDamping(linear_damping, angular_damping)
@@ -847,7 +927,7 @@ base class --- :class:`SCA_IObject`
       In that case you can control if it should be ghost or not:
 
       :arg parent: new parent object.
-      :type parent: :class:`KX_GameObject`
+      :type parent: :class:`~bge.types.KX_GameObject`
       :arg compound: whether the shape should be added to the parent compound shape.
 
          * True: the object shape should be added to the parent compound shape.
@@ -882,8 +962,8 @@ base class --- :class:`SCA_IObject`
 
    .. method:: getDistanceTo(other)
 
-      :arg other: a point or another :class:`KX_GameObject` to measure the distance to.
-      :type other: :class:`KX_GameObject` or list [x, y, z]
+      :arg other: a point or another :class:`~bge.types.KX_GameObject` to measure the distance to.
+      :type other: :class:`~bge.types.KX_GameObject` or list [x, y, z]
       :return: distance to another object or point.
       :rtype: float
 
@@ -892,8 +972,8 @@ base class --- :class:`SCA_IObject`
       Returns the vector and the distance to another object or point.
       The vector is normalized unless the distance is 0, in which a zero length vector is returned.
 
-      :arg other: a point or another :class:`KX_GameObject` to get the vector and distance to.
-      :type other: :class:`KX_GameObject` or list [x, y, z]
+      :arg other: a point or another :class:`~bge.types.KX_GameObject` to get the vector and distance to.
+      :type other: :class:`~bge.types.KX_GameObject` or list [x, y, z]
       :return: (distance, globalVector(3), localVector(3))
       :rtype: 3-tuple (float, 3-tuple (x, y, z), 3-tuple (x, y, z))
 
@@ -906,19 +986,19 @@ base class --- :class:`SCA_IObject`
       Use rayCast() if you need to retrieve the hit point
 
       :arg other: [x, y, z] or object towards which the ray is casted
-      :type other: :class:`KX_GameObject` or 3-tuple
+      :type other: :class:`~bge.types.KX_GameObject` or 3-tuple
       :arg dist: max distance to look (can be negative => look behind); 0 or omitted => detect up to other
       :type dist: float
       :arg prop: property name that object must have; can be omitted => detect any object
       :type prop: string
       :return: the first object hit or None if no object or object does not match prop
-      :rtype: :class:`KX_GameObject`
+      :rtype: :class:`~bge.types.KX_GameObject`
 
    .. method:: rayCast(objto, objfrom=None, dist=0, prop="", face=False, xray=False, poly=0, mask=0xFFFF)
 
       Look from a point/object to another point/object and find first object hit within dist that matches prop.
       if poly is 0, returns a 3-tuple with object reference, hit point and hit normal or (None, None, None) if no hit.
-      if poly is 1, returns a 4-tuple with in addition a :class:`KX_PolyProxy` as 4th element.
+      if poly is 1, returns a 4-tuple with in addition a :class:`~bge.types.KX_PolyProxy` as 4th element.
       if poly is 2, returns a 5-tuple with in addition a 2D vector with the UV mapping of the hit point as 5th element.
 
       .. code-block:: python
@@ -942,15 +1022,15 @@ base class --- :class:`SCA_IObject`
       * prop on, xray off: return closest hit if it matches prop, no hit otherwise.
       * prop on, xray on : return closest hit matching prop or no hit if there is no object matching prop on the full extend of the ray.
 
-      The :class:`KX_PolyProxy` 4th element of the return tuple when poly=1 allows to retrieve information on the polygon hit by the ray.
+      The :class:`~bge.types.KX_PolyProxy` 4th element of the return tuple when poly=1 allows to retrieve information on the polygon hit by the ray.
       If there is no hit or the hit object is not a static mesh, None is returned as 4th element.
 
       The ray ignores collision-free objects and faces that dont have the collision flag enabled, you can however use ghost objects.
 
       :arg objto: [x, y, z] or object to which the ray is casted
-      :type objto: :class:`KX_GameObject` or 3-tuple
+      :type objto: :class:`~bge.types.KX_GameObject` or 3-tuple
       :arg objfrom: [x, y, z] or object from which the ray is casted; None or omitted => use self object center
-      :type objfrom: :class:`KX_GameObject` or 3-tuple or None
+      :type objfrom: :class:`~bge.types.KX_GameObject` or 3-tuple or None
       :arg dist: max distance to look (can be negative => look behind); 0 or omitted => detect up to to
       :type dist: float
       :arg prop: property name that object must have; can be omitted or "" => detect any object
@@ -962,12 +1042,12 @@ base class --- :class:`SCA_IObject`
       :arg poly: polygon option: 0, 1 or 2 to return a 3-, 4- or 5-tuple with information on the face hit.
 
          * 0 or omitted: return value is a 3-tuple (object, hitpoint, hitnormal) or (None, None, None) if no hit
-         * 1: return value is a 4-tuple and the 4th element is a :class:`KX_PolyProxy` or None if no hit or the object doesn't use a mesh collision shape.
+         * 1: return value is a 4-tuple and the 4th element is a :class:`~bge.types.KX_PolyProxy` or None if no hit or the object doesn't use a mesh collision shape.
          * 2: return value is a 5-tuple and the 5th element is a 2-tuple (u, v) with the UV mapping of the hit point or None if no hit, or the object doesn't use a mesh collision shape, or doesn't have a UV mapping.
 
       :type poly: integer
       :arg mask: collision mask: The collision mask (16 layers mapped to a 16-bit integer) is combined with each object's collision group, to hit only a subset of the objects in the scene. Only those objects for which ``collisionGroup & mask`` is true can be hit.
-      :type mask: bitfield
+      :type mask: integer (bit mask)
       :return: (object, hitpoint, hitnormal) or (object, hitpoint, hitnormal, polygon) or (object, hitpoint, hitnormal, polygon, hituv).
 
          * object, hitpoint and hitnormal are None if no hit.
@@ -976,13 +1056,26 @@ base class --- :class:`SCA_IObject`
 
       :rtype:
 
-         * 3-tuple (:class:`KX_GameObject`, 3-tuple (x, y, z), 3-tuple (nx, ny, nz))
-         * or 4-tuple (:class:`KX_GameObject`, 3-tuple (x, y, z), 3-tuple (nx, ny, nz), :class:`KX_PolyProxy`)
-         * or 5-tuple (:class:`KX_GameObject`, 3-tuple (x, y, z), 3-tuple (nx, ny, nz), :class:`KX_PolyProxy`, 2-tuple (u, v))
+         * 3-tuple (:class:`~bge.types.KX_GameObject`, 3-tuple (x, y, z), 3-tuple (nx, ny, nz))
+         * or 4-tuple (:class:`~bge.types.KX_GameObject`, 3-tuple (x, y, z), 3-tuple (nx, ny, nz), :class:`~bge.types.KX_PolyProxy`)
+         * or 5-tuple (:class:`~bge.types.KX_GameObject`, 3-tuple (x, y, z), 3-tuple (nx, ny, nz), :class:`~bge.types.KX_PolyProxy`, 2-tuple (u, v))
 
       .. note::
 
          The ray ignores the object on which the method is called. It is casted from/to object center or explicit [x, y, z] points.
+
+   .. method:: collide(obj)
+
+         Test if this object collides object :data:`obj`.
+
+         :arg obj: the object to test collision with
+         :type obj: string or :class:`KX_GameObject`
+         :return: (collide, points)
+
+            * collide, True if this object collides object :data:`obj`
+            * points, contact point data of the collision or None
+
+         :rtype: 2-tuple (boolean, list of :class:`KX_CollisionContactPoint` or None)
 
    .. method:: setCollisionMargin(margin)
 
@@ -1013,12 +1106,12 @@ base class --- :class:`SCA_IObject`
       If no arguments are given the physics mesh will be re-created from the first mesh assigned to the game object.
 
       :arg gameObject: optional argument, set the physics shape from this gameObjets mesh.
-      :type gameObject: string, :class:`KX_GameObject` or None
+      :type gameObject: string, :class:`~bge.types.KX_GameObject` or None
       :arg meshObject: optional argument, set the physics shape from this mesh.
-      :type meshObject: string, :class:`MeshProxy` or None
+      :type meshObject: string, :class:`~bge.types.KX_MeshProxy` or None
       :arg dupli: optional argument, duplicate the physics shape.
       :type dupli: boolean
-      :arg evaluated: optional argument, use evaluated mesh physics shape.
+      :arg evaluated: optional argument, use evaluated object physics shape (Object with modifiers applied).
       :type dupli: boolean
 
       :return: True if reinstance succeeded, False if it failed.
@@ -1053,7 +1146,7 @@ base class --- :class:`SCA_IObject`
       Replace the current physics shape.
 
       :arg gameObject: set the physics shape from this gameObjets.
-      :type gameObject: string, :class:`KX_GameObject`
+      :type gameObject: string, :class:`~bge.types.KX_GameObject`
       :return: True if replace succeeded, False if it failed.
       :rtype: boolean
 
@@ -1073,28 +1166,28 @@ base class --- :class:`SCA_IObject`
 
       Plays an action.
 
-      :arg name: the name of the action
+      :arg name: the name of the action.
       :type name: string
-      :arg start: the start frame of the action
+      :arg start: the start frame of the action.
       :type start: float
-      :arg end: the end frame of the action
+      :arg end: the end frame of the action.
       :type end: float
-      :arg layer: the layer the action will play in (actions in different layers are added/blended together)
+      :arg layer: the layer the action will play in (actions in different layers are added/blended together).
       :type layer: integer
-      :arg priority: only play this action if there isn't an action currently playing in this layer with a higher (lower number) priority
+      :arg priority: only play this action if there isn't an action currently playing in this layer with a higher (lower number) priority.
       :type priority: integer
-      :arg blendin: the amount of blending between this animation and the previous one on this layer
+      :arg blendin: the amount of blending between this animation and the previous one on this layer.
       :type blendin: float
-      :arg play_mode: the play mode
-      :type play_mode: one of :ref:`these constants <gameobject-playaction-mode>`
-      :arg layer_weight: how much of the previous layer to use for blending
+      :arg play_mode: the play mode. one of :ref:`these constants <gameobject-playaction-mode>`.
+      :type play_mode: integer
+      :arg layer_weight: how much of the previous layer to use for blending.
       :type layer_weight: float
-      :arg ipo_flags: flags for the old IPO behaviors (force, etc)
-      :type ipo_flags: int bitfield
-      :arg speed: the playback speed of the action as a factor (1.0 = normal speed, 2.0 = 2x speed, etc)
+      :arg ipo_flags: flags for the old IPO behaviors (force, etc).
+      :type ipo_flags: integer (bit mask)
+      :arg speed: the playback speed of the action as a factor (1.0 = normal speed, 2.0 = 2x speed, etc).
       :type speed: float
-      :arg blend_mode: how to blend this layer with previous layers
-      :type blend_mode: one of :ref:`these constants <gameobject-playaction-blend>`
+      :arg blend_mode: how to blend this layer with previous layers. one of :ref:`these constants <gameobject-playaction-blend>`.
+      :type blend_mode: integer
 
    .. method:: stopAction([layer])
 

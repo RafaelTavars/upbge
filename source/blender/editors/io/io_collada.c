@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2008 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2008 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup collada
@@ -29,7 +13,6 @@
 #  include "BLI_utildefines.h"
 
 #  include "BKE_context.h"
-#  include "BKE_global.h"
 #  include "BKE_main.h"
 #  include "BKE_object.h"
 #  include "BKE_report.h"
@@ -37,7 +20,6 @@
 #  include "DEG_depsgraph.h"
 
 #  include "ED_object.h"
-#  include "ED_screen.h"
 
 #  include "RNA_access.h"
 #  include "RNA_define.h"
@@ -239,14 +221,6 @@ static int wm_collada_export_exec(bContext *C, wmOperator *op)
   export_settings.limit_precision = limit_precision != 0;
   export_settings.keep_bind_info = keep_bind_info != 0;
 
-  int includeFilter = OB_REL_NONE;
-  if (export_settings.include_armatures) {
-    includeFilter |= OB_REL_MOD_ARMATURE;
-  }
-  if (export_settings.include_children) {
-    includeFilter |= OB_REL_CHILDREN_RECURSIVE;
-  }
-
   export_count = collada_export(C, &export_settings);
 
   if (export_count == 0) {
@@ -404,10 +378,7 @@ static void uiCollada_exportSettings(uiLayout *layout, PointerRNA *imfptr)
 
 static void wm_collada_export_draw(bContext *UNUSED(C), wmOperator *op)
 {
-  PointerRNA ptr;
-
-  RNA_pointer_create(NULL, op->type->srna, op->properties, &ptr);
-  uiCollada_exportSettings(op->layout, &ptr);
+  uiCollada_exportSettings(op->layout, op->ptr);
 }
 
 static bool wm_collada_export_check(bContext *UNUSED(C), wmOperator *op)
@@ -497,7 +468,7 @@ void WM_OT_collada_export(wmOperatorType *ot)
   ot->poll = WM_operator_winactive;
   ot->check = wm_collada_export_check;
 
-  ot->flag |= OPTYPE_PRESET;
+  ot->flag = OPTYPE_PRESET;
 
   ot->ui = wm_collada_export_draw;
 
@@ -801,10 +772,7 @@ static void uiCollada_importSettings(uiLayout *layout, PointerRNA *imfptr)
 
 static void wm_collada_import_draw(bContext *UNUSED(C), wmOperator *op)
 {
-  PointerRNA ptr;
-
-  RNA_pointer_create(NULL, op->type->srna, op->properties, &ptr);
-  uiCollada_importSettings(op->layout, &ptr);
+  uiCollada_importSettings(op->layout, op->ptr);
 }
 
 void WM_OT_collada_import(wmOperatorType *ot)
@@ -818,7 +786,7 @@ void WM_OT_collada_import(wmOperatorType *ot)
   ot->exec = wm_collada_import_exec;
   ot->poll = WM_operator_winactive;
 
-  // ot->flag |= OPTYPE_PRESET;
+  // ot->flag = OPTYPE_PRESET;
 
   ot->ui = wm_collada_import_draw;
 

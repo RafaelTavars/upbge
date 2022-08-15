@@ -1,8 +1,8 @@
-/* Apache License, Version 2.0 */
+/* SPDX-License-Identifier: Apache-2.0 */
 
 #include "testing/testing.h"
 
-/* TODO: ray intersection, overlap ... etc.*/
+/* TODO: ray intersection, overlap ... etc. */
 
 #include "MEM_guardedalloc.h"
 

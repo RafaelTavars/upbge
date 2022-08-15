@@ -1,9 +1,11 @@
 KX_VertexProxy(SCA_IObject)
 ===========================
 
-base class --- :class:`SCA_IObject`
+.. currentmodule:: bge.types
 
-.. class:: KX_VertexProxy(SCA_IObject)
+base class --- :class:`~bge.types.SCA_IObject`
+
+.. class:: KX_VertexProxy
 
    A vertex holds position, UV, color and normal information.
 

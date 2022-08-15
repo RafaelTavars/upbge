@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2009 Blender Foundation, Joshua Leung
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2009 Blender Foundation, Joshua Leung. All rights reserved. */
 
 /** \file
  * \ingroup edanimation
@@ -51,6 +35,7 @@
 #include "BKE_mask.h"
 #include "BKE_nla.h"
 #include "BKE_scene.h"
+#include "BKE_screen.h"
 
 #include "DEG_depsgraph.h"
 #include "DEG_depsgraph_build.h"
@@ -73,8 +58,6 @@
 
 /* -------------------------- Selection ------------------------------------- */
 
-/* Set the given animation-channel as the active one for the active context */
-/* TODO: extend for animdata types... */
 void ANIM_set_active_channel(bAnimContext *ac,
                              void *data,
                              eAnimCont_Types datatype,
@@ -82,6 +65,8 @@ void ANIM_set_active_channel(bAnimContext *ac,
                              void *channel_data,
                              eAnim_ChannelType channel_type)
 {
+  /* TODO: extend for animdata types. */
+
   ListBase anim_data = {NULL, NULL};
   bAnimListElem *ale;
 
@@ -140,6 +125,7 @@ void ANIM_set_active_channel(bAnimContext *ac,
       case ANIMTYPE_DSHAIR:
       case ANIMTYPE_DSPOINTCLOUD:
       case ANIMTYPE_DSVOLUME:
+      case ANIMTYPE_NLAACTION:
       case ANIMTYPE_DSSIMULATION: {
         /* need to verify that this data is valid for now */
         if (ale->adt) {
@@ -197,6 +183,7 @@ void ANIM_set_active_channel(bAnimContext *ac,
       case ANIMTYPE_DSHAIR:
       case ANIMTYPE_DSPOINTCLOUD:
       case ANIMTYPE_DSVOLUME:
+      case ANIMTYPE_NLAACTION:
       case ANIMTYPE_DSSIMULATION: {
         /* need to verify that this data is valid for now */
         if (ale && ale->adt) {
@@ -214,7 +201,6 @@ void ANIM_set_active_channel(bAnimContext *ac,
       /* unhandled currently, but may be interesting */
       case ANIMTYPE_MASKLAYER:
       case ANIMTYPE_SHAPEKEY:
-      case ANIMTYPE_NLAACTION:
         break;
 
       /* other types */
@@ -327,6 +313,7 @@ static eAnimChannels_SetFlag anim_channels_selection_flag_for_toggle(const ListB
       case ANIMTYPE_DSHAIR:
       case ANIMTYPE_DSPOINTCLOUD:
       case ANIMTYPE_DSVOLUME:
+      case ANIMTYPE_NLAACTION:
       case ANIMTYPE_DSSIMULATION: {
         if ((ale->adt) && (ale->adt->flag & ADT_UI_SELECTED)) {
           return ACHANNEL_SETFLAG_CLEAR;
@@ -393,7 +380,11 @@ static void anim_channels_select_set(bAnimContext *ac,
         FCurve *fcu = (FCurve *)ale->data;
 
         ACHANNEL_SET_FLAG(fcu, sel, FCURVE_SELECTED);
-        fcu->flag &= ~FCURVE_ACTIVE;
+        if ((fcu->flag & FCURVE_SELECTED) == 0) {
+          /* Only erase the ACTIVE flag when deselecting. This ensures that "select all curves"
+           * retains the currently active curve. */
+          fcu->flag &= ~FCURVE_ACTIVE;
+        }
         break;
       }
       case ANIMTYPE_SHAPEKEY: {
@@ -431,6 +422,7 @@ static void anim_channels_select_set(bAnimContext *ac,
       case ANIMTYPE_DSHAIR:
       case ANIMTYPE_DSPOINTCLOUD:
       case ANIMTYPE_DSVOLUME:
+      case ANIMTYPE_NLAACTION:
       case ANIMTYPE_DSSIMULATION: {
         /* need to verify that this data is valid for now */
         if (ale->adt) {
@@ -455,7 +447,6 @@ static void anim_channels_select_set(bAnimContext *ac,
   }
 }
 
-/* Set selection state of all animation channels in the context. */
 void ANIM_anim_channels_select_set(bAnimContext *ac, eAnimChannels_SetFlag sel)
 {
   ListBase anim_data = anim_channels_for_selection(ac);
@@ -463,7 +454,6 @@ void ANIM_anim_channels_select_set(bAnimContext *ac, eAnimChannels_SetFlag sel)
   ANIM_animdata_freelist(&anim_data);
 }
 
-/* Toggle selection state of all animation channels in the context. */
 void ANIM_anim_channels_select_toggle(bAnimContext *ac)
 {
   ListBase anim_data = anim_channels_for_selection(ac);
@@ -503,7 +493,7 @@ static void anim_flush_channel_setting_up(bAnimContext *ac,
   }
 
   /* Go backwards in the list, until the highest-ranking element
-   * (by indention has been covered). */
+   * (by indentation has been covered). */
   int prevLevel = matchLevel;
   for (bAnimListElem *ale = match->prev; ale; ale = ale->prev) {
     const bAnimChannelType *acf = ANIM_channel_get_typeinfo(ale);
@@ -552,7 +542,7 @@ static void anim_flush_channel_setting_down(bAnimContext *ac,
                                             bAnimListElem *const match,
                                             const int matchLevel)
 {
-  /* go forwards in the list, until the lowest-ranking element (by indention has been covered) */
+  /* go forwards in the list, until the lowest-ranking element (by indentation has been covered) */
   for (bAnimListElem *ale = match->next; ale; ale = ale->next) {
     const bAnimChannelType *acf = ANIM_channel_get_typeinfo(ale);
 
@@ -583,15 +573,6 @@ static void anim_flush_channel_setting_down(bAnimContext *ac,
   }
 }
 
-/* Flush visibility (for Graph Editor) changes up/down hierarchy for changes in the given setting
- * - anim_data: list of the all the anim channels that can be chosen
- *   -> filtered using ANIMFILTER_CHANNELS only, since if we took VISIBLE too,
- *      then the channels under closed expanders get ignored...
- * - ale_setting: the anim channel (not in the anim_data list directly, though occurring there)
- *   with the new state of the setting that we want flushed up/down the hierarchy
- * - setting: type of setting to set
- * - on: whether the visibility setting has been enabled or disabled
- */
 void ANIM_flush_setting_anim_channels(bAnimContext *ac,
                                       ListBase *anim_data,
                                       bAnimListElem *ale_setting,
@@ -647,7 +628,6 @@ void ANIM_flush_setting_anim_channels(bAnimContext *ac,
 
 /* -------------------------- F-Curves ------------------------------------- */
 
-/* Delete the given F-Curve from its AnimData block */
 void ANIM_fcurve_delete_from_animdata(bAnimContext *ac, AnimData *adt, FCurve *fcu)
 {
   /* - if no AnimData, we've got nowhere to remove the F-Curve from
@@ -703,8 +683,6 @@ void ANIM_fcurve_delete_from_animdata(bAnimContext *ac, AnimData *adt, FCurve *f
   BKE_fcurve_free(fcu);
 }
 
-/* If the action has no F-Curves, unlink it from AnimData if it did not
- * come from a NLA Strip being tweaked. */
 bool ANIM_remove_empty_action_from_animdata(struct AnimData *adt)
 {
   if (adt->action != NULL) {
@@ -733,17 +711,17 @@ static bool animedit_poll_channels_active(bContext *C)
   /* channels region test */
   /* TODO: could enhance with actually testing if channels region? */
   if (ELEM(NULL, area, CTX_wm_region(C))) {
-    return 0;
+    return false;
   }
   /* animation editor test */
   if (ELEM(area->spacetype, SPACE_ACTION, SPACE_GRAPH, SPACE_NLA) == 0) {
-    return 0;
+    return false;
   }
 
-  return 1;
+  return true;
 }
 
-/* poll callback for Animation Editor channels list region + not in NLA-tweakmode for NLA */
+/* Poll callback for Animation Editor channels list region + not in NLA-tweak-mode for NLA. */
 static bool animedit_poll_channels_nla_tweakmode_off(bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
@@ -752,21 +730,21 @@ static bool animedit_poll_channels_nla_tweakmode_off(bContext *C)
   /* channels region test */
   /* TODO: could enhance with actually testing if channels region? */
   if (ELEM(NULL, area, CTX_wm_region(C))) {
-    return 0;
+    return false;
   }
   /* animation editor test */
   if (ELEM(area->spacetype, SPACE_ACTION, SPACE_GRAPH, SPACE_NLA) == 0) {
-    return 0;
+    return false;
   }
 
-  /* NLA TweakMode test */
+  /* NLA tweak-mode test. */
   if (area->spacetype == SPACE_NLA) {
     if ((scene == NULL) || (scene->flag & SCE_NLA_EDIT_ON)) {
-      return 0;
+      return false;
     }
   }
 
-  return 1;
+  return true;
 }
 
 /* ****************** Rearrange Channels Operator ******************* */
@@ -813,7 +791,7 @@ static bool rearrange_island_ok(tReorderChannelIsland *island)
 {
   /* island must not be untouchable */
   if (island->flag & REORDER_ISLAND_UNTOUCHABLE) {
-    return 0;
+    return false;
   }
 
   /* island should be selected to be moved */
@@ -831,10 +809,10 @@ static bool rearrange_island_top(ListBase *list, tReorderChannelIsland *island)
     /* make it first element */
     BLI_insertlinkbefore(list, list->first, island);
 
-    return 1;
+    return true;
   }
 
-  return 0;
+  return false;
 }
 
 static bool rearrange_island_up(ListBase *list, tReorderChannelIsland *island)
@@ -855,11 +833,11 @@ static bool rearrange_island_up(ListBase *list, tReorderChannelIsland *island)
       /* push it up */
       BLI_insertlinkbefore(list, prev, island);
 
-      return 1;
+      return true;
     }
   }
 
-  return 0;
+  return false;
 }
 
 static bool rearrange_island_down(ListBase *list, tReorderChannelIsland *island)
@@ -1105,7 +1083,7 @@ static bool rearrange_animchannel_islands(ListBase *list,
 
   /* don't waste effort on an empty list */
   if (BLI_listbase_is_empty(list)) {
-    return 0;
+    return false;
   }
 
   /* group channels into islands */
@@ -1156,7 +1134,7 @@ static void rearrange_nla_channels(bAnimContext *ac, AnimData *adt, eRearrangeAn
 {
   AnimChanRearrangeFp rearrange_func;
   ListBase anim_data_visible = {NULL, NULL};
-  const bool is_liboverride = ID_IS_OVERRIDE_LIBRARY(ac->obact);
+  const bool is_liboverride = (ac->obact != NULL) ? ID_IS_OVERRIDE_LIBRARY(ac->obact) : false;
 
   /* hack: invert mode so that functions will work in right order */
   mode *= -1;
@@ -1197,7 +1175,7 @@ static void rearrange_nla_channels(bAnimContext *ac, AnimData *adt, eRearrangeAn
   rearrange_animchannel_islands(
       &adt->nla_tracks, rearrange_func, mode, ANIMTYPE_NLATRACK, &anim_data_visible);
 
-  /* Add back non-local NLA tracks at the begining of the animation data's list. */
+  /* Add back non-local NLA tracks at the beginning of the animation data's list. */
   if (!BLI_listbase_is_empty(&extracted_nonlocal_nla_tracks)) {
     BLI_assert(is_liboverride);
     ((NlaTrack *)extracted_nonlocal_nla_tracks.last)->next = adt->nla_tracks.first;
@@ -1279,6 +1257,9 @@ static void split_groups_action_temp(bAction *act, bActionGroup *tgrp)
     else {
       group_fcurves_last->next->prev = group_fcurves_first->prev;
     }
+
+    /* Clear links pointing outside the per-group list. */
+    group_fcurves_first->prev = group_fcurves_last->next = NULL;
   }
 
   /* Initialize memory for temp-group */
@@ -1333,22 +1314,12 @@ static void join_groups_action_temp(bAction *act)
     if (agrp->flag & AGRP_TEMP) {
       LISTBASE_FOREACH (FCurve *, fcu, &agrp->channels) {
         fcu->grp = NULL;
-        if (fcu == agrp->channels.last) {
-          break;
-        }
       }
 
       BLI_remlink(&act->groups, agrp);
       break;
     }
   }
-
-  /* BLI_movelisttolist() doesn't touch first->prev and last->next pointers in its "dst" list.
-   * Ensure that after the reshuffling the list is properly terminated. */
-  FCurve *act_fcurves_first = act->curves.first;
-  act_fcurves_first->prev = NULL;
-  FCurve *act_fcurves_last = act->curves.last;
-  act_fcurves_last->next = NULL;
 }
 
 /* Change the order of anim-channels within action
@@ -1527,7 +1498,8 @@ static int animchannels_rearrange_exec(bContext *C, wmOperator *op)
     int filter;
 
     /* get animdata blocks */
-    filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_ANIMDATA);
+    filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_ANIMDATA |
+              ANIMFILTER_FCURVESONLY);
     ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
 
     for (ale = anim_data.first; ale; ale = ale->next) {
@@ -1580,6 +1552,7 @@ static int animchannels_rearrange_exec(bContext *C, wmOperator *op)
 
   /* send notifier that things have changed */
   WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN | NA_EDITED, NULL);
+  WM_event_add_notifier(C, NC_ANIMATION | ND_NLA_ORDER, NULL);
 
   return OPERATOR_FINISHED;
 }
@@ -1617,7 +1590,7 @@ static bool animchannels_grouping_poll(bContext *C)
   /* channels region test */
   /* TODO: could enhance with actually testing if channels region? */
   if (ELEM(NULL, area, CTX_wm_region(C))) {
-    return 0;
+    return false;
   }
 
   /* animation editor test - must be suitable modes only */
@@ -1630,7 +1603,7 @@ static bool animchannels_grouping_poll(bContext *C)
 
       /* dopesheet and action only - all others are for other datatypes or have no groups */
       if (ELEM(saction->mode, SACTCONT_ACTION, SACTCONT_DOPESHEET) == 0) {
-        return 0;
+        return false;
       }
 
       break;
@@ -1640,17 +1613,17 @@ static bool animchannels_grouping_poll(bContext *C)
 
       /* drivers can't have groups... */
       if (sipo->mode != SIPO_MODE_ANIMATION) {
-        return 0;
+        return false;
       }
 
       break;
     }
     /* unsupported... */
     default:
-      return 0;
+      return false;
   }
 
-  return 1;
+  return true;
 }
 
 /* ----------------------------------------------------------- */
@@ -1667,7 +1640,8 @@ static void animchannels_group_channels(bAnimContext *ac,
     int filter;
 
     /* find selected F-Curves to re-group */
-    filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_SEL);
+    filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_SEL |
+              ANIMFILTER_FCURVESONLY);
     ANIM_animdata_filter(ac, &anim_data, filter, adt_ref, ANIMCONT_CHANNEL);
 
     if (anim_data.first) {
@@ -1678,7 +1652,7 @@ static void animchannels_group_channels(bAnimContext *ac,
       agrp = action_groups_add_new(act, name);
       BLI_assert(agrp != NULL);
 
-      /* transfer selected F-Curves across to new group  */
+      /* Transfer selected F-Curves across to new group. */
       for (ale = anim_data.first; ale; ale = ale->next) {
         FCurve *fcu = (FCurve *)ale->data;
         bActionGroup *grp = fcu->grp;
@@ -1719,9 +1693,9 @@ static int animchannels_group_exec(bContext *C, wmOperator *op)
     bAnimListElem *ale;
     int filter;
 
-    /* handle each animdata block separately, so that the regrouping doesn't flow into blocks  */
+    /* Handle each animdata block separately, so that the regrouping doesn't flow into blocks. */
     filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_ANIMDATA |
-              ANIMFILTER_NODUPLIS);
+              ANIMFILTER_NODUPLIS | ANIMFILTER_FCURVESONLY);
     ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
 
     for (ale = anim_data.first; ale; ale = ale->next) {
@@ -1731,7 +1705,7 @@ static int animchannels_group_exec(bContext *C, wmOperator *op)
     /* free temp data */
     ANIM_animdata_freelist(&anim_data);
 
-    /* updatss */
+    /* Updates. */
     WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN | NA_EDITED, NULL);
   }
 
@@ -1781,7 +1755,7 @@ static int animchannels_ungroup_exec(bContext *C, wmOperator *UNUSED(op))
 
   /* just selected F-Curves... */
   filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_SEL |
-            ANIMFILTER_NODUPLIS);
+            ANIMFILTER_NODUPLIS | ANIMFILTER_FCURVESONLY);
   ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
 
   for (ale = anim_data.first; ale; ale = ale->next) {
@@ -2028,7 +2002,7 @@ static const EnumPropertyItem prop_animchannel_settings_types[] = {
  * \param mode: eAnimChannels_SetFlag.
  * \param onlysel: only selected channels get the flag set.
  *
- * TODO: enable a setting which turns flushing on/off?.
+ * TODO: enable a setting which turns flushing on/off?
  */
 static void setflag_anim_channels(bAnimContext *ac,
                                   eAnimChannel_Settings setting,
@@ -2061,7 +2035,7 @@ static void setflag_anim_channels(bAnimContext *ac,
   if ((ac->spacetype == SPACE_GRAPH) && (ac->regiontype != RGN_TYPE_CHANNELS)) {
     /* graph editor (case 2) */
     filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_CHANNELS | ANIMFILTER_CURVE_VISIBLE |
-              ANIMFILTER_NODUPLIS);
+              ANIMFILTER_FCURVESONLY | ANIMFILTER_NODUPLIS);
   }
   else {
     /* standard case */
@@ -2279,7 +2253,7 @@ static void ANIM_OT_channels_expand(wmOperatorType *ot)
   /* identifiers */
   ot->name = "Expand Channels";
   ot->idname = "ANIM_OT_channels_expand";
-  ot->description = "Expand (i.e. open) all selected expandable animation channels";
+  ot->description = "Expand (open) all selected expandable animation channels";
 
   /* api callbacks */
   ot->exec = animchannels_expand_exec;
@@ -2324,7 +2298,7 @@ static void ANIM_OT_channels_collapse(wmOperatorType *ot)
   /* identifiers */
   ot->name = "Collapse Channels";
   ot->idname = "ANIM_OT_channels_collapse";
-  ot->description = "Collapse (i.e. close) all selected expandable animation channels";
+  ot->description = "Collapse (close) all selected expandable animation channels";
 
   /* api callbacks */
   ot->exec = animchannels_collapse_exec;
@@ -2427,6 +2401,7 @@ static int animchannels_clean_empty_exec(bContext *C, wmOperator *UNUSED(op))
 
   /* send notifier that things have changed */
   WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN | NA_EDITED, NULL);
+  WM_event_add_notifier(C, NC_ANIMATION | ND_NLA | NA_REMOVED, NULL);
 
   return OPERATOR_FINISHED;
 }
@@ -2455,15 +2430,15 @@ static bool animchannels_enable_poll(bContext *C)
   /* channels region test */
   /* TODO: could enhance with actually testing if channels region? */
   if (ELEM(NULL, area, CTX_wm_region(C))) {
-    return 0;
+    return false;
   }
 
   /* animation editor test - Action/Dopesheet/etc. and Graph only */
   if (ELEM(area->spacetype, SPACE_ACTION, SPACE_GRAPH) == 0) {
-    return 0;
+    return false;
   }
 
-  return 1;
+  return true;
 }
 
 static int animchannels_enable_exec(bContext *C, wmOperator *UNUSED(op))
@@ -2480,7 +2455,7 @@ static int animchannels_enable_exec(bContext *C, wmOperator *UNUSED(op))
   }
 
   /* filter data */
-  filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_NODUPLIS);
+  filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_NODUPLIS | ANIMFILTER_FCURVESONLY);
   ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
 
   /* loop through filtered data and clean curves */
@@ -2523,79 +2498,77 @@ static void ANIM_OT_channels_fcurves_enable(wmOperatorType *ot)
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
-/* ****************** Find / Set Filter Operator ******************** */
+/* ****************** Select Filter Textbox Operator ******************** */
 
 /* XXX: make this generic? */
-static bool animchannels_find_poll(bContext *C)
+static bool animchannels_select_filter_poll(bContext *C)
 {
   ScrArea *area = CTX_wm_area(C);
 
   if (area == NULL) {
-    return 0;
+    return false;
   }
 
   /* animation editor with dopesheet */
   return ELEM(area->spacetype, SPACE_ACTION, SPACE_GRAPH, SPACE_NLA);
 }
 
-/* find_invoke() - Get initial channels */
-static int animchannels_find_invoke(bContext *C, wmOperator *op, const wmEvent *evt)
+static int animchannels_select_filter_invoke(struct bContext *C,
+                                             struct wmOperator *op,
+                                             const struct wmEvent *UNUSED(event))
 {
-  bAnimContext ac;
+  ScrArea *area = CTX_wm_area(C);
+  ARegion *region_ctx = CTX_wm_region(C);
+  ARegion *region_channels = BKE_area_find_region_type(area, RGN_TYPE_CHANNELS);
 
-  /* get editor data */
-  if (ANIM_animdata_get_context(C, &ac) == 0) {
-    return OPERATOR_CANCELLED;
+  CTX_wm_region_set(C, region_channels);
+
+  /* Show the channel region if it's hidden. This means that direct activation of the input field
+   * is impossible, as it may not exist yet. For that reason, the actual activation is deferred to
+   * the modal callback function; by the time it runs, the screen has been redrawn and the UI
+   * element is there to activate. */
+  if (region_channels->flag & RGN_FLAG_HIDDEN) {
+    ED_region_toggle_hidden(C, region_channels);
+    ED_region_tag_redraw(region_channels);
   }
 
-  /* set initial filter text, and enable filter */
-  RNA_string_set(op->ptr, "query", ac.ads->searchstr);
+  WM_event_add_modal_handler(C, op);
 
-  /* defer to popup */
-  return WM_operator_props_popup(C, op, evt);
+  CTX_wm_region_set(C, region_ctx);
+  return OPERATOR_RUNNING_MODAL;
 }
 
-/* find_exec() -  Called to set the value */
-static int animchannels_find_exec(bContext *C, wmOperator *op)
+static int animchannels_select_filter_modal(bContext *C,
+                                            wmOperator *UNUSED(op),
+                                            const wmEvent *UNUSED(event))
 {
   bAnimContext ac;
-
-  /* get editor data */
   if (ANIM_animdata_get_context(C, &ac) == 0) {
     return OPERATOR_CANCELLED;
   }
 
-  /* update filter text */
-  RNA_string_get(op->ptr, "query", ac.ads->searchstr);
-
-  /* redraw */
-  WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN | NA_EDITED, NULL);
+  ARegion *region = CTX_wm_region(C);
+  if (UI_textbutton_activate_rna(C, region, ac.ads, "filter_text")) {
+    /* Redraw to make sure it shows the cursor after activating */
+    WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN | NA_EDITED, NULL);
+  }
 
   return OPERATOR_FINISHED;
 }
 
-static void ANIM_OT_channels_find(wmOperatorType *ot)
+static void ANIM_OT_channels_select_filter(wmOperatorType *ot)
 {
   /* identifiers */
-  ot->name = "Find Channels";
-  ot->idname = "ANIM_OT_channels_find";
-  ot->description = "Filter the set of channels shown to only include those with matching names";
+  ot->name = "Filter Channels";
+  ot->idname = "ANIM_OT_channels_select_filter";
+  ot->description =
+      "Start entering text which filters the set of channels shown to only include those with "
+      "matching names";
 
   /* callbacks */
-  ot->invoke = animchannels_find_invoke;
-  ot->exec = animchannels_find_exec;
-  ot->poll = animchannels_find_poll;
-
-  /* flags */
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-
-  /* properties */
-  ot->prop = RNA_def_string(ot->srna,
-                            "query",
-                            "Query",
-                            sizeof(((bDopeSheet *)NULL)->searchstr),
-                            "",
-                            "Text to search for in channel names");
+  ot->invoke = animchannels_select_filter_invoke;
+  ot->modal = animchannels_select_filter_modal;
+  ot->poll = animchannels_select_filter_poll;
 }
 
 /* ********************** Select All Operator *********************** */
@@ -2684,6 +2657,12 @@ static void box_select_anim_channels(bAnimContext *ac, rcti *rect, short selectm
   /* loop over data, doing box select */
   for (ale = anim_data.first; ale; ale = ale->next) {
     float ymin;
+
+    if (ale->type == ANIMTYPE_GPDATABLOCK) {
+      ymax -= ACHANNEL_STEP(ac);
+      continue;
+    }
+
     if (ac->datatype == ANIMCONT_NLA) {
       ymin = ymax - NLACHANNEL_STEP(snla);
     }
@@ -2814,11 +2793,34 @@ static bool rename_anim_channels(bAnimContext *ac, int channel_index)
     return false;
   }
 
-  /* don't allow renaming linked channels */
-  if ((ale->fcurve_owner_id != NULL && ID_IS_LINKED(ale->fcurve_owner_id)) ||
-      (ale->id != NULL && ID_IS_LINKED(ale->id))) {
+  /* Don't allow renaming linked/liboverride channels. */
+  if (ale->fcurve_owner_id != NULL &&
+      (ID_IS_LINKED(ale->fcurve_owner_id) || ID_IS_OVERRIDE_LIBRARY(ale->fcurve_owner_id))) {
     ANIM_animdata_freelist(&anim_data);
     return false;
+  }
+  if (ale->id != NULL) {
+    if (ID_IS_LINKED(ale->id)) {
+      ANIM_animdata_freelist(&anim_data);
+      return false;
+    }
+    /* There is one exception to not allowing renaming on liboverride channels: locally-inserted
+     * NLA tracks. */
+    if (ID_IS_OVERRIDE_LIBRARY(ale->id)) {
+      switch (ale->type) {
+        case ANIMTYPE_NLATRACK: {
+          NlaTrack *nlt = (NlaTrack *)ale->data;
+          if ((nlt->flag & NLATRACK_OVERRIDELIBRARY_LOCAL) == 0) {
+            ANIM_animdata_freelist(&anim_data);
+            return false;
+          }
+          break;
+        }
+        default:
+          ANIM_animdata_freelist(&anim_data);
+          return false;
+      }
+    }
   }
 
   /* check that channel can be renamed */
@@ -2900,6 +2902,7 @@ static int animchannels_rename_invoke(bContext *C, wmOperator *UNUSED(op), const
 
   /* handle click */
   if (rename_anim_channels(&ac, channel_index)) {
+    WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN | NA_RENAME, NULL);
     return OPERATOR_FINISHED;
   }
 
@@ -2986,18 +2989,16 @@ static int click_select_channel_object(bContext *C,
     }
   }
 
-  /* change active object - regardless of whether it is now selected [T37883] */
-  ED_object_base_activate(C, base); /* adds notifier */
+  /* Change active object - regardless of whether it is now selected, see: T37883.
+   *
+   * Ensure we exit edit-mode on whatever object was active before
+   * to avoid getting stuck there, see: T48747. */
+  ED_object_base_activate_with_mode_exit_if_needed(C, base); /* adds notifier */
 
   if ((adt) && (adt->flag & ADT_UI_SELECTED)) {
     adt->flag |= ADT_UI_ACTIVE;
   }
 
-  /* Ensure we exit editmode on whatever object was active before
-   * to avoid getting stuck there - T48747. */
-  if (ob != CTX_data_edit_object(C)) {
-    ED_object_editmode_exit(C, EM_FREEDATA);
-  }
   return (ND_ANIMCHAN | NA_SELECTED);
 }
 
@@ -3259,10 +3260,14 @@ static int mouse_anim_channels(bContext *C,
   bAnimListElem *ale;
   int filter;
   int notifierFlags = 0;
+  ScrArea *area = CTX_wm_area(C);
 
   /* get the channel that was clicked on */
   /* filter channels */
   filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_LIST_CHANNELS);
+  if (ELEM(area->spacetype, SPACE_NLA, SPACE_GRAPH)) {
+    filter |= ANIMFILTER_FCURVESONLY;
+  }
   ANIM_animdata_filter(ac, &anim_data, filter, ac->data, ac->datatype);
 
   /* get channel from index */
@@ -3432,12 +3437,14 @@ static void ANIM_OT_channels_click(wmOperatorType *ot)
   ot->flag = OPTYPE_UNDO;
 
   /* properties */
-  /* NOTE: don't save settings, otherwise, can end up with some weird behavior (sticky extend) */
-  prop = RNA_def_boolean(ot->srna, "extend", false, "Extend Select", ""); /* SHIFTKEY */
+  /* NOTE: don't save settings, otherwise, can end up with some weird behavior (sticky extend)
+   *
+   * Key-map: Enable with `Shift`. */
+  prop = RNA_def_boolean(ot->srna, "extend", false, "Extend Select", "");
   RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 
-  prop = RNA_def_boolean(
-      ot->srna, "children_only", false, "Select Children Only", ""); /* CTRLKEY|SHIFTKEY */
+  /* Key-map: Enable with `Ctrl-Shift`. */
+  prop = RNA_def_boolean(ot->srna, "children_only", false, "Select Children Only", "");
   RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
@@ -3452,7 +3459,8 @@ static bool select_anim_channel_keys(bAnimContext *ac, int channel_index, bool e
 
   /* get the channel that was clicked on */
   /* filter channels */
-  filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_LIST_CHANNELS);
+  filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_LIST_CHANNELS |
+            ANIMFILTER_FCURVESONLY);
   ANIM_animdata_filter(ac, &anim_data, filter, ac->data, ac->datatype);
 
   /* get channel from index */
@@ -3557,7 +3565,7 @@ void ED_operatortypes_animchannels(void)
   WM_operatortype_append(ANIM_OT_channel_select_keys);
   WM_operatortype_append(ANIM_OT_channels_rename);
 
-  WM_operatortype_append(ANIM_OT_channels_find);
+  WM_operatortype_append(ANIM_OT_channels_select_filter);
 
   WM_operatortype_append(ANIM_OT_channels_setting_enable);
   WM_operatortype_append(ANIM_OT_channels_setting_disable);

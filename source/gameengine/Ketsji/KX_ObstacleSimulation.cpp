@@ -28,7 +28,6 @@
 
 #include "KX_ObstacleSimulation.h"
 
-
 #include "KX_Globals.h"
 #include "KX_NavMeshObject.h"
 
@@ -607,14 +606,8 @@ static void processSamples(KX_Obstacle *activeObst,
 
   const float ivmax = 1.0f / vmax;
 
-  float adir[2] /*, adist */;
-  if (normalize_v2_v2(adir, activeObst->pvel) <= 0.01f) {
-    zero_v2(adir);
-  }
-
   float activeObstPos[2];
   vset(activeObstPos, activeObst->m_pos.x(), activeObst->m_pos.y());
-  /* adist = vdot(adir, activeObstPos); */
 
   float minPenalty = FLT_MAX;
 
@@ -629,8 +622,8 @@ static void processSamples(KX_Obstacle *activeObst,
 
     for (int i = 0; i < obstacles.size(); ++i) {
       KX_Obstacle *ob = obstacles[i];
-      bool res = filterObstacle(activeObst, activeNavMeshObj, ob, levelHeight);
-      if (!res)
+      bool found = filterObstacle(activeObst, activeNavMeshObj, ob, levelHeight);
+      if (!found)
         continue;
       float htmin, htmax;
 
@@ -771,7 +764,6 @@ void KX_ObstacleSimulationTOI_cells::sampleRVO(KX_Obstacle *activeObst,
   if (!m_adaptive) {
     const float cvx = activeObst->dvel[0] * m_bias;
     const float cvy = activeObst->dvel[1] * m_bias;
-    float vmax = len_v2(activeObst->dvel);
     const float vrange = vmax * (1 - m_bias);
     const float cs = 1.0f / (float)m_sampleRadius * vrange;
 

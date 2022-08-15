@@ -1,9 +1,11 @@
 SCA_RaySensor(SCA_ISensor)
-=========================
+==========================
 
-base class --- :class:`SCA_ISensor`
+.. currentmodule:: bge.types
 
-.. class:: SCA_RaySensor(SCA_ISensor)
+base class --- :class:`~bge.types.SCA_ISensor`
+
+.. class:: SCA_RaySensor
 
    A ray sensor detects the first object in a given direction.
 
@@ -36,13 +38,13 @@ base class --- :class:`SCA_ISensor`
       The collision mask (16 layers mapped to a 16-bit integer) combined with each object's collision group, to hit only a subset of the
       objects in the scene. Only those objects for which ``collisionGroup & mask`` is true can be hit.
 
-      :type: bitfield
+      :type: integer (bit mask)
 
    .. attribute:: hitObject
 
       The game object that was hit by the ray. (read-only).
 
-      :type: :class:`KX_GameObject`
+      :type: :class:`~bge.types.KX_GameObject`
 
    .. attribute:: hitPosition
 

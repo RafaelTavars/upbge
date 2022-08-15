@@ -1,4 +1,4 @@
-/* Apache License, Version 2.0 */
+/* SPDX-License-Identifier: Apache-2.0 */
 
 #include <set>
 #include <unordered_set>
@@ -456,8 +456,8 @@ TEST(set, LookupKeyPtr)
 TEST(set, LookupKeyOrAdd)
 {
   Set<MyKeyType> set;
-  set.add({1, 10});
-  set.add({2, 20});
+  set.lookup_key_or_add({1, 10});
+  set.lookup_key_or_add({2, 20});
   EXPECT_EQ(set.size(), 2);
   EXPECT_EQ(set.lookup_key_or_add({2, 40}).attached_data, 20);
   EXPECT_EQ(set.size(), 2);
@@ -524,6 +524,56 @@ TEST(set, AddExceptions)
   EXPECT_EQ(set.size(), 0);
   EXPECT_ANY_THROW({ set.add(value); });
   EXPECT_EQ(set.size(), 0);
+}
+
+TEST(set, ForwardIterator)
+{
+  Set<int> set = {5, 2, 6, 4, 1};
+  Set<int>::iterator iter1 = set.begin();
+  int value1 = *iter1;
+  Set<int>::iterator iter2 = iter1++;
+  EXPECT_EQ(*iter2, value1);
+  EXPECT_EQ(*(++iter2), *iter1);
+  /* Interesting find: On GCC & MSVC this will succeed, as the 2nd argument is evaluated before the
+   * 1st. On Apple Clang it's the other way around, and the test fails. */
+  // EXPECT_EQ(*iter1, *(++iter1));
+  Set<int>::iterator iter3 = ++iter1;
+  /* Check that #iter1 itself changed. */
+  EXPECT_EQ(*iter3, *iter1);
+}
+
+TEST(set, GenericAlgorithms)
+{
+  Set<int> set = {1, 20, 30, 40};
+  EXPECT_FALSE(std::any_of(set.begin(), set.end(), [](int v) { return v == 5; }));
+  EXPECT_TRUE(std::any_of(set.begin(), set.end(), [](int v) { return v == 30; }));
+  EXPECT_EQ(std::count(set.begin(), set.end(), 20), 1);
+}
+
+TEST(set, RemoveDuringIteration)
+{
+  Set<int> set;
+  set.add(6);
+  set.add(5);
+  set.add(2);
+  set.add(3);
+
+  EXPECT_EQ(set.size(), 4);
+
+  using Iter = Set<int>::Iterator;
+  Iter begin = set.begin();
+  Iter end = set.end();
+  for (Iter iter = begin; iter != end; ++iter) {
+    int item = *iter;
+    if (item == 2) {
+      set.remove(iter);
+    }
+  }
+
+  EXPECT_EQ(set.size(), 3);
+  EXPECT_TRUE(set.contains(5));
+  EXPECT_TRUE(set.contains(6));
+  EXPECT_TRUE(set.contains(3));
 }
 
 /**

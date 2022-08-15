@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2012 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2012 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup pybmesh
@@ -56,7 +40,7 @@ static CustomData *bpy_bm_customdata_get(BMesh *bm, char htype)
       return &bm->ldata;
   }
 
-  BLI_assert(0);
+  BLI_assert_unreachable();
   return NULL;
 }
 
@@ -78,7 +62,7 @@ static CustomDataLayer *bpy_bmlayeritem_get(BPy_BMLayerItem *self)
 /* getseters
  * ========= */
 
-/* used for many different types  */
+/* used for many different types. */
 
 PyDoc_STRVAR(bpy_bmlayeraccess_collection__float_doc,
              "Generic float custom-data layer.\n\ntype: :class:`BMLayerCollection`");
@@ -106,7 +90,7 @@ PyDoc_STRVAR(
 PyDoc_STRVAR(bpy_bmlayeraccess_collection__bevel_weight_doc,
              "Bevel weight float in [0 - 1].\n\n:type: :class:`BMLayerCollection`");
 PyDoc_STRVAR(bpy_bmlayeraccess_collection__crease_doc,
-             "Edge crease for subdivision surface - float in [0 - 1].\n\n:type: "
+             "Crease for subdivision surface - float in [0 - 1].\n\n:type: "
              ":class:`BMLayerCollection`");
 PyDoc_STRVAR(
     bpy_bmlayeraccess_collection__uv_doc,
@@ -209,7 +193,7 @@ static PyGetSetDef bpy_bmlayeraccess_vert_getseters[] = {
      (getter)bpy_bmlayeraccess_collection_get,
      (setter)NULL,
      bpy_bmlayeraccess_collection__color_doc,
-     (void *)CD_MLOOPCOL},
+     (void *)CD_PROP_BYTE_COLOR},
     {"string",
      (getter)bpy_bmlayeraccess_collection_get,
      (setter)NULL,
@@ -226,6 +210,11 @@ static PyGetSetDef bpy_bmlayeraccess_vert_getseters[] = {
      (setter)NULL,
      bpy_bmlayeraccess_collection__bevel_weight_doc,
      (void *)CD_BWEIGHT},
+    {"crease",
+     (getter)bpy_bmlayeraccess_collection_get,
+     (setter)NULL,
+     bpy_bmlayeraccess_collection__crease_doc,
+     (void *)CD_CREASE},
     {"skin",
      (getter)bpy_bmlayeraccess_collection_get,
      (setter)NULL,
@@ -265,7 +254,7 @@ static PyGetSetDef bpy_bmlayeraccess_edge_getseters[] = {
      (getter)bpy_bmlayeraccess_collection_get,
      (setter)NULL,
      bpy_bmlayeraccess_collection__color_doc,
-     (void *)CD_MLOOPCOL},
+     (void *)CD_PROP_BYTE_COLOR},
     {"string",
      (getter)bpy_bmlayeraccess_collection_get,
      (setter)NULL,
@@ -318,7 +307,7 @@ static PyGetSetDef bpy_bmlayeraccess_face_getseters[] = {
      (getter)bpy_bmlayeraccess_collection_get,
      (setter)NULL,
      bpy_bmlayeraccess_collection__color_doc,
-     (void *)CD_MLOOPCOL},
+     (void *)CD_PROP_BYTE_COLOR},
     {"string",
      (getter)bpy_bmlayeraccess_collection_get,
      (setter)NULL,
@@ -376,7 +365,7 @@ static PyGetSetDef bpy_bmlayeraccess_loop_getseters[] = {
      (getter)bpy_bmlayeraccess_collection_get,
      (setter)NULL,
      bpy_bmlayeraccess_collection__color_doc,
-     (void *)CD_MLOOPCOL},
+     (void *)CD_PROP_BYTE_COLOR},
 
     {NULL, NULL, NULL, NULL, NULL} /* Sentinel */
 };
@@ -804,7 +793,7 @@ static PyObject *bpy_bmlayercollection_subscript(BPy_BMLayerCollection *self, Py
 {
   /* don't need error check here */
   if (PyUnicode_Check(key)) {
-    return bpy_bmlayercollection_subscript_str(self, _PyUnicode_AsString(key));
+    return bpy_bmlayercollection_subscript_str(self, PyUnicode_AsUTF8(key));
   }
   if (PyIndex_Check(key)) {
     const Py_ssize_t i = PyNumber_AsSsize_t(key, PyExc_IndexError);
@@ -843,9 +832,11 @@ static PyObject *bpy_bmlayercollection_subscript(BPy_BMLayerCollection *self, Py
       const Py_ssize_t len = bpy_bmlayercollection_length(self);
       if (start < 0) {
         start += len;
+        CLAMP_MIN(start, 0);
       }
       if (stop < 0) {
         stop += len;
+        CLAMP_MIN(stop, 0);
       }
     }
 
@@ -862,7 +853,7 @@ static PyObject *bpy_bmlayercollection_subscript(BPy_BMLayerCollection *self, Py
 
 static int bpy_bmlayercollection_contains(BPy_BMLayerCollection *self, PyObject *value)
 {
-  const char *keyname = _PyUnicode_AsString(value);
+  const char *keyname = PyUnicode_AsUTF8(value);
   CustomData *data;
   int index;
 
@@ -958,7 +949,7 @@ PyObject *BPy_BMLayerAccess_CreatePyObject(BMesh *bm, const char htype)
       type = &BPy_BMLayerAccessLoop_Type;
       break;
     default: {
-      BLI_assert(0);
+      BLI_assert_unreachable();
       type = NULL;
       break;
     }
@@ -1102,13 +1093,6 @@ static void *bpy_bmlayeritem_ptr_get(BPy_BMElem *py_ele, BPy_BMLayerItem *py_lay
   return value;
 }
 
-/**
- *\brief BMElem.__getitem__()
- *
- * assume all error checks are done, eg:
- *
- *     uv = vert[uv_layer]
- */
 PyObject *BPy_BMLayerItem_GetItem(BPy_BMElem *py_ele, BPy_BMLayerItem *py_layer)
 {
   void *value = bpy_bmlayeritem_ptr_get(py_ele, py_layer);
@@ -1150,7 +1134,7 @@ PyObject *BPy_BMLayerItem_GetItem(BPy_BMElem *py_ele, BPy_BMLayerItem *py_layer)
       ret = BPy_BMLoopUV_CreatePyObject(value);
       break;
     }
-    case CD_MLOOPCOL: {
+    case CD_PROP_BYTE_COLOR: {
       ret = BPy_BMLoopColor_CreatePyObject(value);
       break;
     }
@@ -1252,7 +1236,7 @@ int BPy_BMLayerItem_SetItem(BPy_BMElem *py_ele, BPy_BMLayerItem *py_layer, PyObj
       ret = BPy_BMLoopUV_AssignPyObject(value, py_value);
       break;
     }
-    case CD_MLOOPCOL: {
+    case CD_PROP_BYTE_COLOR: {
       ret = BPy_BMLoopColor_AssignPyObject(value, py_value);
       break;
     }

@@ -1,33 +1,20 @@
-/*
- * Copyright 2011-2016 Blender Foundation
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+/* SPDX-License-Identifier: Apache-2.0
+ * Copyright 2011-2022 Blender Foundation */
 
 #include "testing/mock_log.h"
 #include "testing/testing.h"
 
 #include "device/device.h"
 
-#include "render/graph.h"
-#include "render/nodes.h"
-#include "render/scene.h"
+#include "scene/scene.h"
+#include "scene/shader_graph.h"
+#include "scene/shader_nodes.h"
 
-#include "util/util_array.h"
-#include "util/util_logging.h"
-#include "util/util_stats.h"
-#include "util/util_string.h"
-#include "util/util_vector.h"
+#include "util/array.h"
+#include "util/log.h"
+#include "util/stats.h"
+#include "util/string.h"
+#include "util/vector.h"
 
 using testing::_;
 using testing::AnyNumber;
@@ -179,9 +166,9 @@ class RenderGraph : public testing::Test {
   virtual void SetUp()
   {
     util_logging_start();
-    util_logging_verbosity_set(1);
+    util_logging_verbosity_set(5);
 
-    device_cpu = Device::create(device_info, stats, profiler, true);
+    device_cpu = Device::create(device_info, stats, profiler);
     scene = new Scene(scene_params, device_cpu);
   }
 
@@ -259,9 +246,7 @@ TEST_F(RenderGraph, constant_fold_emission1)
   EXPECT_ANY_MESSAGE(log);
   CORRECT_INFO_MESSAGE(log, "Discarding closure Emission.");
 
-  builder
-      .add_node(ShaderNodeBuilder<EmissionNode>(graph, "Emission")
-                    .set("Color", make_float3(0.0f, 0.0f, 0.0f)))
+  builder.add_node(ShaderNodeBuilder<EmissionNode>(graph, "Emission").set("Color", zero_float3()))
       .output_closure("Emission::Emission");
 
   graph.finalize(scene);
@@ -288,8 +273,7 @@ TEST_F(RenderGraph, constant_fold_background1)
   CORRECT_INFO_MESSAGE(log, "Discarding closure Background.");
 
   builder
-      .add_node(ShaderNodeBuilder<BackgroundNode>(graph, "Background")
-                    .set("Color", make_float3(0.0f, 0.0f, 0.0f)))
+      .add_node(ShaderNodeBuilder<BackgroundNode>(graph, "Background").set("Color", zero_float3()))
       .output_closure("Background::Background");
 
   graph.finalize(scene);
@@ -892,8 +876,7 @@ TEST_F(RenderGraph, constant_fold_gamma_part_0)
   builder
       .add_attribute("Attribute")
       /* constant on the left */
-      .add_node(ShaderNodeBuilder<GammaNode>(graph, "Gamma_Cx")
-                    .set("Color", make_float3(0.0f, 0.0f, 0.0f)))
+      .add_node(ShaderNodeBuilder<GammaNode>(graph, "Gamma_Cx").set("Color", zero_float3()))
       .add_connection("Attribute::Fac", "Gamma_Cx::Gamma")
       /* constant on the right */
       .add_node(ShaderNodeBuilder<GammaNode>(graph, "Gamma_xC").set("Gamma", 0.0f))
@@ -922,8 +905,7 @@ TEST_F(RenderGraph, constant_fold_gamma_part_1)
   builder
       .add_attribute("Attribute")
       /* constant on the left */
-      .add_node(ShaderNodeBuilder<GammaNode>(graph, "Gamma_Cx")
-                    .set("Color", make_float3(1.0f, 1.0f, 1.0f)))
+      .add_node(ShaderNodeBuilder<GammaNode>(graph, "Gamma_Cx").set("Color", one_float3()))
       .add_connection("Attribute::Fac", "Gamma_Cx::Gamma")
       /* constant on the right */
       .add_node(ShaderNodeBuilder<GammaNode>(graph, "Gamma_xC").set("Gamma", 1.0f))
@@ -964,7 +946,7 @@ TEST_F(RenderGraph, constant_fold_bright_contrast)
 TEST_F(RenderGraph, constant_fold_blackbody)
 {
   EXPECT_ANY_MESSAGE(log);
-  CORRECT_INFO_MESSAGE(log, "Folding Blackbody::Color to constant (3.94163, 0.226523, 0).");
+  CORRECT_INFO_MESSAGE(log, "Folding Blackbody::Color to constant (3.96553, 0.227897, 0).");
 
   builder
       .add_node(ShaderNodeBuilder<BlackbodyNode>(graph, "Blackbody").set("Temperature", 1200.0f))

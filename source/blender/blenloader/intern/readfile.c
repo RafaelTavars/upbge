@@ -1,27 +1,9 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2001-2002 by NaN Holding BV.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2001-2002 NaN Holding BV. All rights reserved. */
 
 /** \file
  * \ingroup blenloader
  */
-
-#include "zlib.h"
 
 #include <ctype.h> /* for isdigit. */
 #include <fcntl.h> /* for open flags (O_BINARY, O_RDONLY). */
@@ -39,6 +21,8 @@
 #  include "winsock2.h"
 #  include <io.h> /* for open close read */
 #endif
+
+#include "CLG_log.h"
 
 /* allow readfile to use deprecated functionality */
 #define DNA_DEPRECATED_ALLOW
@@ -62,6 +46,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_blenlib.h"
+#include "BLI_endian_defines.h"
 #include "BLI_endian_switch.h"
 #include "BLI_ghash.h"
 #include "BLI_linklist.h"
@@ -69,6 +54,8 @@
 #include "BLI_memarena.h"
 #include "BLI_mempool.h"
 #include "BLI_threads.h"
+
+#include "PIL_time.h"
 
 #include "BLT_translation.h"
 
@@ -93,6 +80,7 @@
 #include "BKE_report.h"
 #include "BKE_scene.h"
 #include "BKE_screen.h"
+#include "BKE_undo_system.h"
 #include "BKE_workspace.h"
 
 #include "DRW_engine.h"
@@ -109,6 +97,7 @@
 #include "SEQ_iterator.h"
 #include "SEQ_modifier.h"
 #include "SEQ_sequencer.h"
+#include "SEQ_utils.h"
 
 #include "readfile.h"
 
@@ -176,31 +165,24 @@
  * which keeps large arrays in memory from data-blocks we may not even use.
  *
  * \note This is disabled when using compression,
- * while zlib supports seek it's unusably slow, see: T61880.
+ * while ZLIB supports seek it's unusably slow, see: T61880.
  */
 #define USE_BHEAD_READ_ON_DEMAND
 
-/* use GHash for BHead name-based lookups (speeds up linking) */
+/** Use #GHash for #BHead name-based lookups (speeds up linking). */
 #define USE_GHASH_BHEAD
 
-/* Use GHash for restoring pointers by name */
+/** Use #GHash for restoring pointers by name. */
 #define USE_GHASH_RESTORE_POINTER
 
-/* Define this to have verbose debug prints. */
-//#define USE_DEBUG_PRINT
-
-#ifdef USE_DEBUG_PRINT
-#  define DEBUG_PRINTF(...) printf(__VA_ARGS__)
-#else
-#  define DEBUG_PRINTF(...)
-#endif
+static CLG_LogRef LOG = {"blo.readfile"};
+static CLG_LogRef LOG_UNDO = {"blo.readfile.undo"};
 
 /* local prototypes */
 static void read_libraries(FileData *basefd, ListBase *mainlist);
 static void *read_struct(FileData *fd, BHead *bh, const char *blockname);
 static BHead *find_bhead_from_code_name(FileData *fd, const short idcode, const char *name);
 static BHead *find_bhead_from_idname(FileData *fd, const char *idname);
-static bool library_link_idcode_needs_tag_check(const short idcode, const int flag);
 
 typedef struct BHeadN {
   struct BHeadN *next, *prev;
@@ -216,18 +198,13 @@ typedef struct BHeadN {
 
 #define BHEADN_FROM_BHEAD(bh) ((BHeadN *)POINTER_OFFSET(bh, -(int)offsetof(BHeadN, bhead)))
 
-/* We could change this in the future, for now it's simplest if only data is delayed
- * because ID names are used in lookup tables. */
+/**
+ * We could change this in the future, for now it's simplest if only data is delayed
+ * because ID names are used in lookup tables.
+ */
 #define BHEAD_USE_READ_ON_DEMAND(bhead) ((bhead)->code == DATA)
 
-/**
- * This function ensures that reports are printed,
- * in the case of library linking errors this is important!
- *
- * bit kludge but better than doubling up on prints,
- * we could alternatively have a versions of a report function which forces printing - campbell
- */
-void BLO_reportf_wrap(ReportList *reports, ReportType type, const char *format, ...)
+void BLO_reportf_wrap(BlendFileReadReport *reports, eReportType type, const char *format, ...)
 {
   char fixed_buf[1024]; /* should be long enough */
 
@@ -239,7 +216,7 @@ void BLO_reportf_wrap(ReportList *reports, ReportType type, const char *format, 
 
   fixed_buf[sizeof(fixed_buf) - 1] = '\0';
 
-  BKE_report(reports, type, fixed_buf);
+  BKE_report(reports->reports, type, fixed_buf);
 
   if (G.background == 0) {
     printf("%s: %s\n", BKE_report_type_str(type), fixed_buf);
@@ -267,7 +244,7 @@ typedef struct OldNewMap {
   /* Array that stores the actual entries. */
   OldNew *entries;
   int nentries;
-  /* Hashmap that stores indices into the `entries` array. */
+  /* Hash-map that stores indices into the `entries` array. */
   int32_t *map;
 
   int capacity_exp;
@@ -349,15 +326,22 @@ static void oldnewmap_increase_size(OldNewMap *onm)
 
 /* Public OldNewMap API */
 
-static OldNewMap *oldnewmap_new(void)
+static void oldnewmap_init_data(OldNewMap *onm, const int capacity_exp)
 {
-  OldNewMap *onm = MEM_callocN(sizeof(*onm), "OldNewMap");
+  memset(onm, 0x0, sizeof(*onm));
 
-  onm->capacity_exp = DEFAULT_SIZE_EXP;
+  onm->capacity_exp = capacity_exp;
   onm->entries = MEM_malloc_arrayN(
       ENTRIES_CAPACITY(onm), sizeof(*onm->entries), "OldNewMap.entries");
   onm->map = MEM_malloc_arrayN(MAP_CAPACITY(onm), sizeof(*onm->map), "OldNewMap.map");
   oldnewmap_clear_map(onm);
+}
+
+static OldNewMap *oldnewmap_new(void)
+{
+  OldNewMap *onm = MEM_mallocN(sizeof(*onm), "OldNewMap");
+
+  oldnewmap_init_data(onm, DEFAULT_SIZE_EXP);
 
   return onm;
 }
@@ -377,6 +361,11 @@ static void oldnewmap_insert(OldNewMap *onm, const void *oldaddr, void *newaddr,
   entry.newp = newaddr;
   entry.nr = nr;
   oldnewmap_insert_or_replace(onm, entry);
+}
+
+static void oldnewmap_lib_insert(FileData *fd, const void *oldaddr, ID *newaddr, int nr)
+{
+  oldnewmap_insert(fd->libmap, oldaddr, newaddr, nr);
 }
 
 void blo_do_versions_oldnewmap_insert(OldNewMap *onm, const void *oldaddr, void *newaddr, int nr)
@@ -424,9 +413,10 @@ static void oldnewmap_clear(OldNewMap *onm)
     }
   }
 
-  onm->capacity_exp = DEFAULT_SIZE_EXP;
-  oldnewmap_clear_map(onm);
-  onm->nentries = 0;
+  MEM_freeN(onm->entries);
+  MEM_freeN(onm->map);
+
+  oldnewmap_init_data(onm, DEFAULT_SIZE_EXP);
 }
 
 static void oldnewmap_free(OldNewMap *onm)
@@ -451,7 +441,7 @@ static void oldnewmap_free(OldNewMap *onm)
 
 static void add_main_to_main(Main *mainvar, Main *from)
 {
-  ListBase *lbarray[MAX_LIBARRAY], *fromarray[MAX_LIBARRAY];
+  ListBase *lbarray[INDEX_ID_MAX], *fromarray[INDEX_ID_MAX];
   int a;
 
   set_listbasepointers(mainvar, lbarray);
@@ -466,6 +456,13 @@ void blo_join_main(ListBase *mainlist)
   Main *tojoin, *mainl;
 
   mainl = mainlist->first;
+
+  if (mainl->id_map != NULL) {
+    /* Cannot keep this since we add some IDs from joined mains. */
+    BKE_main_idmap_destroy(mainl->id_map);
+    mainl->id_map = NULL;
+  }
+
   while ((tojoin = mainl->next)) {
     add_main_to_main(mainl, tojoin);
     BLI_remlink(mainlist, tojoin);
@@ -488,8 +485,7 @@ static void split_libdata(ListBase *lb_src, Main **lib_main_array, const uint li
         BLI_addtail(lb_dst, id);
       }
       else {
-        printf("%s: invalid library for '%s'\n", __func__, id->name);
-        BLI_assert(0);
+        CLOG_ERROR(&LOG, "Invalid library for '%s'", id->name);
       }
     }
   }
@@ -502,6 +498,12 @@ void blo_split_main(ListBase *mainlist, Main *main)
 
   if (BLI_listbase_is_empty(&main->libraries)) {
     return;
+  }
+
+  if (main->id_map != NULL) {
+    /* Cannot keep this since we remove some IDs from given main. */
+    BKE_main_idmap_destroy(main->id_map);
+    main->id_map = NULL;
   }
 
   /* (Library.temp_index -> Main), lookup table */
@@ -519,12 +521,12 @@ void blo_split_main(ListBase *mainlist, Main *main)
     lib_main_array[i] = libmain;
   }
 
-  ListBase *lbarray[MAX_LIBARRAY];
+  ListBase *lbarray[INDEX_ID_MAX];
   i = set_listbasepointers(main, lbarray);
   while (i--) {
     ID *id = lbarray[i]->first;
     if (id == NULL || GS(id->name) == ID_LI) {
-      /* No ID_LI data-lock should ever be linked anyway, but just in case, better be explicit. */
+      /* No ID_LI data-block should ever be linked anyway, but just in case, better be explicit. */
       continue;
     }
     split_libdata(lbarray[i], lib_main_array, lib_main_array_len);
@@ -559,6 +561,23 @@ static void read_file_version(FileData *fd, Main *main)
   }
 }
 
+static bool blo_bhead_is_id(const BHead *bhead)
+{
+  /* BHead codes are four bytes (like 'ENDB', 'TEST', etc.), but if the two most-significant bytes
+   * are zero, the values actually indicate an ID type. */
+  return bhead->code <= 0xFFFF;
+}
+
+static bool blo_bhead_is_id_valid_type(const BHead *bhead)
+{
+  if (!blo_bhead_is_id(bhead)) {
+    return false;
+  }
+
+  const short id_type_code = bhead->code & 0xFFFF;
+  return BKE_idtype_idcode_is_valid(id_type_code);
+}
+
 #ifdef USE_GHASH_BHEAD
 static void read_file_bhead_idname_map_create(FileData *fd)
 {
@@ -572,8 +591,9 @@ static void read_file_bhead_idname_map_create(FileData *fd)
   for (bhead = blo_bhead_first(fd); bhead; bhead = blo_bhead_next(fd, bhead)) {
     if (code_prev != bhead->code) {
       code_prev = bhead->code;
-      is_link = BKE_idtype_idcode_is_valid(code_prev) ? BKE_idtype_idcode_is_linkable(code_prev) :
-                                                        false;
+      is_link = blo_bhead_is_id_valid_type(bhead) ?
+                    BKE_idtype_idcode_is_linkable((short)code_prev) :
+                    false;
     }
 
     if (is_link) {
@@ -588,8 +608,9 @@ static void read_file_bhead_idname_map_create(FileData *fd)
   for (bhead = blo_bhead_first(fd); bhead; bhead = blo_bhead_next(fd, bhead)) {
     if (code_prev != bhead->code) {
       code_prev = bhead->code;
-      is_link = BKE_idtype_idcode_is_valid(code_prev) ? BKE_idtype_idcode_is_linkable(code_prev) :
-                                                        false;
+      is_link = blo_bhead_is_id_valid_type(bhead) ?
+                    BKE_idtype_idcode_is_linkable((short)code_prev) :
+                    false;
     }
 
     if (is_link) {
@@ -614,11 +635,11 @@ static Main *blo_find_main(FileData *fd, const char *filepath, const char *relab
   //  printf("blo_find_main: converted to %s\n", name1);
 
   for (m = mainlist->first; m; m = m->next) {
-    const char *libname = (m->curlib) ? m->curlib->filepath_abs : m->name;
+    const char *libname = (m->curlib) ? m->curlib->filepath_abs : m->filepath;
 
     if (BLI_path_cmp(name1, libname) == 0) {
       if (G.debug & G_DEBUG) {
-        printf("blo_find_main: found library %s\n", libname);
+        CLOG_INFO(&LOG, 3, "Found library %s", libname);
       }
       return m;
     }
@@ -645,7 +666,7 @@ static Main *blo_find_main(FileData *fd, const char *filepath, const char *relab
   read_file_version(fd, m);
 
   if (G.debug & G_DEBUG) {
-    printf("blo_find_main: added new lib %s\n", filepath);
+    CLOG_INFO(&LOG, 3, "Added new lib %s", filepath);
   }
   return m;
 }
@@ -714,7 +735,7 @@ static void bh4_from_bh8(BHead *bhead, BHead8 *bhead8, bool do_endian_swap)
       BLI_endian_switch_uint64(&bhead8->old);
     }
 
-    /* this patch is to avoid a long long being read from not-eight aligned positions
+    /* this patch is to avoid `intptr_t` being read from not-eight aligned positions
      * is necessary on any modern 64bit architecture) */
     memcpy(&old, &bhead8->old, 8);
     bhead4->old = (int)(old >> 3);
@@ -760,7 +781,7 @@ static BHeadN *get_bhead(FileData *fd)
        */
       if (fd->flags & FD_FLAGS_FILE_POINTSIZE_IS_4) {
         bhead4.code = DATA;
-        readsize = fd->read(fd, &bhead4, sizeof(bhead4), NULL);
+        readsize = fd->file->read(fd->file, &bhead4, sizeof(bhead4));
 
         if (readsize == sizeof(bhead4) || bhead4.code == ENDB) {
           if (fd->flags & FD_FLAGS_SWITCH_ENDIAN) {
@@ -783,7 +804,7 @@ static BHeadN *get_bhead(FileData *fd)
       }
       else {
         bhead8.code = DATA;
-        readsize = fd->read(fd, &bhead8, sizeof(bhead8), NULL);
+        readsize = fd->file->read(fd->file, &bhead8, sizeof(bhead8));
 
         if (readsize == sizeof(bhead8) || bhead8.code == ENDB) {
           if (fd->flags & FD_FLAGS_SWITCH_ENDIAN) {
@@ -817,22 +838,22 @@ static BHeadN *get_bhead(FileData *fd)
         /* pass */
       }
 #ifdef USE_BHEAD_READ_ON_DEMAND
-      else if (fd->seek != NULL && BHEAD_USE_READ_ON_DEMAND(&bhead)) {
+      else if (fd->file->seek != NULL && BHEAD_USE_READ_ON_DEMAND(&bhead)) {
         /* Delay reading bhead content. */
         new_bhead = MEM_mallocN(sizeof(BHeadN), "new_bhead");
         if (new_bhead) {
           new_bhead->next = new_bhead->prev = NULL;
-          new_bhead->file_offset = fd->file_offset;
+          new_bhead->file_offset = fd->file->offset;
           new_bhead->has_data = false;
           new_bhead->is_memchunk_identical = false;
           new_bhead->bhead = bhead;
-          off64_t seek_new = fd->seek(fd, bhead.len, SEEK_CUR);
+          off64_t seek_new = fd->file->seek(fd->file, bhead.len, SEEK_CUR);
           if (seek_new == -1) {
             fd->is_eof = true;
             MEM_freeN(new_bhead);
             new_bhead = NULL;
           }
-          BLI_assert(fd->file_offset == seek_new);
+          BLI_assert(fd->file->offset == seek_new);
         }
         else {
           fd->is_eof = true;
@@ -850,13 +871,16 @@ static BHeadN *get_bhead(FileData *fd)
           new_bhead->is_memchunk_identical = false;
           new_bhead->bhead = bhead;
 
-          readsize = fd->read(
-              fd, new_bhead + 1, (size_t)bhead.len, &new_bhead->is_memchunk_identical);
+          readsize = fd->file->read(fd->file, new_bhead + 1, (size_t)bhead.len);
 
-          if (readsize != (ssize_t)bhead.len) {
+          if (readsize != bhead.len) {
             fd->is_eof = true;
             MEM_freeN(new_bhead);
             new_bhead = NULL;
+          }
+
+          if (fd->flags & FD_FLAGS_IS_MEMFILE) {
+            new_bhead->is_memchunk_identical = ((UndoReader *)fd->file)->memchunk_identical;
           }
         }
         else {
@@ -936,17 +960,19 @@ static bool blo_bhead_read_data(FileData *fd, BHead *thisblock, void *buf)
   bool success = true;
   BHeadN *new_bhead = BHEADN_FROM_BHEAD(thisblock);
   BLI_assert(new_bhead->has_data == false && new_bhead->file_offset != 0);
-  off64_t offset_backup = fd->file_offset;
-  if (UNLIKELY(fd->seek(fd, new_bhead->file_offset, SEEK_SET) == -1)) {
+  off64_t offset_backup = fd->file->offset;
+  if (UNLIKELY(fd->file->seek(fd->file, new_bhead->file_offset, SEEK_SET) == -1)) {
     success = false;
   }
   else {
-    if (fd->read(fd, buf, (size_t)new_bhead->bhead.len, &new_bhead->is_memchunk_identical) !=
-        (ssize_t)new_bhead->bhead.len) {
+    if (fd->file->read(fd->file, buf, (size_t)new_bhead->bhead.len) != new_bhead->bhead.len) {
       success = false;
     }
+    if (fd->flags & FD_FLAGS_IS_MEMFILE) {
+      new_bhead->is_memchunk_identical = ((UndoReader *)fd->file)->memchunk_identical;
+    }
   }
-  if (fd->seek(fd, offset_backup, SEEK_SET) == -1) {
+  if (fd->file->seek(fd->file, offset_backup, SEEK_SET) == -1) {
     success = false;
   }
   return success;
@@ -968,18 +994,16 @@ static BHead *blo_bhead_read_full(FileData *fd, BHead *thisblock)
 }
 #endif /* USE_BHEAD_READ_ON_DEMAND */
 
-/* Warning! Caller's responsibility to ensure given bhead **is** an ID one! */
 const char *blo_bhead_id_name(const FileData *fd, const BHead *bhead)
 {
-  return (const char *)POINTER_OFFSET(bhead, sizeof(*bhead) + fd->id_name_offs);
+  return (const char *)POINTER_OFFSET(bhead, sizeof(*bhead) + fd->id_name_offset);
 }
 
-/* Warning! Caller's responsibility to ensure given bhead **is** an ID one! */
 AssetMetaData *blo_bhead_id_asset_data_address(const FileData *fd, const BHead *bhead)
 {
-  BLI_assert(BKE_idtype_idcode_is_valid(bhead->code));
-  return (fd->id_asset_data_offs >= 0) ?
-             *(AssetMetaData **)POINTER_OFFSET(bhead, sizeof(*bhead) + fd->id_asset_data_offs) :
+  BLI_assert(blo_bhead_is_id_valid_type(bhead));
+  return (fd->id_asset_data_offset >= 0) ?
+             *(AssetMetaData **)POINTER_OFFSET(bhead, sizeof(*bhead) + fd->id_asset_data_offset) :
              NULL;
 }
 
@@ -989,7 +1013,7 @@ static void decode_blender_header(FileData *fd)
   ssize_t readsize;
 
   /* read in the header data */
-  readsize = fd->read(fd, header, sizeof(header), NULL);
+  readsize = fd->file->read(fd->file, header, sizeof(header));
 
   if (readsize == sizeof(header) && STREQLEN(header, "BLENDER", 7) && ELEM(header[7], '_', '-') &&
       ELEM(header[8], 'v', 'V') &&
@@ -1058,9 +1082,9 @@ static bool read_file_dna(FileData *fd, const char **r_error_message)
         fd->reconstruct_info = DNA_reconstruct_info_create(
             fd->filesdna, fd->memsdna, fd->compflags);
         /* used to retrieve ID names from (bhead+1) */
-        fd->id_name_offs = DNA_elem_offset(fd->filesdna, "ID", "char", "name[]");
-        BLI_assert(fd->id_name_offs != -1);
-        fd->id_asset_data_offs = DNA_elem_offset(
+        fd->id_name_offset = DNA_elem_offset(fd->filesdna, "ID", "char", "name[]");
+        BLI_assert(fd->id_name_offset != -1);
+        fd->id_asset_data_offset = DNA_elem_offset(
             fd->filesdna, "ID", "AssetMetaData", "*asset_data");
 
         return true;
@@ -1123,162 +1147,19 @@ static int *read_file_thumbnail(FileData *fd)
 /** \name File Data API
  * \{ */
 
-/* Regular file reading. */
-
-static ssize_t fd_read_data_from_file(FileData *filedata,
-                                      void *buffer,
-                                      size_t size,
-                                      bool *UNUSED(r_is_memchunck_identical))
+static FileData *filedata_new(BlendFileReadReport *reports)
 {
-  ssize_t readsize = read(filedata->filedes, buffer, size);
+  BLI_assert(reports != NULL);
 
-  if (readsize < 0) {
-    readsize = EOF;
-  }
-  else {
-    filedata->file_offset += readsize;
-  }
-
-  return readsize;
-}
-
-static off64_t fd_seek_data_from_file(FileData *filedata, off64_t offset, int whence)
-{
-  filedata->file_offset = BLI_lseek(filedata->filedes, offset, whence);
-  return filedata->file_offset;
-}
-
-/* GZip file reading. */
-
-static ssize_t fd_read_gzip_from_file(FileData *filedata,
-                                      void *buffer,
-                                      size_t size,
-                                      bool *UNUSED(r_is_memchunck_identical))
-{
-  BLI_assert(size <= INT_MAX);
-
-  ssize_t readsize = gzread(filedata->gzfiledes, buffer, (uint)size);
-
-  if (readsize < 0) {
-    readsize = EOF;
-  }
-  else {
-    filedata->file_offset += readsize;
-  }
-
-  return readsize;
-}
-
-/* Memory reading. */
-
-static ssize_t fd_read_from_memory(FileData *filedata,
-                                   void *buffer,
-                                   size_t size,
-                                   bool *UNUSED(r_is_memchunck_identical))
-{
-  /* don't read more bytes than there are available in the buffer */
-  ssize_t readsize = (ssize_t)MIN2(size, filedata->buffersize - (size_t)filedata->file_offset);
-
-  memcpy(buffer, filedata->buffer + filedata->file_offset, (size_t)readsize);
-  filedata->file_offset += readsize;
-
-  return readsize;
-}
-
-/* MemFile reading. */
-
-static ssize_t fd_read_from_memfile(FileData *filedata,
-                                    void *buffer,
-                                    size_t size,
-                                    bool *r_is_memchunck_identical)
-{
-  static size_t seek = SIZE_MAX; /* the current position */
-  static size_t offset = 0;      /* size of previous chunks */
-  static MemFileChunk *chunk = NULL;
-  size_t chunkoffset, readsize, totread;
-
-  if (r_is_memchunck_identical != NULL) {
-    *r_is_memchunck_identical = true;
-  }
-
-  if (size == 0) {
-    return 0;
-  }
-
-  if (seek != (size_t)filedata->file_offset) {
-    chunk = filedata->memfile->chunks.first;
-    seek = 0;
-
-    while (chunk) {
-      if (seek + chunk->size > (size_t)filedata->file_offset) {
-        break;
-      }
-      seek += chunk->size;
-      chunk = chunk->next;
-    }
-    offset = seek;
-    seek = (size_t)filedata->file_offset;
-  }
-
-  if (chunk) {
-    totread = 0;
-
-    do {
-      /* first check if it's on the end if current chunk */
-      if (seek - offset == chunk->size) {
-        offset += chunk->size;
-        chunk = chunk->next;
-      }
-
-      /* debug, should never happen */
-      if (chunk == NULL) {
-        printf("illegal read, chunk zero\n");
-        return 0;
-      }
-
-      chunkoffset = seek - offset;
-      readsize = size - totread;
-
-      /* data can be spread over multiple chunks, so clamp size
-       * to within this chunk, and then it will read further in
-       * the next chunk */
-      if (chunkoffset + readsize > chunk->size) {
-        readsize = chunk->size - chunkoffset;
-      }
-
-      memcpy(POINTER_OFFSET(buffer, totread), chunk->buf + chunkoffset, readsize);
-      totread += readsize;
-      filedata->file_offset += readsize;
-      seek += readsize;
-      if (r_is_memchunck_identical != NULL) {
-        /* `is_identical` of current chunk represents whether it changed compared to previous undo
-         * step. this is fine in redo case (filedata->undo_direction > 0), but not in undo case,
-         * where we need an extra flag defined when saving the next (future) step after the one we
-         * want to restore, as we are supposed to 'come from' that future undo step, and not the
-         * one before current one. */
-        *r_is_memchunck_identical &= filedata->undo_direction > 0 ? chunk->is_identical :
-                                                                    chunk->is_identical_future;
-      }
-    } while (totread < size);
-
-    return (ssize_t)totread;
-  }
-
-  return 0;
-}
-
-static FileData *filedata_new(void)
-{
   FileData *fd = MEM_callocN(sizeof(FileData), "FileData");
-
-  fd->filedes = -1;
-  fd->gzfiledes = NULL;
 
   fd->memsdna = DNA_sdna_current_get();
 
   fd->datamap = oldnewmap_new();
   fd->globmap = oldnewmap_new();
   fd->libmap = oldnewmap_new();
+
+  fd->reports = reports;
 
   return fd;
 }
@@ -1307,75 +1188,69 @@ static FileData *blo_decode_and_check(FileData *fd, ReportList *reports)
 }
 
 static FileData *blo_filedata_from_file_descriptor(const char *filepath,
-                                                   ReportList *reports,
-                                                   int file)
+                                                   BlendFileReadReport *reports,
+                                                   int filedes)
 {
-  FileDataReadFn *read_fn = NULL;
-  FileDataSeekFn *seek_fn = NULL; /* Optional. */
-
-  gzFile gzfile = (gzFile)Z_NULL;
-
   char header[7];
+  FileReader *rawfile = BLI_filereader_new_file(filedes);
+  FileReader *file = NULL;
 
 #ifdef WITH_GAMEENGINE_BPPLAYER
   const int typeencryption = SPINDLE_CheckEncryptionFromFile(filepath);
   if (typeencryption <= SPINDLE_NO_ENCRYPTION) {
 #endif
 
-  /* Regular file. */
   errno = 0;
-  if (read(file, header, sizeof(header)) != sizeof(header)) {
-    BKE_reportf(reports,
+  /* If opening the file failed or we can't read the header, give up. */
+  if (rawfile == NULL || rawfile->read(rawfile, header, sizeof(header)) != sizeof(header)) {
+    BKE_reportf(reports->reports,
                 RPT_WARNING,
                 "Unable to read '%s': %s",
                 filepath,
                 errno ? strerror(errno) : TIP_("insufficient content"));
-    return NULL;
-  }
-
-  BLI_lseek(file, 0, SEEK_SET);
-
-  /* Regular file. */
-  if (memcmp(header, "BLENDER", sizeof(header)) == 0) {
-    read_fn = fd_read_data_from_file;
-    seek_fn = fd_seek_data_from_file;
-  }
-
-  /* Gzip file. */
-  errno = 0;
-  if ((read_fn == NULL) &&
-      /* Check header magic. */
-      (header[0] == 0x1f && header[1] == 0x8b)) {
-    gzfile = BLI_gzopen(filepath, "rb");
-    if (gzfile == (gzFile)Z_NULL) {
-      BKE_reportf(reports,
-                  RPT_WARNING,
-                  "Unable to open '%s': %s",
-                  filepath,
-                  errno ? strerror(errno) : TIP_("unknown error reading file"));
-      return NULL;
+    if (rawfile) {
+      rawfile->close(rawfile);
     }
-
-    /* 'seek_fn' is too slow for gzip, don't set it. */
-    read_fn = fd_read_gzip_from_file;
-    /* Caller must close. */
-    file = -1;
-  }
-
-  if (read_fn == NULL) {
-    BKE_reportf(reports, RPT_WARNING, "Unrecognized file format '%s'", filepath);
+    else {
+      close(filedes);
+    }
     return NULL;
   }
 
-  FileData *fd = filedata_new();
+  /* Rewind the file after reading the header. */
+  rawfile->seek(rawfile, 0, SEEK_SET);
 
-  fd->filedes = file;
-  fd->gzfiledes = gzfile;
+  /* Check if we have a regular file. */
+  if (memcmp(header, "BLENDER", sizeof(header)) == 0) {
+    /* Try opening the file with memory-mapped IO. */
+    file = BLI_filereader_new_mmap(filedes);
+    if (file == NULL) {
+      /* mmap failed, so just keep using rawfile. */
+      file = rawfile;
+      rawfile = NULL;
+    }
+  }
+  else if (BLI_file_magic_is_gzip(header)) {
+    file = BLI_filereader_new_gzip(rawfile);
+    if (file != NULL) {
+      rawfile = NULL; /* The `Gzip` #FileReader takes ownership of `rawfile`. */
+    }
+  }
+  else if (BLI_file_magic_is_zstd(header)) {
+    file = BLI_filereader_new_zstd(rawfile);
+    if (file != NULL) {
+      rawfile = NULL; /* The `Zstd` #FileReader takes ownership of `rawfile`. */
+    }
+  }
 
-  fd->read = read_fn;
-  fd->seek = seek_fn;
-
-  return fd;
+  /* Clean up `rawfile` if it wasn't taken over. */
+  if (rawfile != NULL) {
+    rawfile->close(rawfile);
+  }
+  if (file == NULL) {
+    BKE_reportf(reports->reports, RPT_WARNING, "Unrecognized file format '%s'", filepath);
+    return NULL;
+  }
 
 #ifdef WITH_GAMEENGINE_BPPLAYER
   }
@@ -1386,37 +1261,36 @@ static FileData *blo_filedata_from_file_descriptor(const char *filepath,
     return blo_filedata_from_memory(decrypteddata, filesize, reports);
   }
 #endif
+
+  FileData *fd = filedata_new(reports);
+  fd->file = file;
+
+  return fd;
 }
 
-static FileData *blo_filedata_from_file_open(const char *filepath, ReportList *reports)
+static FileData *blo_filedata_from_file_open(const char *filepath, BlendFileReadReport *reports)
 {
   errno = 0;
   const int file = BLI_open(filepath, O_BINARY | O_RDONLY, 0);
   if (file == -1) {
-    BKE_reportf(reports,
+    BKE_reportf(reports->reports,
                 RPT_WARNING,
                 "Unable to open '%s': %s",
                 filepath,
                 errno ? strerror(errno) : TIP_("unknown error reading file"));
     return NULL;
   }
-  FileData *fd = blo_filedata_from_file_descriptor(filepath, reports, file);
-  if ((fd == NULL) || (fd->filedes == -1)) {
-    close(file);
-  }
-  return fd;
+  return blo_filedata_from_file_descriptor(filepath, reports, file);
 }
 
-/* cannot be called with relative paths anymore! */
-/* on each new library added, it now checks for the current FileData and expands relativeness */
-FileData *blo_filedata_from_file(const char *filepath, ReportList *reports)
+FileData *blo_filedata_from_file(const char *filepath, BlendFileReadReport *reports)
 {
   FileData *fd = blo_filedata_from_file_open(filepath, reports);
   if (fd != NULL) {
     /* needed for library_append and read_libraries */
     BLI_strncpy(fd->relabase, filepath, sizeof(fd->relabase));
 
-    return blo_decode_and_check(fd, reports);
+    return blo_decode_and_check(fd, reports->reports);
   }
   return NULL;
 }
@@ -1427,7 +1301,7 @@ FileData *blo_filedata_from_file(const char *filepath, ReportList *reports)
  */
 static FileData *blo_filedata_from_file_minimal(const char *filepath)
 {
-  FileData *fd = blo_filedata_from_file_open(filepath, NULL);
+  FileData *fd = blo_filedata_from_file_open(filepath, &(BlendFileReadReport){.reports = NULL});
   if (fd != NULL) {
     decode_blender_header(fd);
     if (fd->flags & FD_FLAGS_FILE_OK) {
@@ -1438,124 +1312,61 @@ static FileData *blo_filedata_from_file_minimal(const char *filepath)
   return NULL;
 }
 
-static ssize_t fd_read_gzip_from_memory(FileData *filedata,
-                                        void *buffer,
-                                        size_t size,
-                                        bool *UNUSED(r_is_memchunck_identical))
-{
-  int err;
-
-  filedata->strm.next_out = (Bytef *)buffer;
-  filedata->strm.avail_out = (uint)size;
-
-  /* Inflate another chunk. */
-  err = inflate(&filedata->strm, Z_SYNC_FLUSH);
-
-  if (err == Z_STREAM_END) {
-    return 0;
-  }
-  if (err != Z_OK) {
-    printf("fd_read_gzip_from_memory: zlib error\n");
-    return 0;
-  }
-
-  filedata->file_offset += size;
-
-  return (ssize_t)size;
-}
-
-static int fd_read_gzip_from_memory_init(FileData *fd)
-{
-
-  fd->strm.next_in = (Bytef *)fd->buffer;
-  fd->strm.avail_in = fd->buffersize;
-  fd->strm.total_out = 0;
-  fd->strm.zalloc = Z_NULL;
-  fd->strm.zfree = Z_NULL;
-
-  if (inflateInit2(&fd->strm, (16 + MAX_WBITS)) != Z_OK) {
-    return 0;
-  }
-
-  fd->read = fd_read_gzip_from_memory;
-
-  return 1;
-}
-
-FileData *blo_filedata_from_memory(const void *mem, int memsize, ReportList *reports)
+FileData *blo_filedata_from_memory(const void *mem, int memsize, BlendFileReadReport *reports)
 {
   if (!mem || memsize < SIZEOFBLENDERHEADER) {
-    BKE_report(reports, RPT_WARNING, (mem) ? TIP_("Unable to read") : TIP_("Unable to open"));
+    BKE_report(
+        reports->reports, RPT_WARNING, (mem) ? TIP_("Unable to read") : TIP_("Unable to open"));
     return NULL;
   }
 
-  FileData *fd = filedata_new();
-  const char *cp = mem;
+  FileReader *mem_file = BLI_filereader_new_memory(mem, memsize);
+  FileReader *file = mem_file;
 
-  fd->buffer = mem;
-  fd->buffersize = memsize;
-
-  /* test if gzip */
-  if (cp[0] == 0x1f && cp[1] == 0x8b) {
-    if (0 == fd_read_gzip_from_memory_init(fd)) {
-      blo_filedata_free(fd);
-      return NULL;
-    }
+  if (BLI_file_magic_is_gzip(mem)) {
+    file = BLI_filereader_new_gzip(mem_file);
   }
-  else {
-    fd->read = fd_read_from_memory;
+  else if (BLI_file_magic_is_zstd(mem)) {
+    file = BLI_filereader_new_zstd(mem_file);
   }
 
-  fd->flags |= FD_FLAGS_NOT_MY_BUFFER;
+  if (file == NULL) {
+    /* Compression initialization failed. */
+    mem_file->close(mem_file);
+    return NULL;
+  }
+
+  FileData *fd = filedata_new(reports);
+  fd->file = file;
 
 #ifdef WITH_GAMEENGINE_BPPLAYER
-    // Set local path before calling blo_decode_and_check.
-    BLI_strncpy(fd->relabase, SPINDLE_GetFilePath(), sizeof(fd->relabase));
+  // Set local path before calling blo_decode_and_check.
+  BLI_strncpy(fd->relabase, SPINDLE_GetFilePath(), sizeof(fd->relabase));
 #endif
 
-  return blo_decode_and_check(fd, reports);
+  return blo_decode_and_check(fd, reports->reports);
 }
 
 FileData *blo_filedata_from_memfile(MemFile *memfile,
                                     const struct BlendFileReadParams *params,
-                                    ReportList *reports)
+                                    BlendFileReadReport *reports)
 {
   if (!memfile) {
-    BKE_report(reports, RPT_WARNING, "Unable to open blend <memory>");
+    BKE_report(reports->reports, RPT_WARNING, "Unable to open blend <memory>");
     return NULL;
   }
 
-  FileData *fd = filedata_new();
-  fd->memfile = memfile;
+  FileData *fd = filedata_new(reports);
+  fd->file = BLO_memfile_new_filereader(memfile, params->undo_direction);
   fd->undo_direction = params->undo_direction;
+  fd->flags |= FD_FLAGS_IS_MEMFILE;
 
-  fd->read = fd_read_from_memfile;
-  fd->flags |= FD_FLAGS_NOT_MY_BUFFER;
-
-  return blo_decode_and_check(fd, reports);
+  return blo_decode_and_check(fd, reports->reports);
 }
 
 void blo_filedata_free(FileData *fd)
 {
   if (fd) {
-    if (fd->filedes != -1) {
-      close(fd->filedes);
-    }
-
-    if (fd->gzfiledes != NULL) {
-      gzclose(fd->gzfiledes);
-    }
-
-    if (fd->strm.next_in) {
-      if (inflateEnd(&fd->strm) != Z_OK) {
-        printf("close gzip stream error\n");
-      }
-    }
-
-    if (fd->buffer && !(fd->flags & FD_FLAGS_NOT_MY_BUFFER)) {
-      MEM_freeN((void *)fd->buffer);
-      fd->buffer = NULL;
-    }
 
     /* Free all BHeadN data blocks */
 #ifndef NDEBUG
@@ -1563,12 +1374,13 @@ void blo_filedata_free(FileData *fd)
 #else
     /* Sanity check we're not keeping memory we don't need. */
     LISTBASE_FOREACH_MUTABLE (BHeadN *, new_bhead, &fd->bhead_list) {
-      if (fd->seek != NULL && BHEAD_USE_READ_ON_DEMAND(&new_bhead->bhead)) {
+      if (fd->file->seek != NULL && BHEAD_USE_READ_ON_DEMAND(&new_bhead->bhead)) {
         BLI_assert(new_bhead->has_data == 0);
       }
       MEM_freeN(new_bhead);
     }
 #endif
+    fd->file->close(fd->file);
 
     if (fd->filesdna) {
       DNA_sdna_free(fd->filesdna);
@@ -1616,30 +1428,12 @@ void blo_filedata_free(FileData *fd)
 /** \name Public Utilities
  * \{ */
 
-/**
- * Check whether given path ends with a blend file compatible extension
- * (`.blend`, `.ble` or `.blend.gz`).
- *
- * \param str: The path to check.
- * \return true is this path ends with a blender file extension.
- */
 bool BLO_has_bfile_extension(const char *str)
 {
   const char *ext_test[4] = {".blend", ".ble", ".blend.gz", NULL};
   return BLI_path_extension_check_array(str, ext_test);
 }
 
-/**
- * Try to explode given path into its 'library components'
- * (i.e. a .blend file, id type/group, and data-block itself).
- *
- * \param path: the full path to explode.
- * \param r_dir: the string that'll contain path up to blend file itself ('library' path).
- * WARNING! Must be #FILE_MAX_LIBEXTRA long (it also stores group and name strings)!
- * \param r_group: the string that'll contain 'group' part of the path, if any. May be NULL.
- * \param r_name: the string that'll contain data's name part of the path, if any. May be NULL.
- * \return true if path contains a blend file.
- */
 bool BLO_library_path_explode(const char *path, char *r_dir, char **r_group, char **r_name)
 {
   /* We might get some data names with slashes,
@@ -1700,14 +1494,6 @@ bool BLO_library_path_explode(const char *path, char *r_dir, char **r_group, cha
   return true;
 }
 
-/**
- * Does a very light reading of given .blend file to extract its stored thumbnail.
- *
- * \param filepath: The path of the file to extract thumbnail from.
- * \return The raw thumbnail
- * (MEM-allocated, as stored in file, use #BKE_main_thumbnail_to_imbuf()
- * to convert it to ImBuf image).
- */
 BlendThumbnail *BLO_thumbnail_from_file(const char *filepath)
 {
   FileData *fd;
@@ -1721,14 +1507,14 @@ BlendThumbnail *BLO_thumbnail_from_file(const char *filepath)
     const int width = fd_data[0];
     const int height = fd_data[1];
     if (BLEN_THUMB_MEMSIZE_IS_VALID(width, height)) {
-      const size_t sz = BLEN_THUMB_MEMSIZE(width, height);
-      data = MEM_mallocN(sz, __func__);
+      const size_t data_size = BLEN_THUMB_MEMSIZE(width, height);
+      data = MEM_mallocN(data_size, __func__);
       if (data) {
-        BLI_assert((sz - sizeof(*data)) ==
+        BLI_assert((data_size - sizeof(*data)) ==
                    (BLEN_THUMB_MEMSIZE_FILE(width, height) - (sizeof(*fd_data) * 2)));
         data->width = width;
         data->height = height;
-        memcpy(data->rect, &fd_data[2], sz - sizeof(*data));
+        memcpy(data->rect, &fd_data[2], data_size - sizeof(*data));
       }
     }
   }
@@ -1744,25 +1530,24 @@ BlendThumbnail *BLO_thumbnail_from_file(const char *filepath)
 /** \name Old/New Pointer Map
  * \{ */
 
-/* only direct databocks */
+/* Only direct data-blocks. */
 static void *newdataadr(FileData *fd, const void *adr)
 {
   return oldnewmap_lookup_and_inc(fd->datamap, adr, true);
 }
 
-/* only direct databocks */
+/* Only direct data-blocks. */
 static void *newdataadr_no_us(FileData *fd, const void *adr)
 {
   return oldnewmap_lookup_and_inc(fd->datamap, adr, false);
 }
 
-/* direct datablocks with global linking */
 void *blo_read_get_new_globaldata_address(FileData *fd, const void *adr)
 {
   return oldnewmap_lookup_and_inc(fd->globmap, adr, true);
 }
 
-/* used to restore packed data after undo */
+/* Used to restore packed data after undo. */
 static void *newpackedadr(FileData *fd, const void *adr)
 {
   if (fd->packedmap && adr) {
@@ -1778,7 +1563,6 @@ static void *newlibadr(FileData *fd, const void *lib, const void *adr)
   return oldnewmap_liblookup(fd->libmap, adr, lib);
 }
 
-/* only lib data */
 void *blo_do_versions_newlibadr(FileData *fd, const void *lib, const void *adr)
 {
   return newlibadr(fd, lib, adr);
@@ -1816,21 +1600,6 @@ static void change_link_placeholder_to_real_ID_pointer(ListBase *mainlist,
 
     if (fd) {
       change_link_placeholder_to_real_ID_pointer_fd(fd, old, new);
-    }
-  }
-}
-
-/* lib linked proxy objects point to our local data, we need
- * to clear that pointer before reading the undo memfile since
- * the object might be removed, it is set again in reading
- * if the local object still exists.
- * This is only valid for local proxy objects though, linked ones should not be affected here.
- */
-void blo_clear_proxy_pointers_from_lib(Main *oldmain)
-{
-  LISTBASE_FOREACH (Object *, ob, &oldmain->objects) {
-    if (ob->id.lib != NULL && ob->proxy_from != NULL && ob->proxy_from->id.lib == NULL) {
-      ob->proxy_from = NULL;
     }
   }
 }
@@ -1885,8 +1654,6 @@ void blo_make_packed_pointer_map(FileData *fd, Main *oldmain)
   }
 }
 
-/* set old main packed data to zero if it has been restored */
-/* this works because freeing old main only happens after this call */
 void blo_end_packed_pointer_map(FileData *fd, Main *oldmain)
 {
   OldNew *entry = fd->packedmap->entries;
@@ -1923,16 +1690,15 @@ void blo_end_packed_pointer_map(FileData *fd, Main *oldmain)
   }
 }
 
-/* undo file support: add all library pointers in lookup */
 void blo_add_library_pointer_map(ListBase *old_mainlist, FileData *fd)
 {
-  ListBase *lbarray[MAX_LIBARRAY];
+  ListBase *lbarray[INDEX_ID_MAX];
 
   LISTBASE_FOREACH (Main *, ptr, old_mainlist) {
     int i = set_listbasepointers(ptr, lbarray);
     while (i--) {
       LISTBASE_FOREACH (ID *, id, lbarray[i]) {
-        oldnewmap_insert(fd->libmap, id, id, GS(id->name));
+        oldnewmap_lib_insert(fd, id, id, GS(id->name));
       }
     }
   }
@@ -1940,8 +1706,6 @@ void blo_add_library_pointer_map(ListBase *old_mainlist, FileData *fd)
   fd->old_mainlist = old_mainlist;
 }
 
-/* Build a GSet of old main (we only care about local data here, so we can do that after
- * split_main() call. */
 void blo_make_old_idmap_from_main(FileData *fd, Main *bmain)
 {
   if (fd->old_idmap != NULL) {
@@ -1955,12 +1719,14 @@ typedef struct BLOCacheStorage {
   MemArena *memarena;
 } BLOCacheStorage;
 
+typedef struct BLOCacheStorageValue {
+  void *cache_v;
+  uint new_usage_count;
+} BLOCacheStorageValue;
+
 /** Register a cache data entry to be preserved when reading some undo memfile. */
-static void blo_cache_storage_entry_register(ID *id,
-                                             const IDCacheKey *key,
-                                             void **UNUSED(cache_p),
-                                             uint UNUSED(flags),
-                                             void *cache_storage_v)
+static void blo_cache_storage_entry_register(
+    ID *id, const IDCacheKey *key, void **cache_p, uint UNUSED(flags), void *cache_storage_v)
 {
   BLI_assert(key->id_session_uuid == id->session_uuid);
   UNUSED_VARS_NDEBUG(id);
@@ -1970,7 +1736,11 @@ static void blo_cache_storage_entry_register(ID *id,
 
   IDCacheKey *storage_key = BLI_memarena_alloc(cache_storage->memarena, sizeof(*storage_key));
   *storage_key = *key;
-  BLI_ghash_insert(cache_storage->cache_map, storage_key, POINTER_FROM_UINT(0));
+  BLOCacheStorageValue *storage_value = BLI_memarena_alloc(cache_storage->memarena,
+                                                           sizeof(*storage_value));
+  storage_value->cache_v = *cache_p;
+  storage_value->new_usage_count = 0;
+  BLI_ghash_insert(cache_storage->cache_map, storage_key, storage_value);
 }
 
 /** Restore a cache data entry from old ID into new one, when reading some undo memfile. */
@@ -1989,13 +1759,13 @@ static void blo_cache_storage_entry_restore_in_new(
     return;
   }
 
-  void **value = BLI_ghash_lookup_p(cache_storage->cache_map, key);
-  if (value == NULL) {
+  BLOCacheStorageValue *storage_value = BLI_ghash_lookup(cache_storage->cache_map, key);
+  if (storage_value == NULL) {
     *cache_p = NULL;
     return;
   }
-  *value = POINTER_FROM_UINT(POINTER_AS_UINT(*value) + 1);
-  *cache_p = key->cache_v;
+  storage_value->new_usage_count++;
+  *cache_p = storage_value->cache_v;
 }
 
 /** Clear as needed a cache data entry from old ID, when reading some undo memfile. */
@@ -2007,19 +1777,24 @@ static void blo_cache_storage_entry_clear_in_old(ID *UNUSED(id),
 {
   BLOCacheStorage *cache_storage = cache_storage_v;
 
-  void **value = BLI_ghash_lookup_p(cache_storage->cache_map, key);
-  if (value == NULL) {
+  BLOCacheStorageValue *storage_value = BLI_ghash_lookup(cache_storage->cache_map, key);
+  if (storage_value == NULL) {
     *cache_p = NULL;
     return;
   }
   /* If that cache has been restored into some new ID, we want to remove it from old one, otherwise
    * keep it there so that it gets properly freed together with its ID. */
-  *cache_p = POINTER_AS_UINT(*value) != 0 ? NULL : key->cache_v;
+  if (storage_value->new_usage_count != 0) {
+    *cache_p = NULL;
+  }
+  else {
+    BLI_assert(*cache_p == storage_value->cache_v);
+  }
 }
 
 void blo_cache_storage_init(FileData *fd, Main *bmain)
 {
-  if (fd->memfile != NULL) {
+  if (fd->flags & FD_FLAGS_IS_MEMFILE) {
     BLI_assert(fd->cache_storage == NULL);
     fd->cache_storage = MEM_mallocN(sizeof(*fd->cache_storage), __func__);
     fd->cache_storage->memarena = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, __func__);
@@ -2184,7 +1959,7 @@ static void *read_struct(FileData *fd, BHead *bh, const char *blockname)
  * undo since DNA must match. */
 static const void *peek_struct_undo(FileData *fd, BHead *bhead)
 {
-  BLI_assert(fd->memfile != NULL);
+  BLI_assert(fd->flags & FD_FLAGS_IS_MEMFILE);
   UNUSED_VARS_NDEBUG(fd);
   return (bhead->len) ? (const void *)(bhead + 1) : NULL;
 }
@@ -2247,9 +2022,9 @@ static void lib_link_id_embedded_id(BlendLibReader *reader, ID *id)
 
 static void lib_link_id(BlendLibReader *reader, ID *id)
 {
-  /* Note: WM IDProperties are never written to file, hence they should always be NULL here. */
+  /* NOTE: WM IDProperties are never written to file, hence they should always be NULL here. */
   BLI_assert((GS(id->name) != ID_WM) || id->properties == NULL);
-  IDP_BlendReadLib(reader, id->properties);
+  IDP_BlendReadLib(reader, id->lib, id->properties);
 
   AnimData *adt = BKE_animdata_from_id(id);
   if (adt != NULL) {
@@ -2259,6 +2034,7 @@ static void lib_link_id(BlendLibReader *reader, ID *id)
   if (id->override_library) {
     BLO_read_id_address(reader, id->lib, &id->override_library->reference);
     BLO_read_id_address(reader, id->lib, &id->override_library->storage);
+    BLO_read_id_address(reader, id->lib, &id->override_library->hierarchy_root);
   }
 
   lib_link_id_embedded_id(reader, id);
@@ -2322,7 +2098,7 @@ static void direct_link_id_embedded_id(BlendDataReader *reader,
 static int direct_link_id_restore_recalc_exceptions(const ID *id_current)
 {
   /* Exception for armature objects, where the pose has direct points to the
-   * armature databolock. */
+   * armature data-block. */
   if (GS(id_current->name) == ID_OB && ((Object *)id_current)->pose) {
     return ID_RECALC_GEOMETRY;
   }
@@ -2362,11 +2138,12 @@ static int direct_link_id_restore_recalc(const FileData *fd,
 
     /* Tags that were set between the target state and the current state,
      * that we need to perform again. */
-    if (fd->undo_direction < 0) {
+    if (fd->undo_direction == STEP_UNDO) {
       /* Undo: tags from target to the current state. */
       recalc |= id_current->recalc_up_to_undo_push;
     }
     else {
+      BLI_assert(fd->undo_direction == STEP_REDO);
       /* Redo: tags from current to the target state. */
       recalc |= id_target->recalc_up_to_undo_push;
     }
@@ -2379,12 +2156,14 @@ static void direct_link_id_common(
     BlendDataReader *reader, Library *current_library, ID *id, ID *id_old, const int tag)
 {
   if (!BLO_read_data_is_undo(reader)) {
-    /* When actually reading a file , we do want to reset/re-generate session uuids.
+    /* When actually reading a file, we do want to reset/re-generate session uuids.
      * In undo case, we want to re-use existing ones. */
     id->session_uuid = MAIN_ID_SESSION_UUID_UNSET;
   }
 
-  BKE_lib_libblock_session_uuid_ensure(id);
+  if ((tag & LIB_TAG_TEMP_MAIN) == 0) {
+    BKE_lib_libblock_session_uuid_ensure(id);
+  }
 
   id->lib = current_library;
   id->us = ID_FAKE_USERS(id);
@@ -2396,6 +2175,13 @@ static void direct_link_id_common(
   /* Initialize with provided tag. */
   id->tag = tag;
 
+  if (ID_IS_LINKED(id)) {
+    id->library_weak_reference = NULL;
+  }
+  else {
+    BLO_read_data_address(reader, &id->library_weak_reference);
+  }
+
   if (tag & LIB_TAG_ID_LINK_PLACEHOLDER) {
     /* For placeholder we only need to set the tag and properly initialize generic ID fields above,
      * no further data to read. */
@@ -2405,9 +2191,12 @@ static void direct_link_id_common(
   if (id->asset_data) {
     BLO_read_data_address(reader, &id->asset_data);
     BKE_asset_metadata_read(reader, id->asset_data);
+    /* Restore runtime asset type info. */
+    const IDTypeInfo *id_type = BKE_idtype_get_info_from_id(id);
+    id->asset_data->local_type_info = id_type->asset_type_info;
   }
 
-  /*link direct data of ID properties*/
+  /* Link direct data of ID properties. */
   if (id->properties) {
     BLO_read_data_address(reader, &id->properties);
     /* this case means the data was written incorrectly, it should not happen */
@@ -2436,9 +2225,12 @@ static void direct_link_id_common(
   /* Link direct data of overrides. */
   if (id->override_library) {
     BLO_read_data_address(reader, &id->override_library);
-    BLO_read_list_cb(
-        reader, &id->override_library->properties, direct_link_id_override_property_cb);
-    id->override_library->runtime = NULL;
+    /* Work around file corruption on writing, see T86853. */
+    if (id->override_library != NULL) {
+      BLO_read_list_cb(
+          reader, &id->override_library->properties, direct_link_id_override_property_cb);
+      id->override_library->runtime = NULL;
+    }
   }
 
   DrawDataList *drawdata = DRW_drawdatalist_from_id(id);
@@ -2520,7 +2312,7 @@ static void lib_link_scenes_check_set(Main *bmain)
     if (sce->flag & SCE_READFILE_LIBLINK_NEED_SETSCENE_CHECK) {
       sce->flag &= ~SCE_READFILE_LIBLINK_NEED_SETSCENE_CHECK;
       if (!scene_validate_setscene__liblink(sce, totscene)) {
-        printf("Found cyclic background scene when linking %s\n", sce->id.name + 2);
+        CLOG_WARN(&LOG, "Found cyclic background scene when linking %s", sce->id.name + 2);
       }
     }
   }
@@ -2617,7 +2409,7 @@ static void lib_link_seq_clipboard_pt_restore(ID *id, struct IDNameLib_Map *id_m
     id->newid = restore_pointer_by_name(id_map, id->newid, USER_REAL);
   }
 }
-static int lib_link_seq_clipboard_cb(Sequence *seq, void *arg_pt)
+static bool lib_link_seq_clipboard_cb(Sequence *seq, void *arg_pt)
 {
   struct IDNameLib_Map *id_map = arg_pt;
 
@@ -2626,13 +2418,13 @@ static int lib_link_seq_clipboard_cb(Sequence *seq, void *arg_pt)
   lib_link_seq_clipboard_pt_restore((ID *)seq->clip, id_map);
   lib_link_seq_clipboard_pt_restore((ID *)seq->mask, id_map);
   lib_link_seq_clipboard_pt_restore((ID *)seq->sound, id_map);
-  return 1;
+  return true;
 }
 
 static void lib_link_clipboard_restore(struct IDNameLib_Map *id_map)
 {
   /* update IDs stored in sequencer clipboard */
-  SEQ_iterator_seqbase_recursive_apply(&seqbase_clipboard, lib_link_seq_clipboard_cb, id_map);
+  SEQ_for_each_callback(&seqbase_clipboard, lib_link_seq_clipboard_cb, id_map);
 }
 
 static int lib_link_main_data_restore_cb(LibraryIDLinkCallbackData *cb_data)
@@ -2651,14 +2443,14 @@ static int lib_link_main_data_restore_cb(LibraryIDLinkCallbackData *cb_data)
     if (collection->flag & COLLECTION_IS_MASTER) {
       /* We should never reach that point anymore, since master collection private ID should be
        * properly tagged with IDWALK_CB_EMBEDDED. */
-      BLI_assert(0);
+      BLI_assert_unreachable();
       return IDWALK_RET_NOP;
     }
   }
 
   struct IDNameLib_Map *id_map = cb_data->user_data;
 
-  /* Note: Handling of usercount here is really bad, defining its own system...
+  /* NOTE: Handling of usercount here is really bad, defining its own system...
    * Will have to be refactored at some point, but that is not top priority task for now.
    * And all user-counts are properly recomputed at the end of the undo management code anyway. */
   *id_pointer = restore_pointer_by_name(
@@ -2700,7 +2492,7 @@ static void lib_link_window_scene_data_restore(wmWindow *win, Scene *scene, View
 
           v3d->localvd->camera = scene->camera;
 
-          /* Localview can become invalid during undo/redo steps,
+          /* Local-view can become invalid during undo/redo steps,
            * so we exit it when no could be found. */
           for (base = view_layer->object_bases.first; base; base = base->next) {
             if (base->local_view_bits & v3d->local_view_uuid) {
@@ -2712,7 +2504,7 @@ static void lib_link_window_scene_data_restore(wmWindow *win, Scene *scene, View
             v3d->localvd = NULL;
             v3d->local_view_uuid = 0;
 
-            /* Regionbase storage is different depending if the space is active. */
+            /* Region-base storage is different depending if the space is active. */
             ListBase *regionbase = (sl == area->spacedata.first) ? &area->regionbase :
                                                                    &sl->regionbase;
             LISTBASE_FOREACH (ARegion *, region, regionbase) {
@@ -2773,13 +2565,12 @@ static void lib_link_workspace_layout_restore(struct IDNameLib_Map *id_map,
           }
 
           /* TODO: restore path pointers: T40046
-           * (complicated because this contains data pointers too, not just ID)*/
+           * (complicated because this contains data pointers too, not just ID). */
           MEM_SAFE_FREE(sbuts->path);
         }
         else if (sl->spacetype == SPACE_FILE) {
           SpaceFile *sfile = (SpaceFile *)sl;
           sfile->op = NULL;
-          sfile->previews_timer = NULL;
           sfile->tags = FILE_TAG_REBUILD_MAIN_FILES;
         }
         else if (sl->spacetype == SPACE_ACTION) {
@@ -2848,7 +2639,7 @@ static void lib_link_workspace_layout_restore(struct IDNameLib_Map *id_map,
         else if (sl->spacetype == SPACE_TEXT) {
           SpaceText *st = (SpaceText *)sl;
 
-          st->text = restore_pointer_by_name(id_map, (ID *)st->text, USER_REAL);
+          st->text = restore_pointer_by_name(id_map, (ID *)st->text, USER_IGNORE);
           if (st->text == NULL) {
             st->text = newmain->texts.first;
           }
@@ -2858,7 +2649,7 @@ static void lib_link_workspace_layout_restore(struct IDNameLib_Map *id_map,
 
           scpt->script = restore_pointer_by_name(id_map, (ID *)scpt->script, USER_REAL);
 
-          /*screen->script = NULL; - 2.45 set to null, better re-run the script */
+          // screen->script = NULL; /* 2.45 set to null, better re-run the script. */
           if (scpt->script) {
             SCRIPT_SET_NULL(scpt->script);
           }
@@ -2948,15 +2739,22 @@ static void lib_link_workspace_layout_restore(struct IDNameLib_Map *id_map,
 
           sclip->scopes.ok = 0;
         }
+        else if (sl->spacetype == SPACE_SPREADSHEET) {
+          SpaceSpreadsheet *sspreadsheet = (SpaceSpreadsheet *)sl;
+
+          LISTBASE_FOREACH (SpreadsheetContext *, context, &sspreadsheet->context_path) {
+            if (context->type == SPREADSHEET_CONTEXT_OBJECT) {
+              SpreadsheetContextObject *object_context = (SpreadsheetContextObject *)context;
+              object_context->object = restore_pointer_by_name(
+                  id_map, (ID *)object_context->object, USER_IGNORE);
+            }
+          }
+        }
       }
     }
   }
 }
 
-/**
- * Used to link a file (without UI) to the current UI.
- * Note that it assumes the old pointers in UI are still valid, so old Main is not freed.
- */
 void blo_lib_link_restore(Main *oldmain,
                           Main *newmain,
                           wmWindowManager *curwm,
@@ -2970,6 +2768,8 @@ void blo_lib_link_restore(Main *oldmain,
     LISTBASE_FOREACH (WorkSpaceLayout *, layout, &workspace->layouts) {
       lib_link_workspace_layout_restore(id_map, newmain, layout);
     }
+    workspace->pin_scene = restore_pointer_by_name(
+        id_map, (ID *)workspace->pin_scene, USER_IGNORE);
   }
 
   LISTBASE_FOREACH (wmWindow *, win, &curwm->windows) {
@@ -2983,6 +2783,7 @@ void blo_lib_link_restore(Main *oldmain,
     if (win->scene == NULL) {
       win->scene = curscene;
     }
+    win->unpinned_scene = restore_pointer_by_name(id_map, (ID *)win->unpinned_scene, USER_IGNORE);
     if (BKE_view_layer_find(win->scene, win->view_layer_name) == NULL) {
       STRNCPY(win->view_layer_name, cur_view_layer->name);
     }
@@ -2991,7 +2792,7 @@ void blo_lib_link_restore(Main *oldmain,
     /* keep cursor location through undo */
     memcpy(&win->scene->cursor, &oldscene->cursor, sizeof(win->scene->cursor));
 
-    /* Note: even though that function seems to redo part of what is done by
+    /* NOTE: even though that function seems to redo part of what is done by
      * `lib_link_workspace_layout_restore()` above, it seems to have a slightly different scope:
      * while the former updates the whole UI pointers from Main db (going over all layouts of
      * all workspaces), that one only focuses one current active screen, takes care of
@@ -3085,7 +2886,7 @@ static void lib_link_library(BlendLibReader *UNUSED(reader), Library *UNUSED(lib
  * in relation to the blend file. */
 static void fix_relpaths_library(const char *basepath, Main *main)
 {
-  /* BLO_read_from_memory uses a blank filename */
+  /* #BLO_read_from_memory uses a blank file-path. */
   if (basepath == NULL || basepath[0] == '\0') {
     LISTBASE_FOREACH (Library *, lib, &main->libraries) {
       /* when loading a linked lib into a file which has not been saved,
@@ -3133,7 +2934,13 @@ static ID *create_placeholder(Main *mainvar, const short idcode, const char *idn
   BLI_addtail(lb, ph_id);
   id_sort_by_name(lb, ph_id, NULL);
 
-  BKE_lib_libblock_session_uuid_ensure(ph_id);
+  if (mainvar->id_map != NULL) {
+    BKE_main_idmap_insert_id(mainvar->id_map, ph_id);
+  }
+
+  if ((tag & LIB_TAG_TEMP_MAIN) == 0) {
+    BKE_lib_libblock_session_uuid_ensure(ph_id);
+  }
 
   return ph_id;
 }
@@ -3165,7 +2972,7 @@ static const char *dataname(short id_code)
       return "Data from MA";
     case ID_TE:
       return "Data from TE";
-    case ID_CU:
+    case ID_CU_LEGACY:
       return "Data from CU";
     case ID_GR:
       return "Data from GR";
@@ -3225,7 +3032,7 @@ static const char *dataname(short id_code)
       return "Data from CF";
     case ID_WS:
       return "Data from WS";
-    case ID_HA:
+    case ID_CV:
       return "Data from HA";
     case ID_PT:
       return "Data from PT";
@@ -3346,15 +3153,17 @@ static bool read_libblock_undo_restore_library(FileData *fd, Main *main, const I
    * That means we have to carefully check whether current lib or
    * libdata already exits in old main, if it does we merely copy it over into new main area,
    * otherwise we have to do a full read of that bhead... */
-  DEBUG_PRINTF("UNDO: restore library %s\n", id->name);
+  CLOG_INFO(&LOG_UNDO, 2, "UNDO: restore library %s", id->name);
 
   Main *libmain = fd->old_mainlist->first;
   /* Skip oldmain itself... */
   for (libmain = libmain->next; libmain; libmain = libmain->next) {
-    DEBUG_PRINTF("  compare with %s -> ", libmain->curlib ? libmain->curlib->id.name : "<NULL>");
     if (libmain->curlib && STREQ(id->name, libmain->curlib->id.name)) {
       Main *oldmain = fd->old_mainlist->first;
-      DEBUG_PRINTF("match!\n");
+      CLOG_INFO(&LOG_UNDO,
+                2,
+                "    compare with %s -> match",
+                libmain->curlib ? libmain->curlib->id.name : "<NULL>");
       /* In case of a library, we need to re-add its main to fd->mainlist,
        * because if we have later a missing ID_LINK_PLACEHOLDER,
        * we need to get the correct lib it is linked to!
@@ -3366,7 +3175,10 @@ static bool read_libblock_undo_restore_library(FileData *fd, Main *main, const I
       BLI_addtail(&main->libraries, libmain->curlib);
       return true;
     }
-    DEBUG_PRINTF("no match\n");
+    CLOG_INFO(&LOG_UNDO,
+              2,
+              "    compare with %s -> NO match",
+              libmain->curlib ? libmain->curlib->id.name : "<NULL>");
   }
 
   return false;
@@ -3375,18 +3187,19 @@ static bool read_libblock_undo_restore_library(FileData *fd, Main *main, const I
 /* For undo, restore existing linked datablock from the old main. */
 static bool read_libblock_undo_restore_linked(FileData *fd, Main *main, const ID *id, BHead *bhead)
 {
-  DEBUG_PRINTF("UNDO: restore linked datablock %s\n", id->name);
-  DEBUG_PRINTF("  from %s (%s): ",
-               main->curlib ? main->curlib->id.name : "<NULL>",
-               main->curlib ? main->curlib->filepath : "<NULL>");
+  CLOG_INFO(&LOG_UNDO, 2, "UNDO: restore linked datablock %s", id->name);
 
   ID *id_old = BKE_libblock_find_name(main, GS(id->name), id->name + 2);
   if (id_old != NULL) {
-    DEBUG_PRINTF("  found!\n");
+    CLOG_INFO(&LOG_UNDO,
+              2,
+              "    from %s (%s): found",
+              main->curlib ? main->curlib->id.name : "<NULL>",
+              main->curlib ? main->curlib->filepath : "<NULL>");
     /* Even though we found our linked ID, there is no guarantee its address
      * is still the same. */
     if (id_old != bhead->old) {
-      oldnewmap_insert(fd->libmap, bhead->old, id_old, GS(id_old->name));
+      oldnewmap_lib_insert(fd, bhead->old, id_old, GS(id_old->name));
     }
 
     /* No need to do anything else for ID_LINK_PLACEHOLDER, it's assumed
@@ -3394,7 +3207,11 @@ static bool read_libblock_undo_restore_linked(FileData *fd, Main *main, const ID
     return true;
   }
 
-  DEBUG_PRINTF("  not found\n");
+  CLOG_INFO(&LOG_UNDO,
+            2,
+            "    from %s (%s): NOT found",
+            main->curlib ? main->curlib->id.name : "<NULL>",
+            main->curlib ? main->curlib->filepath : "<NULL>");
   return false;
 }
 
@@ -3425,18 +3242,8 @@ static void read_libblock_undo_restore_identical(
   id_old->recalc |= direct_link_id_restore_recalc_exceptions(id_old);
   id_old->recalc_after_undo_push = 0;
 
-  /* As usual, proxies require some special love...
-   * In `blo_clear_proxy_pointers_from_lib()` we clear all `proxy_from` pointers to local IDs, for
-   * undo. This is required since we do not re-read linked data in that case, so we also do not
-   * re-'lib_link' their pointers.
-   * Those `proxy_from` pointers are then re-defined properly when lib_linking the newly read local
-   * object. However, in case of re-used data 'as-is', we never lib_link it again, so we have to
-   * fix those backward pointers here. */
   if (GS(id_old->name) == ID_OB) {
     Object *ob = (Object *)id_old;
-    if (ob->proxy != NULL) {
-      ob->proxy->proxy_from = ob;
-    }
     /* For undo we stay in object mode during undo presses, so keep editmode disabled for re-used
      * data-blocks too. */
     ob->mode &= ~OB_MODE_EDIT;
@@ -3503,8 +3310,6 @@ static bool read_libblock_undo_restore(
   }
 
   /* Restore local datablocks. */
-  DEBUG_PRINTF("UNDO: read %s (uuid %u) -> ", id->name, id->session_uuid);
-
   ID *id_old = NULL;
   const bool do_partial_undo = (fd->skip_flags & BLO_READ_SKIP_UNDO_OLD_MAIN) == 0;
   if (do_partial_undo && (bhead->code != ID_LINK_PLACEHOLDER)) {
@@ -3519,7 +3324,11 @@ static bool read_libblock_undo_restore(
 
   if (id_old != NULL && read_libblock_is_identical(fd, bhead)) {
     /* Local datablock was unchanged, restore from the old main. */
-    DEBUG_PRINTF("keep identical datablock\n");
+    CLOG_INFO(&LOG_UNDO,
+              2,
+              "UNDO: read %s (uuid %u) -> keep identical datablock",
+              id->name,
+              id->session_uuid);
 
     /* Do not add LIB_TAG_NEW here, this should not be needed/used in undo case anyway (as
      * this is only for do_version-like code), but for sake of consistency, and also because
@@ -3532,20 +3341,25 @@ static bool read_libblock_undo_restore(
     /* Insert into library map for lookup by newly read datablocks (with pointer value bhead->old).
      * Note that existing datablocks in memory (which pointer value would be id_old) are not
      * remapped anymore, so no need to store this info here. */
-    oldnewmap_insert(fd->libmap, bhead->old, id_old, bhead->code);
+    oldnewmap_lib_insert(fd, bhead->old, id_old, bhead->code);
 
     *r_id_old = id_old;
     return true;
   }
   if (id_old != NULL) {
     /* Local datablock was changed. Restore at the address of the old datablock. */
-    DEBUG_PRINTF("read to old existing address\n");
+    CLOG_INFO(&LOG_UNDO,
+              2,
+              "UNDO: read %s (uuid %u) -> read to old existing address",
+              id->name,
+              id->session_uuid);
     *r_id_old = id_old;
     return false;
   }
 
   /* Local datablock does not exist in the undo step, so read from scratch. */
-  DEBUG_PRINTF("read at new address\n");
+  CLOG_INFO(
+      &LOG_UNDO, 2, "UNDO: read %s (uuid %u) -> read at new address", id->name, id->session_uuid);
   return false;
 }
 
@@ -3567,11 +3381,15 @@ static BHead *read_libblock(FileData *fd,
    * When datablocks are changed but still exist, we restore them at the old
    * address and inherit recalc flags for the dependency graph. */
   ID *id_old = NULL;
-  if (fd->memfile != NULL) {
+  if (fd->flags & FD_FLAGS_IS_MEMFILE) {
     if (read_libblock_undo_restore(fd, main, bhead, tag, &id_old)) {
       if (r_id) {
         *r_id = id_old;
       }
+      if (main->id_map != NULL) {
+        BKE_main_idmap_insert_id(main->id_map, id_old);
+      }
+
       return blo_bhead_next(fd, bhead);
     }
   }
@@ -3590,7 +3408,7 @@ static BHead *read_libblock(FileData *fd,
   ListBase *lb = which_libbase(main, idcode);
   if (lb == NULL) {
     /* Unknown ID type. */
-    printf("%s: unknown id code '%c%c'\n", __func__, (idcode & 0xff), (idcode >> 8));
+    CLOG_WARN(&LOG, "Unknown id code '%c%c'", (idcode & 0xff), (idcode >> 8));
     MEM_freeN(id);
     if (r_id) {
       *r_id = NULL;
@@ -3606,7 +3424,7 @@ static BHead *read_libblock(FileData *fd,
    * Note that existing datablocks in memory (which pointer value would be id_old) are not remapped
    * remapped anymore, so no need to store this info here. */
   ID *id_target = id_old ? id_old : id;
-  oldnewmap_insert(fd->libmap, bhead->old, id_target, bhead->code);
+  oldnewmap_lib_insert(fd, bhead->old, id_target, bhead->code);
 
   if (r_id) {
     *r_id = id_target;
@@ -3630,6 +3448,11 @@ static BHead *read_libblock(FileData *fd,
     }
 
     direct_link_id(fd, main, id_tag, id, id_old);
+
+    if (main->id_map != NULL) {
+      BKE_main_idmap_insert_id(main->id_map, id);
+    }
+
     return blo_bhead_next(fd, bhead);
   }
 
@@ -3653,6 +3476,13 @@ static BHead *read_libblock(FileData *fd,
   else if (id_old) {
     /* For undo, store contents read into id at id_old. */
     read_libblock_undo_restore_at_old_address(fd, main, id, id_old);
+
+    if (main->id_map != NULL) {
+      BKE_main_idmap_insert_id(main->id_map, id_old);
+    }
+  }
+  else if (main->id_map != NULL) {
+    BKE_main_idmap_insert_id(main->id_map, id);
   }
 
   return bhead;
@@ -3666,7 +3496,7 @@ static BHead *read_libblock(FileData *fd,
 
 BHead *blo_read_asset_data_block(FileData *fd, BHead *bhead, AssetMetaData **r_asset_data)
 {
-  BLI_assert(BKE_idtype_idcode_is_valid(bhead->code));
+  BLI_assert(blo_bhead_is_id_valid_type(bhead));
 
   bhead = read_data_into_datamap(fd, bhead, "asset-data read");
 
@@ -3685,7 +3515,7 @@ BHead *blo_read_asset_data_block(FileData *fd, BHead *bhead, AssetMetaData **r_a
 /** \name Read Global Data
  * \{ */
 
-/* note, this has to be kept for reading older files... */
+/* NOTE: this has to be kept for reading older files... */
 /* also version info is written here */
 static BHead *read_global(BlendFileData *bfd, FileData *fd, BHead *bhead)
 {
@@ -3702,25 +3532,25 @@ static BHead *read_global(BlendFileData *bfd, FileData *fd, BHead *bhead)
 
   bfd->fileflags = fg->fileflags;
   bfd->globalf = fg->globalf;
-  BLI_strncpy(bfd->filename, fg->filename, sizeof(bfd->filename));
+  STRNCPY(bfd->filepath, fg->filepath);
 
-  /* Error in 2.65 and older: main->name was not set if you save from startup
+  /* Error in 2.65 and older: `main->filepath` was not set if you save from startup
    * (not after loading file). */
-  if (bfd->filename[0] == 0) {
+  if (bfd->filepath[0] == 0) {
     if (fd->fileversion < 265 || (fd->fileversion == 265 && fg->subversion < 1)) {
-      if ((G.fileflags & G_FILE_RECOVER) == 0) {
-        BLI_strncpy(bfd->filename, BKE_main_blendfile_path(bfd->main), sizeof(bfd->filename));
+      if ((G.fileflags & G_FILE_RECOVER_READ) == 0) {
+        STRNCPY(bfd->filepath, BKE_main_blendfile_path(bfd->main));
       }
     }
 
-    /* early 2.50 version patch - filename not in FileGlobal struct at all */
+    /* early 2.50 version patch - filepath not in FileGlobal struct at all */
     if (fd->fileversion <= 250) {
-      BLI_strncpy(bfd->filename, BKE_main_blendfile_path(bfd->main), sizeof(bfd->filename));
+      STRNCPY(bfd->filepath, BKE_main_blendfile_path(bfd->main));
     }
   }
 
-  if (G.fileflags & G_FILE_RECOVER) {
-    BLI_strncpy(fd->relabase, fg->filename, sizeof(fd->relabase));
+  if (G.fileflags & G_FILE_RECOVER_READ) {
+    BLI_strncpy(fd->relabase, fg->filepath, sizeof(fd->relabase));
   }
 
   bfd->curscreen = fg->curscreen;
@@ -3735,7 +3565,7 @@ static BHead *read_global(BlendFileData *bfd, FileData *fd, BHead *bhead)
   return blo_bhead_next(fd, bhead);
 }
 
-/* note, this has to be kept for reading older files... */
+/* NOTE: this has to be kept for reading older files... */
 static void link_global(FileData *fd, BlendFileData *bfd)
 {
   bfd->cur_view_layer = blo_read_get_new_globaldata_address(fd, bfd->cur_view_layer);
@@ -3784,12 +3614,14 @@ static void do_versions(FileData *fd, Library *lib, Main *main)
       BLI_strncpy(build_commit_datetime, "unknown", sizeof(build_commit_datetime));
     }
 
-    printf("read file %s\n  Version %d sub %d date %s hash %s\n",
-           fd->relabase,
-           main->versionfile,
-           main->subversionfile,
-           build_commit_datetime,
-           main->build_hash);
+    CLOG_INFO(&LOG, 0, "Read file %s", fd->relabase);
+    CLOG_INFO(&LOG,
+              0,
+              "    Version %d sub %d date %s hash %s",
+              main->versionfile,
+              main->subversionfile,
+              build_commit_datetime,
+              main->build_hash);
   }
 
   blo_do_versions_pre250(fd, lib, main);
@@ -3798,6 +3630,7 @@ static void do_versions(FileData *fd, Library *lib, Main *main)
   blo_do_versions_270(fd, lib, main);
   blo_do_versions_280(fd, lib, main);
   blo_do_versions_290(fd, lib, main);
+  blo_do_versions_300(fd, lib, main);
   blo_do_versions_cycles(fd, lib, main);
   blo_do_versions_upbge(fd, lib, main);
 
@@ -3811,8 +3644,13 @@ static void do_versions(FileData *fd, Library *lib, Main *main)
 
 static void do_versions_after_linking(Main *main, ReportList *reports)
 {
-  //  printf("%s for %s (%s), %d.%d\n", __func__, main->curlib ? main->curlib->filepath :
-  //         main->name, main->curlib ? "LIB" : "MAIN", main->versionfile, main->subversionfile);
+  CLOG_INFO(&LOG,
+            2,
+            "Processing %s (%s), %d.%d",
+            main->curlib ? main->curlib->filepath : main->filepath,
+            main->curlib ? "LIB" : "MAIN",
+            main->versionfile,
+            main->subversionfile);
 
   /* Don't allow versioning to create new data-blocks. */
   main->is_locked_for_linking = true;
@@ -3822,6 +3660,7 @@ static void do_versions_after_linking(Main *main, ReportList *reports)
   do_versions_after_linking_270(main);
   do_versions_after_linking_280(main, reports);
   do_versions_after_linking_290(main, reports);
+  do_versions_after_linking_300(main, reports);
   do_versions_after_linking_cycles(main);
 
   main->is_locked_for_linking = false;
@@ -3846,13 +3685,14 @@ static void lib_link_all(FileData *fd, Main *bmain)
       continue;
     }
 
-    if (fd->memfile != NULL && GS(id->name) == ID_WM) {
+    if ((fd->flags & FD_FLAGS_IS_MEMFILE) && GS(id->name) == ID_WM) {
       /* No load UI for undo memfiles.
        * Only WM currently, SCR needs it still (see below), and so does WS? */
       continue;
     }
 
-    if (fd->memfile != NULL && do_partial_undo && (id->tag & LIB_TAG_UNDO_OLD_ID_REUSED) != 0) {
+    if ((fd->flags & FD_FLAGS_IS_MEMFILE) && do_partial_undo &&
+        (id->tag & LIB_TAG_UNDO_OLD_ID_REUSED) != 0) {
       /* This ID has been re-used from 'old' bmain. Since it was therefore unchanged across
        * current undo step, and old IDs re-use their old memory address, we do not need to liblink
        * it at all. */
@@ -3886,6 +3726,26 @@ static void lib_link_all(FileData *fd, Main *bmain)
   }
   FOREACH_MAIN_ID_END;
 
+#ifndef NDEBUG
+  /* Double check we do not have any 'need link' tag remaining, this should never be the case once
+   * this function has run. */
+  FOREACH_MAIN_ID_BEGIN (bmain, id) {
+    BLI_assert((id->tag & LIB_TAG_NEED_LINK) == 0);
+  }
+  FOREACH_MAIN_ID_END;
+#endif
+}
+
+/**
+ * Checks to perform after `lib_link_all`.
+ * Those operations cannot perform properly in a split bmain case, since some data from other
+ * bmain's (aka libraries) may not have been processed yet.
+ */
+static void after_liblink_merged_bmain_process(Main *bmain)
+{
+  /* We only expect a merged Main here, not a split one. */
+  BLI_assert((bmain->prev == NULL) && (bmain->next == NULL));
+
   /* Check for possible cycles in scenes' 'set' background property. */
   lib_link_scenes_check_set(bmain);
 
@@ -3896,15 +3756,6 @@ static void lib_link_all(FileData *fd, Main *bmain)
   /* We have to rebuild that runtime information *after* all data-blocks have been properly linked.
    */
   BKE_main_collections_parent_relations_rebuild(bmain);
-
-#ifndef NDEBUG
-  /* Double check we do not have any 'need link' tag remaining, this should never be the case once
-   * this function has run. */
-  FOREACH_MAIN_ID_BEGIN (bmain, id) {
-    BLI_assert((id->tag & LIB_TAG_NEED_LINK) == 0);
-  }
-  FOREACH_MAIN_ID_END;
-#endif
 }
 
 /** \} */
@@ -4020,8 +3871,8 @@ BlendFileData *blo_read_file_internal(FileData *fd, const char *filepath)
   BlendFileData *bfd;
   ListBase mainlist = {NULL, NULL};
 
-  if (fd->memfile != NULL) {
-    DEBUG_PRINTF("\nUNDO: read step\n");
+  if (fd->flags & FD_FLAGS_IS_MEMFILE) {
+    CLOG_INFO(&LOG_UNDO, 2, "UNDO: read step");
   }
 
   bfd = MEM_callocN(sizeof(BlendFileData), "blendfiledata");
@@ -4034,7 +3885,7 @@ BlendFileData *blo_read_file_internal(FileData *fd, const char *filepath)
   if ((fd->skip_flags & BLO_READ_SKIP_DATA) == 0) {
     BLI_addtail(&mainlist, bfd->main);
     fd->mainlist = &mainlist;
-    BLI_strncpy(bfd->main->name, filepath, sizeof(bfd->main->name));
+    STRNCPY(bfd->main->filepath, filepath);
   }
 
   if (G.background) {
@@ -4047,14 +3898,14 @@ BlendFileData *blo_read_file_internal(FileData *fd, const char *filepath)
       const int width = data[0];
       const int height = data[1];
       if (BLEN_THUMB_MEMSIZE_IS_VALID(width, height)) {
-        const size_t sz = BLEN_THUMB_MEMSIZE(width, height);
-        bfd->main->blen_thumb = MEM_mallocN(sz, __func__);
+        const size_t data_size = BLEN_THUMB_MEMSIZE(width, height);
+        bfd->main->blen_thumb = MEM_mallocN(data_size, __func__);
 
-        BLI_assert((sz - sizeof(*bfd->main->blen_thumb)) ==
+        BLI_assert((data_size - sizeof(*bfd->main->blen_thumb)) ==
                    (BLEN_THUMB_MEMSIZE_FILE(width, height) - (sizeof(*data) * 2)));
         bfd->main->blen_thumb->width = width;
         bfd->main->blen_thumb->height = height;
-        memcpy(bfd->main->blen_thumb->rect, &data[2], sz - sizeof(*bfd->main->blen_thumb));
+        memcpy(bfd->main->blen_thumb->rect, &data[2], data_size - sizeof(*bfd->main->blen_thumb));
       }
     }
   }
@@ -4111,7 +3962,7 @@ BlendFileData *blo_read_file_internal(FileData *fd, const char *filepath)
   }
 
   /* do before read_libraries, but skip undo case */
-  if (fd->memfile == NULL) {
+  if ((fd->flags & FD_FLAGS_IS_MEMFILE) == 0) {
     if ((fd->skip_flags & BLO_READ_SKIP_DATA) == 0) {
       do_versions(fd, NULL, bfd->main);
     }
@@ -4122,14 +3973,18 @@ BlendFileData *blo_read_file_internal(FileData *fd, const char *filepath)
   }
 
   if ((fd->skip_flags & BLO_READ_SKIP_DATA) == 0) {
+    fd->reports->duration.libraries = PIL_check_seconds_timer();
     read_libraries(fd, &mainlist);
 
     blo_join_main(&mainlist);
 
     lib_link_all(fd, bfd->main);
+    after_liblink_merged_bmain_process(bfd->main);
+
+    fd->reports->duration.libraries = PIL_check_seconds_timer() - fd->reports->duration.libraries;
 
     /* Skip in undo case. */
-    if (fd->memfile == NULL) {
+    if ((fd->flags & FD_FLAGS_IS_MEMFILE) == 0) {
       /* Note that we can't recompute user-counts at this point in undo case, we play too much with
        * IDs from different memory realms, and Main database is not in a fully valid state yet.
        */
@@ -4143,7 +3998,7 @@ BlendFileData *blo_read_file_internal(FileData *fd, const char *filepath)
       blo_split_main(&mainlist, bfd->main);
       LISTBASE_FOREACH (Main *, mainvar, &mainlist) {
         BLI_assert(mainvar->versionfile != 0);
-        do_versions_after_linking(mainvar, fd->reports);
+        do_versions_after_linking(mainvar, fd->reports->reports);
       }
       blo_join_main(&mainlist);
 
@@ -4151,10 +4006,12 @@ BlendFileData *blo_read_file_internal(FileData *fd, const char *filepath)
        * does not always properly handle user counts, and/or that function does not take into
        * account old, deprecated data. */
       BKE_main_id_refcount_recompute(bfd->main, false);
-
-      /* After all data has been read and versioned, uses LIB_TAG_NEW. */
-      ntreeUpdateAllNew(bfd->main);
     }
+
+    /* After all data has been read and versioned, uses LIB_TAG_NEW. Theoretically this should
+     * not be calculated in the undo case, but it is currently needed even on undo to recalculate
+     * a cache. */
+    ntreeUpdateAllNew(bfd->main);
 
     placeholders_ensure_valid(bfd->main);
 
@@ -4162,9 +4019,15 @@ BlendFileData *blo_read_file_internal(FileData *fd, const char *filepath)
 
     /* Now that all our data-blocks are loaded,
      * we can re-generate overrides from their references. */
-    if (fd->memfile == NULL) {
+    if ((fd->flags & FD_FLAGS_IS_MEMFILE) == 0) {
       /* Do not apply in undo case! */
+      fd->reports->duration.lib_overrides = PIL_check_seconds_timer();
+
+      BKE_lib_override_library_main_validate(bfd->main, fd->reports->reports);
       BKE_lib_override_library_main_update(bfd->main);
+
+      fd->reports->duration.lib_overrides = PIL_check_seconds_timer() -
+                                            fd->reports->duration.lib_overrides;
     }
 
     BKE_collections_after_lib_link(bfd->main);
@@ -4176,6 +4039,8 @@ BlendFileData *blo_read_file_internal(FileData *fd, const char *filepath)
   }
 
   fd->mainlist = NULL; /* Safety, this is local variable, shall not be used afterward. */
+
+  BLI_assert(bfd->main->id_map == NULL);
 
   return bfd;
 }
@@ -4234,7 +4099,7 @@ static void sort_bhead_old_map(FileData *fd)
 static BHead *find_previous_lib(FileData *fd, BHead *bhead)
 {
   /* Skip library data-blocks in undo, see comment in read_libblock. */
-  if (fd->memfile) {
+  if (fd->flags & FD_FLAGS_IS_MEMFILE) {
     return NULL;
   }
 
@@ -4321,9 +4186,16 @@ static BHead *find_bhead_from_idname(FileData *fd, const char *idname)
 
 static ID *is_yet_read(FileData *fd, Main *mainvar, BHead *bhead)
 {
+  if (mainvar->id_map == NULL) {
+    mainvar->id_map = BKE_main_idmap_create(mainvar, false, NULL, MAIN_IDMAP_TYPE_NAME);
+  }
+  BLI_assert(BKE_main_idmap_main_get(mainvar->id_map) == mainvar);
+
   const char *idname = blo_bhead_id_name(fd, bhead);
-  /* which_libbase can be NULL, intentionally not using idname+2 */
-  return BLI_findstring(which_libbase(mainvar, GS(idname)), idname, offsetof(ID, name));
+
+  ID *id = BKE_main_idmap_lookup_name(mainvar->id_map, GS(idname), idname + 2, mainvar->curlib);
+  BLI_assert(id == BLI_findstring(which_libbase(mainvar, GS(idname)), idname, offsetof(ID, name)));
+  return id;
 }
 
 /** \} */
@@ -4342,7 +4214,7 @@ static void expand_doit_library(void *fdhandle, Main *mainvar, void *old)
   }
 
   if (bhead->code == ID_LINK_PLACEHOLDER) {
-    /* Placeholder link to data-lock in another library. */
+    /* Placeholder link to data-block in another library. */
     BHead *bheadlib = find_previous_lib(fd, bhead);
     if (bheadlib == NULL) {
       return;
@@ -4367,7 +4239,10 @@ static void expand_doit_library(void *fdhandle, Main *mainvar, void *old)
     if (id == NULL) {
       /* ID has not been read yet, add placeholder to the main of the
        * library it belongs to, so that it will be read later. */
-      read_libblock(fd, libmain, bhead, LIB_TAG_INDIRECT, false, NULL);
+      read_libblock(fd, libmain, bhead, fd->id_tag_extra | LIB_TAG_INDIRECT, false, &id);
+      BLI_assert(id != NULL);
+      id_sort_by_name(which_libbase(libmain, GS(id->name)), id, id->prev);
+
       /* commented because this can print way too much */
       // if (G.debug & G_DEBUG) printf("expand_doit: other lib %s\n", lib->filepath);
 
@@ -4392,9 +4267,9 @@ static void expand_doit_library(void *fdhandle, Main *mainvar, void *old)
        * (B) forest.blend: contains Forest collection linking in Tree from tree.blend.
        * (C) shot.blend: links in both Tree from tree.blend and Forest from forest.blend.
        */
-      oldnewmap_insert(fd->libmap, bhead->old, id, bhead->code);
+      oldnewmap_lib_insert(fd, bhead->old, id, bhead->code);
 
-      /* If "id" is a real data-lock and not a placeholder, we need to
+      /* If "id" is a real data-block and not a placeholder, we need to
        * update fd->libmap to replace ID_LINK_PLACEHOLDER with the real
        * ID_* code.
        *
@@ -4422,7 +4297,14 @@ static void expand_doit_library(void *fdhandle, Main *mainvar, void *old)
 
     ID *id = is_yet_read(fd, mainvar, bhead);
     if (id == NULL) {
-      read_libblock(fd, mainvar, bhead, LIB_TAG_NEED_EXPAND | LIB_TAG_INDIRECT, false, NULL);
+      read_libblock(fd,
+                    mainvar,
+                    bhead,
+                    fd->id_tag_extra | LIB_TAG_NEED_EXPAND | LIB_TAG_INDIRECT,
+                    false,
+                    &id);
+      BLI_assert(id != NULL);
+      id_sort_by_name(which_libbase(mainvar, GS(id->name)), id, id->prev);
     }
     else {
       /* Convert any previously read weak link to regular link
@@ -4434,7 +4316,7 @@ static void expand_doit_library(void *fdhandle, Main *mainvar, void *old)
       /* this is actually only needed on UI call? when ID was already read before,
        * and another append happens which invokes same ID...
        * in that case the lookup table needs this entry */
-      oldnewmap_insert(fd->libmap, bhead->old, id, bhead->code);
+      oldnewmap_lib_insert(fd, bhead->old, id, bhead->code);
       /* commented because this can print way too much */
       // if (G.debug & G_DEBUG) printf("expand: already read %s\n", id->name);
     }
@@ -4480,26 +4362,14 @@ static void expand_id(BlendExpander *expander, ID *id)
   expand_id_embedded_id(expander, id);
 }
 
-/**
- * Set the callback func used over all ID data found by \a BLO_expand_main func.
- *
- * \param expand_doit_func: Called for each ID block it finds.
- */
 void BLO_main_expander(BLOExpandDoitCallback expand_doit_func)
 {
   expand_doit = expand_doit_func;
 }
 
-/**
- * Loop over all ID data in Main to mark relations.
- * Set (id->tag & LIB_TAG_NEED_EXPAND) to mark expanding. Flags get cleared after expanding.
- *
- * \param fdhandle: usually filedata, or own handle.
- * \param mainvar: the Main database to expand.
- */
 void BLO_expand_main(void *fdhandle, Main *mainvar)
 {
-  ListBase *lbarray[MAX_LIBARRAY];
+  ListBase *lbarray[INDEX_ID_MAX];
   FileData *fd = fdhandle;
   ID *id;
   int a;
@@ -4537,248 +4407,6 @@ void BLO_expand_main(void *fdhandle, Main *mainvar)
 /** \name Library Linking (helper functions)
  * \{ */
 
-static bool object_in_any_scene(Main *bmain, Object *ob)
-{
-  LISTBASE_FOREACH (Scene *, sce, &bmain->scenes) {
-    if (BKE_scene_object_find(sce, ob)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-static bool object_in_any_collection(Main *bmain, Object *ob)
-{
-  LISTBASE_FOREACH (Collection *, collection, &bmain->collections) {
-    if (BKE_collection_has_object(collection, ob)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
- * Shared operations to perform on the object's base after adding it to the scene.
- */
-static void object_base_instance_init(
-    Object *ob, bool set_selected, bool set_active, ViewLayer *view_layer, const View3D *v3d)
-{
-  Base *base = BKE_view_layer_base_find(view_layer, ob);
-
-  if (v3d != NULL) {
-    base->local_view_bits |= v3d->local_view_uuid;
-  }
-
-  if (set_selected) {
-    if (base->flag & BASE_SELECTABLE) {
-      base->flag |= BASE_SELECTED;
-    }
-  }
-
-  if (set_active) {
-    view_layer->basact = base;
-  }
-
-  BKE_scene_object_base_flag_sync_from_base(base);
-}
-
-static void add_loose_objects_to_scene(Main *mainvar,
-                                       Main *bmain,
-                                       Scene *scene,
-                                       ViewLayer *view_layer,
-                                       const View3D *v3d,
-                                       Library *lib,
-                                       const short flag)
-{
-  Collection *active_collection = NULL;
-  const bool do_append = (flag & FILE_LINK) == 0;
-
-  BLI_assert(scene);
-
-  /* Give all objects which are LIB_TAG_INDIRECT a base,
-   * or for a collection when *lib has been set. */
-  LISTBASE_FOREACH (Object *, ob, &mainvar->objects) {
-    bool do_it = (ob->id.tag & LIB_TAG_DOIT) != 0;
-    if (do_it || ((ob->id.tag & LIB_TAG_INDIRECT) && (ob->id.tag & LIB_TAG_PRE_EXISTING) == 0)) {
-      if (do_append) {
-        if (ob->id.us == 0) {
-          do_it = true;
-        }
-        else if ((ob->id.lib == lib) && !object_in_any_collection(bmain, ob)) {
-          /* When appending, make sure any indirectly loaded object gets a base,
-           * when they are not part of any collection yet. */
-          do_it = true;
-        }
-      }
-
-      if (do_it) {
-        /* Find or add collection as needed. */
-        if (active_collection == NULL) {
-          if (flag & FILE_ACTIVE_COLLECTION) {
-            LayerCollection *lc = BKE_layer_collection_get_active(view_layer);
-            active_collection = lc->collection;
-          }
-          else {
-            active_collection = BKE_collection_add(bmain, scene->master_collection, NULL);
-          }
-        }
-
-        CLAMP_MIN(ob->id.us, 0);
-        ob->mode = OB_MODE_OBJECT;
-
-        BKE_collection_object_add(bmain, active_collection, ob);
-
-        const bool set_selected = (flag & FILE_AUTOSELECT) != 0;
-        /* Do NOT make base active here! screws up GUI stuff,
-         * if you want it do it at the editor level. */
-        const bool set_active = false;
-        object_base_instance_init(ob, set_selected, set_active, view_layer, v3d);
-
-        ob->id.tag &= ~LIB_TAG_INDIRECT;
-        ob->id.flag &= ~LIB_INDIRECT_WEAK_LINK;
-        ob->id.tag |= LIB_TAG_EXTERN;
-      }
-    }
-  }
-}
-
-static void add_loose_object_data_to_scene(Main *mainvar,
-                                           Main *bmain,
-                                           Scene *scene,
-                                           ViewLayer *view_layer,
-                                           const View3D *v3d,
-                                           const short flag)
-{
-  if ((flag & FILE_OBDATA_INSTANCE) == 0) {
-    return;
-  }
-
-  Collection *active_collection = scene->master_collection;
-  if (flag & FILE_ACTIVE_COLLECTION) {
-    LayerCollection *lc = BKE_layer_collection_get_active(view_layer);
-    active_collection = lc->collection;
-  }
-
-  /* Loop over all ID types, instancing object-data for ID types that have support for it. */
-  ListBase *lbarray[MAX_LIBARRAY];
-  int i = set_listbasepointers(mainvar, lbarray);
-  while (i--) {
-    const short idcode = BKE_idtype_idcode_from_index(i);
-    if (!OB_DATA_SUPPORT_ID(idcode)) {
-      continue;
-    }
-
-    LISTBASE_FOREACH (ID *, id, lbarray[i]) {
-      if (id->tag & LIB_TAG_DOIT) {
-        const int type = BKE_object_obdata_to_type(id);
-        BLI_assert(type != -1);
-        Object *ob = BKE_object_add_only_object(bmain, type, id->name + 2);
-        ob->data = id;
-        id_us_plus(id);
-        BKE_object_materials_test(bmain, ob, ob->data);
-
-        BKE_collection_object_add(bmain, active_collection, ob);
-
-        const bool set_selected = (flag & FILE_AUTOSELECT) != 0;
-        /* Do NOT make base active here! screws up GUI stuff,
-         * if you want it do it at the editor level. */
-        bool set_active = false;
-        object_base_instance_init(ob, set_selected, set_active, view_layer, v3d);
-
-        copy_v3_v3(ob->loc, scene->cursor.location);
-      }
-    }
-  }
-}
-
-static void add_collections_to_scene(Main *mainvar,
-                                     Main *bmain,
-                                     Scene *scene,
-                                     ViewLayer *view_layer,
-                                     const View3D *v3d,
-                                     Library *lib,
-                                     const short flag)
-{
-  Collection *active_collection = scene->master_collection;
-  if (flag & FILE_ACTIVE_COLLECTION) {
-    LayerCollection *lc = BKE_layer_collection_get_active(view_layer);
-    active_collection = lc->collection;
-  }
-
-  /* Give all objects which are tagged a base. */
-  LISTBASE_FOREACH (Collection *, collection, &mainvar->collections) {
-    if ((flag & FILE_COLLECTION_INSTANCE) && (collection->id.tag & LIB_TAG_DOIT)) {
-      /* Any indirect collection should not have been tagged. */
-      BLI_assert((collection->id.tag & LIB_TAG_INDIRECT) == 0);
-
-      /* BKE_object_add(...) messes with the selection. */
-      Object *ob = BKE_object_add_only_object(bmain, OB_EMPTY, collection->id.name + 2);
-      ob->type = OB_EMPTY;
-      ob->empty_drawsize = U.collection_instance_empty_size;
-
-      BKE_collection_object_add(bmain, active_collection, ob);
-
-      const bool set_selected = (flag & FILE_AUTOSELECT) != 0;
-      /* TODO: why is it OK to make this active here but not in other situations?
-       * See other callers of #object_base_instance_init */
-      const bool set_active = set_selected;
-      object_base_instance_init(ob, set_selected, set_active, view_layer, v3d);
-
-      DEG_id_tag_update(&ob->id, ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY | ID_RECALC_ANIMATION);
-
-      /* Assign the collection. */
-      ob->instance_collection = collection;
-      id_us_plus(&collection->id);
-      ob->transflag |= OB_DUPLICOLLECTION;
-      copy_v3_v3(ob->loc, scene->cursor.location);
-    }
-    /* We do not want to force instantiation of indirectly linked collections,
-     * not even when appending. Users can now easily instantiate collections (and their objects)
-     * as needed by themselves. See T67032. */
-    else if ((collection->id.tag & LIB_TAG_INDIRECT) == 0) {
-      bool do_add_collection = (collection->id.tag & LIB_TAG_DOIT) != 0;
-      if (!do_add_collection) {
-        /* We need to check that objects in that collections are already instantiated in a scene.
-         * Otherwise, it's better to add the collection to the scene's active collection, than to
-         * instantiate its objects in active scene's collection directly. See T61141.
-         * Note that we only check object directly into that collection,
-         * not recursively into its children.
-         */
-        LISTBASE_FOREACH (CollectionObject *, coll_ob, &collection->gobject) {
-          Object *ob = coll_ob->ob;
-          if ((ob->id.tag & (LIB_TAG_PRE_EXISTING | LIB_TAG_DOIT | LIB_TAG_INDIRECT)) == 0 &&
-              (ob->id.lib == lib) && (object_in_any_scene(bmain, ob) == 0)) {
-            do_add_collection = true;
-            break;
-          }
-        }
-      }
-      if (do_add_collection) {
-        /* Add collection as child of active collection. */
-        BKE_collection_child_add(bmain, active_collection, collection);
-
-        if (flag & FILE_AUTOSELECT) {
-          LISTBASE_FOREACH (CollectionObject *, coll_ob, &collection->gobject) {
-            Object *ob = coll_ob->ob;
-            Base *base = BKE_view_layer_base_find(view_layer, ob);
-            if (base) {
-              base->flag |= BASE_SELECTED;
-              BKE_scene_object_base_flag_sync_from_base(base);
-            }
-          }
-        }
-
-        /* Those are kept for safety and consistency, but should not be needed anymore? */
-        collection->id.tag &= ~LIB_TAG_INDIRECT;
-        collection->id.flag &= ~LIB_INDIRECT_WEAK_LINK;
-        collection->id.tag |= LIB_TAG_EXTERN;
-      }
-    }
-  }
-}
-
 /* returns true if the item was found
  * but it may already have already been appended/linked */
 static ID *link_named_part(
@@ -4796,7 +4424,7 @@ static ID *link_named_part(
     id = is_yet_read(fd, mainl, bhead);
     if (id == NULL) {
       /* not read yet */
-      const int tag = force_indirect ? LIB_TAG_INDIRECT : LIB_TAG_EXTERN;
+      const int tag = ((force_indirect ? LIB_TAG_INDIRECT : LIB_TAG_EXTERN) | fd->id_tag_extra);
       read_libblock(fd, mainl, bhead, tag | LIB_TAG_NEED_EXPAND, false, &id);
 
       if (id) {
@@ -4807,10 +4435,8 @@ static ID *link_named_part(
     }
     else {
       /* already linked */
-      if (G.debug) {
-        printf("append: already linked\n");
-      }
-      oldnewmap_insert(fd->libmap, bhead->old, id, bhead->code);
+      CLOG_WARN(&LOG, "Append: ID '%s' is already linked", id->name);
+      oldnewmap_lib_insert(fd, bhead->old, id, bhead->code);
       if (!force_indirect && (id->tag & LIB_TAG_INDIRECT)) {
         id->tag &= ~LIB_TAG_INDIRECT;
         id->flag &= ~LIB_INDIRECT_WEAK_LINK;
@@ -4830,68 +4456,9 @@ static ID *link_named_part(
   /* if we found the id but the id is NULL, this is really bad */
   BLI_assert(!((bhead != NULL) && (id == NULL)));
 
-  /* Tag as loose object (or data associated with objects)
-   * needing to be instantiated in #LibraryLink_Params.scene. */
-  if ((id != NULL) && (flag & BLO_LIBLINK_NEEDS_ID_TAG_DOIT)) {
-    if (library_link_idcode_needs_tag_check(idcode, flag)) {
-      id->tag |= LIB_TAG_DOIT;
-    }
-  }
-
   return id;
 }
 
-/**
- * Simple reader for copy/paste buffers.
- */
-int BLO_library_link_copypaste(Main *mainl, BlendHandle *bh, const uint64_t id_types_mask)
-{
-  FileData *fd = (FileData *)(bh);
-  BHead *bhead;
-  int num_directly_linked = 0;
-
-  for (bhead = blo_bhead_first(fd); bhead; bhead = blo_bhead_next(fd, bhead)) {
-    ID *id = NULL;
-
-    if (bhead->code == ENDB) {
-      break;
-    }
-
-    if (BKE_idtype_idcode_is_valid(bhead->code) && BKE_idtype_idcode_is_linkable(bhead->code) &&
-        (id_types_mask == 0 ||
-         (BKE_idtype_idcode_to_idfilter((short)bhead->code) & id_types_mask) != 0)) {
-      read_libblock(fd, mainl, bhead, LIB_TAG_NEED_EXPAND | LIB_TAG_INDIRECT, false, &id);
-      num_directly_linked++;
-    }
-
-    if (id) {
-      /* sort by name in list */
-      ListBase *lb = which_libbase(mainl, GS(id->name));
-      id_sort_by_name(lb, id, NULL);
-
-      if (bhead->code == ID_OB) {
-        /* Instead of instancing Base's directly, postpone until after collections are loaded
-         * otherwise the base's flag is set incorrectly when collections are used */
-        Object *ob = (Object *)id;
-        ob->mode = OB_MODE_OBJECT;
-        /* ensure add_loose_objects_to_scene runs on this object */
-        BLI_assert(id->us == 0);
-      }
-    }
-  }
-
-  return num_directly_linked;
-}
-
-/**
- * Link a named data-block from an external blend file.
- *
- * \param mainl: The main database to link from (not the active one).
- * \param bh: The blender file handle.
- * \param idcode: The kind of data-block to link.
- * \param name: The name of the data-block (without the 2 char ID prefix).
- * \return the linked ID when found.
- */
 ID *BLO_library_link_named_part(Main *mainl,
                                 BlendHandle **bh,
                                 const short idcode,
@@ -4904,49 +4471,21 @@ ID *BLO_library_link_named_part(Main *mainl,
 
 /* common routine to append/link something from a library */
 
-/**
- * Checks if the \a idcode needs to be tagged with #LIB_TAG_DOIT when linking/appending.
- */
-static bool library_link_idcode_needs_tag_check(const short idcode, const int flag)
-{
-  if (flag & BLO_LIBLINK_NEEDS_ID_TAG_DOIT) {
-    /* Always true because of #add_loose_objects_to_scene & #add_collections_to_scene. */
-    if (ELEM(idcode, ID_OB, ID_GR)) {
-      return true;
-    }
-    if (flag & FILE_OBDATA_INSTANCE) {
-      if (OB_DATA_SUPPORT_ID(idcode)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-/**
- * Clears #LIB_TAG_DOIT based on the result of #library_link_idcode_needs_tag_check.
- */
-static void library_link_clear_tag(Main *mainvar, const int flag)
-{
-  for (int i = 0; i < MAX_LIBARRAY; i++) {
-    const short idcode = BKE_idtype_idcode_from_index(i);
-    BLI_assert(idcode != -1);
-    if (library_link_idcode_needs_tag_check(idcode, flag)) {
-      BKE_main_id_tag_idcode(mainvar, idcode, LIB_TAG_DOIT, false);
-    }
-  }
-}
-
-static Main *library_link_begin(Main *mainvar, FileData **fd, const char *filepath, const int flag)
+static Main *library_link_begin(Main *mainvar,
+                                FileData **fd,
+                                const char *filepath,
+                                const int id_tag_extra)
 {
   Main *mainl;
 
-  (*fd)->mainlist = MEM_callocN(sizeof(ListBase), "FileData.mainlist");
+  /* Only allow specific tags to be set as extra,
+   * otherwise this could conflict with library loading logic.
+   * Other flags can be added here, as long as they are safe. */
+  BLI_assert((id_tag_extra & ~LIB_TAG_TEMP_MAIN) == 0);
 
-  if (flag & BLO_LIBLINK_NEEDS_ID_TAG_DOIT) {
-    /* Clear for objects and collections instantiating tag. */
-    library_link_clear_tag(mainvar, flag);
-  }
+  (*fd)->id_tag_extra = id_tag_extra;
+
+  (*fd)->mainlist = MEM_callocN(sizeof(ListBase), "FileData.mainlist");
 
   /* make mains */
   blo_split_main((*fd)->mainlist, mainvar);
@@ -4966,47 +4505,38 @@ static Main *library_link_begin(Main *mainvar, FileData **fd, const char *filepa
 
 void BLO_library_link_params_init(struct LibraryLink_Params *params,
                                   struct Main *bmain,
-                                  const int flag)
+                                  const int flag,
+                                  const int id_tag_extra)
 {
   memset(params, 0, sizeof(*params));
   params->bmain = bmain;
   params->flag = flag;
+  params->id_tag_extra = id_tag_extra;
 }
 
 void BLO_library_link_params_init_with_context(struct LibraryLink_Params *params,
                                                struct Main *bmain,
                                                const int flag,
+                                               const int id_tag_extra,
                                                /* Context arguments. */
                                                struct Scene *scene,
                                                struct ViewLayer *view_layer,
                                                const struct View3D *v3d)
 {
-  BLO_library_link_params_init(params, bmain, flag);
+  BLO_library_link_params_init(params, bmain, flag, id_tag_extra);
   if (scene != NULL) {
-    /* Tagging is needed for instancing. */
-    params->flag |= BLO_LIBLINK_NEEDS_ID_TAG_DOIT;
-
     params->context.scene = scene;
     params->context.view_layer = view_layer;
     params->context.v3d = v3d;
   }
 }
 
-/**
- * Initialize the #BlendHandle for linking library data.
- *
- * \param bh: A blender file handle as returned by
- * #BLO_blendhandle_from_file or #BLO_blendhandle_from_memory.
- * \param filepath: Used for relative linking, copied to the `lib->filepath`.
- * \param params: Settings for linking that don't change from beginning to end of linking.
- * \return the library #Main, to be passed to #BLO_library_link_named_part as \a mainl.
- */
 Main *BLO_library_link_begin(BlendHandle **bh,
                              const char *filepath,
                              const struct LibraryLink_Params *params)
 {
   FileData *fd = (FileData *)(*bh);
-  return library_link_begin(params->bmain, &fd, filepath, params->flag);
+  return library_link_begin(params->bmain, &fd, filepath, params->id_tag_extra);
 }
 
 static void split_main_newid(Main *mainptr, Main *main_newid)
@@ -5014,11 +4544,11 @@ static void split_main_newid(Main *mainptr, Main *main_newid)
   /* We only copy the necessary subset of data in this temp main. */
   main_newid->versionfile = mainptr->versionfile;
   main_newid->subversionfile = mainptr->subversionfile;
-  BLI_strncpy(main_newid->name, mainptr->name, sizeof(main_newid->name));
+  STRNCPY(main_newid->filepath, mainptr->filepath);
   main_newid->curlib = mainptr->curlib;
 
-  ListBase *lbarray[MAX_LIBARRAY];
-  ListBase *lbarray_newid[MAX_LIBARRAY];
+  ListBase *lbarray[INDEX_ID_MAX];
+  ListBase *lbarray_newid[INDEX_ID_MAX];
   int i = set_listbasepointers(mainptr, lbarray);
   set_listbasepointers(main_newid, lbarray_newid);
   while (i--) {
@@ -5033,22 +4563,14 @@ static void split_main_newid(Main *mainptr, Main *main_newid)
   }
 }
 
-/**
- * \param scene: The scene in which to instantiate objects/collections
- * (if NULL, no instantiation is done).
- * \param v3d: The active 3D viewport.
- * (only to define active layers for instantiated objects & collections, can be NULL).
- */
-static void library_link_end(Main *mainl,
-                             FileData **fd,
-                             Main *bmain,
-                             const int flag,
-                             Scene *scene,
-                             ViewLayer *view_layer,
-                             const View3D *v3d)
+static void library_link_end(Main *mainl, FileData **fd, const int flag)
 {
   Main *mainvar;
   Library *curlib;
+
+  if (mainl->id_map == NULL) {
+    mainl->id_map = BKE_main_idmap_create(mainl, false, NULL, MAIN_IDMAP_TYPE_NAME);
+  }
 
   /* expander now is callback function */
   BLO_main_expander(expand_doit_library);
@@ -5072,9 +4594,10 @@ static void library_link_end(Main *mainl,
 
   blo_join_main((*fd)->mainlist);
   mainvar = (*fd)->mainlist->first;
-  mainl = NULL; /* blo_join_main free's mainl, cant use anymore */
+  mainl = NULL; /* blo_join_main free's mainl, can't use anymore */
 
   lib_link_all(*fd, mainvar);
+  after_liblink_merged_bmain_process(mainvar);
 
   /* Some versioning code does expect some proper userrefcounting, e.g. in conversion from
    * groups to collections... We could optimize out that first call when we are reading a
@@ -5093,12 +4616,11 @@ static void library_link_end(Main *mainl,
      * or they will go again through do_versions - bad, very bad! */
     split_main_newid(mainvar, main_newid);
 
-    do_versions_after_linking(main_newid, (*fd)->reports);
+    do_versions_after_linking(main_newid, (*fd)->reports->reports);
 
     add_main_to_main(mainvar, main_newid);
   }
 
-  BKE_main_free(main_newid);
   blo_join_main((*fd)->mainlist);
   mainvar = (*fd)->mainlist->first;
   MEM_freeN((*fd)->mainlist);
@@ -5112,26 +4634,19 @@ static void library_link_end(Main *mainl,
 
   placeholders_ensure_valid(mainvar);
 
+  /* Apply overrides of newly linked data if needed. Already existing IDs need to split out, to
+   * avoid re-applying their own overrides. */
+  BLI_assert(BKE_main_is_empty(main_newid));
+  split_main_newid(mainvar, main_newid);
+  BKE_lib_override_library_main_validate(main_newid, (*fd)->reports->reports);
+  BKE_lib_override_library_main_update(main_newid);
+  add_main_to_main(mainvar, main_newid);
+  BKE_main_free(main_newid);
+
   BKE_main_id_tag_all(mainvar, LIB_TAG_NEW, false);
 
   /* Make all relative paths, relative to the open blend file. */
   fix_relpaths_library(BKE_main_blendfile_path(mainvar), mainvar);
-
-  /* Give a base to loose objects and collections.
-   * Only directly linked objects & collections are instantiated by
-   * #BLO_library_link_named_part & co,
-   * here we handle indirect ones and other possible edge-cases. */
-  if (flag & BLO_LIBLINK_NEEDS_ID_TAG_DOIT) {
-    /* Should always be true. */
-    if (scene != NULL) {
-      add_collections_to_scene(mainvar, bmain, scene, view_layer, v3d, curlib, flag);
-      add_loose_objects_to_scene(mainvar, bmain, scene, view_layer, v3d, curlib, flag);
-      add_loose_object_data_to_scene(mainvar, bmain, scene, view_layer, v3d, flag);
-    }
-
-    /* Clear objects and collections instantiating tag. */
-    library_link_clear_tag(mainvar, flag);
-  }
 
   /* patch to prevent switch_endian happens twice */
   if ((*fd)->flags & FD_FLAGS_SWITCH_ENDIAN) {
@@ -5140,25 +4655,10 @@ static void library_link_end(Main *mainl,
   }
 }
 
-/**
- * Finalize linking from a given .blend file (library).
- * Optionally instance the indirect object/collection in the scene when the flags are set.
- * \note Do not use \a bh after calling this function, it may frees it.
- *
- * \param mainl: The main database to link from (not the active one).
- * \param bh: The blender file handle (WARNING! may be freed by this function!).
- * \param params: Settings for linking that don't change from beginning to end of linking.
- */
 void BLO_library_link_end(Main *mainl, BlendHandle **bh, const struct LibraryLink_Params *params)
 {
   FileData *fd = (FileData *)(*bh);
-  library_link_end(mainl,
-                   &fd,
-                   params->bmain,
-                   params->flag,
-                   params->context.scene,
-                   params->context.view_layer,
-                   params->context.v3d);
+  library_link_end(mainl, &fd, params->flag);
   *bh = (BlendHandle *)fd;
 }
 
@@ -5175,7 +4675,7 @@ void *BLO_library_read_struct(FileData *fd, BHead *bh, const char *blockname)
 
 static int has_linked_ids_to_read(Main *mainvar)
 {
-  ListBase *lbarray[MAX_LIBARRAY];
+  ListBase *lbarray[INDEX_ID_MAX];
   int a = set_listbasepointers(mainvar, lbarray);
 
   while (a--) {
@@ -5190,7 +4690,7 @@ static int has_linked_ids_to_read(Main *mainvar)
 }
 
 static void read_library_linked_id(
-    ReportList *reports, FileData *fd, Main *mainvar, ID *id, ID **r_id)
+    FileData *basefd, FileData *fd, Main *mainvar, ID *id, ID **r_id)
 {
   BHead *bhead = NULL;
   const bool is_valid = BKE_idtype_idcode_is_linkable(GS(id->name)) ||
@@ -5201,7 +4701,7 @@ static void read_library_linked_id(
   }
 
   if (!is_valid) {
-    BLO_reportf_wrap(reports,
+    BLO_reportf_wrap(basefd->reports,
                      RPT_ERROR,
                      TIP_("LIB: %s: '%s' is directly linked from '%s' (parent '%s'), but is a "
                           "non-linkable data type"),
@@ -5220,13 +4720,14 @@ static void read_library_linked_id(
     read_libblock(fd, mainvar, bhead, id->tag, false, r_id);
   }
   else {
-    BLO_reportf_wrap(reports,
-                     RPT_WARNING,
+    BLO_reportf_wrap(basefd->reports,
+                     RPT_INFO,
                      TIP_("LIB: %s: '%s' missing from '%s', parent '%s'"),
                      BKE_idtype_idcode_to_name(GS(id->name)),
                      id->name + 2,
                      mainvar->curlib->filepath_abs,
                      library_parent_filepath(mainvar->curlib));
+    basefd->reports->count.missing_linked_id++;
 
     /* Generate a placeholder for this ID (simplified version of read_libblock actually...). */
     if (r_id) {
@@ -5242,7 +4743,7 @@ static void read_library_linked_ids(FileData *basefd,
 {
   GHash *loaded_ids = BLI_ghash_str_new(__func__);
 
-  ListBase *lbarray[MAX_LIBARRAY];
+  ListBase *lbarray[INDEX_ID_MAX];
   int a = set_listbasepointers(mainvar, lbarray);
 
   while (a--) {
@@ -5253,6 +4754,9 @@ static void read_library_linked_ids(FileData *basefd,
       ID *id_next = id->next;
       if ((id->tag & LIB_TAG_ID_LINK_PLACEHOLDER) && !(id->flag & LIB_INDIRECT_WEAK_LINK)) {
         BLI_remlink(lbarray[a], id);
+        if (mainvar->id_map != NULL) {
+          BKE_main_idmap_remove_id(mainvar->id_map, id);
+        }
 
         /* When playing with lib renaming and such, you may end with cases where
          * you have more than one linked ID of the same data-block from same
@@ -5260,12 +4764,12 @@ static void read_library_linked_ids(FileData *basefd,
          * we go back to a single linked data when loading the file. */
         ID **realid = NULL;
         if (!BLI_ghash_ensure_p(loaded_ids, id->name, (void ***)&realid)) {
-          read_library_linked_id(basefd->reports, fd, mainvar, id, realid);
+          read_library_linked_id(basefd, fd, mainvar, id, realid);
         }
 
-        /* realid shall never be NULL - unless some source file/lib is broken
+        /* `realid` shall never be NULL - unless some source file/lib is broken
          * (known case: some directly linked shapekey from a missing lib...). */
-        /* BLI_assert(*realid != NULL); */
+        // BLI_assert(*realid != NULL);
 
         /* Now that we have a real ID, replace all pointers to placeholders in
          * fd->libmap with pointers to the real data-blocks. We do this for all
@@ -5291,7 +4795,7 @@ static void read_library_clear_weak_links(FileData *basefd, ListBase *mainlist, 
 {
   /* Any remaining weak links at this point have been lost, silently drop
    * those by setting them to NULL pointers. */
-  ListBase *lbarray[MAX_LIBARRAY];
+  ListBase *lbarray[INDEX_ID_MAX];
   int a = set_listbasepointers(mainvar, lbarray);
 
   while (a--) {
@@ -5300,7 +4804,7 @@ static void read_library_clear_weak_links(FileData *basefd, ListBase *mainlist, 
     while (id) {
       ID *id_next = id->next;
       if ((id->tag & LIB_TAG_ID_LINK_PLACEHOLDER) && (id->flag & LIB_INDIRECT_WEAK_LINK)) {
-        /* printf("Dropping weak link to %s\n", id->name); */
+        CLOG_INFO(&LOG, 3, "Dropping weak link to '%s'", id->name);
         change_link_placeholder_to_real_ID_pointer(mainlist, basefd, id, NULL);
         BLI_freelinkN(lbarray[a], id);
       }
@@ -5380,7 +4884,8 @@ static FileData *read_library_file_data(FileData *basefd,
 
   if (fd == NULL) {
     BLO_reportf_wrap(
-        basefd->reports, RPT_WARNING, TIP_("Cannot find lib '%s'"), mainptr->curlib->filepath_abs);
+        basefd->reports, RPT_INFO, TIP_("Cannot find lib '%s'"), mainptr->curlib->filepath_abs);
+    basefd->reports->count.missing_libraries++;
   }
 
   return fd;
@@ -5409,36 +4914,44 @@ static void read_libraries(FileData *basefd, ListBase *mainlist)
     for (Main *mainptr = mainl->next; mainptr; mainptr = mainptr->next) {
       /* Does this library have any more linked data-blocks we need to read? */
       if (has_linked_ids_to_read(mainptr)) {
-#if 0
-        printf("Reading linked data-blocks from %s (%s)\n",
-          mainptr->curlib->id.name,
-          mainptr->curlib->filepath);
-#endif
+        CLOG_INFO(&LOG,
+                  3,
+                  "Reading linked data-blocks from %s (%s)",
+                  mainptr->curlib->id.name,
+                  mainptr->curlib->filepath);
 
         /* Open file if it has not been done yet. */
         FileData *fd = read_library_file_data(basefd, mainlist, mainl, mainptr);
 
         if (fd) {
           do_it = true;
+
+          if (mainptr->id_map == NULL) {
+            mainptr->id_map = BKE_main_idmap_create(mainptr, false, NULL, MAIN_IDMAP_TYPE_NAME);
+          }
         }
 
-        /* Read linked data-locks for each link placeholder, and replace
-         * the placeholder with the real data-lock. */
+        /* Read linked data-blocks for each link placeholder, and replace
+         * the placeholder with the real data-block. */
         read_library_linked_ids(basefd, fd, mainlist, mainptr);
 
-        /* Test if linked data-locks need to read further linked data-locks
+        /* Test if linked data-blocks need to read further linked data-blocks
          * and create link placeholders for them. */
         BLO_expand_main(fd, mainptr);
       }
     }
   }
 
+  for (Main *mainptr = mainl->next; mainptr; mainptr = mainptr->next) {
+    /* Drop weak links for which no data-block was found.
+     * Since this can remap pointers in `libmap` of all libraries, it needs to be performed in its
+     * own loop, before any call to `lib_link_all` (and the freeing of the libraries' filedata). */
+    read_library_clear_weak_links(basefd, mainlist, mainptr);
+  }
+
   Main *main_newid = BKE_main_new();
   for (Main *mainptr = mainl->next; mainptr; mainptr = mainptr->next) {
-    /* Drop weak links for which no data-block was found. */
-    read_library_clear_weak_links(basefd, mainlist, mainptr);
-
-    /* Do versioning for newly added linked data-locks. If no data-locks
+    /* Do versioning for newly added linked data-blocks. If no data-blocks
      * were read from a library versionfile will still be zero and we can
      * skip it. */
     if (mainptr->versionfile) {
@@ -5462,7 +4975,7 @@ static void read_libraries(FileData *basefd, ListBase *mainlist)
       lib_link_all(mainptr->curlib->filedata, mainptr);
     }
 
-    /* Note: No need to call #do_versions_after_linking() or #BKE_main_id_refcount_recompute()
+    /* NOTE: No need to call #do_versions_after_linking() or #BKE_main_id_refcount_recompute()
      * here, as this function is only called for library 'subset' data handling, as part of
      * either full blendfile reading (#blo_read_file_internal()), or library-data linking
      * (#library_link_end()). */
@@ -5501,11 +5014,6 @@ bool BLO_read_requires_endian_switch(BlendDataReader *reader)
   return (reader->fd->flags & FD_FLAGS_SWITCH_ENDIAN) != 0;
 }
 
-/**
- * Updates all ->prev and ->next pointers of the list elements.
- * Updates the list->first and list->last pointers.
- * When not NULL, calls the callback on every element.
- */
 void BLO_read_list_cb(BlendDataReader *reader, ListBase *list, BlendReadListFn callback)
 {
   if (BLI_listbase_is_empty(list)) {
@@ -5648,7 +5156,7 @@ void BLO_read_pointer_array(BlendDataReader *reader, void **ptr_p)
 
 bool BLO_read_data_is_undo(BlendDataReader *reader)
 {
-  return reader->fd->memfile != NULL;
+  return (reader->fd->flags & FD_FLAGS_IS_MEMFILE);
 }
 
 void BLO_read_data_globmap_add(BlendDataReader *reader, void *oldaddr, void *newaddr)
@@ -5661,14 +5169,14 @@ void BLO_read_glob_list(BlendDataReader *reader, ListBase *list)
   link_glob_list(reader->fd, list);
 }
 
-ReportList *BLO_read_data_reports(BlendDataReader *reader)
+BlendFileReadReport *BLO_read_data_reports(BlendDataReader *reader)
 {
   return reader->fd->reports;
 }
 
 bool BLO_read_lib_is_undo(BlendLibReader *reader)
 {
-  return reader->fd->memfile != NULL;
+  return (reader->fd->flags & FD_FLAGS_IS_MEMFILE);
 }
 
 Main *BLO_read_lib_get_main(BlendLibReader *reader)
@@ -5676,7 +5184,7 @@ Main *BLO_read_lib_get_main(BlendLibReader *reader)
   return reader->main;
 }
 
-ReportList *BLO_read_lib_reports(BlendLibReader *reader)
+BlendFileReadReport *BLO_read_lib_reports(BlendLibReader *reader)
 {
   return reader->fd->reports;
 }
@@ -5690,19 +5198,21 @@ void BLO_expand_id(BlendExpander *expander, ID *id)
 
 BlendFileData *blo_read_blendafterruntime(int file,
                                           const char *name,
-                                          int actualsize,
-                                          ReportList *reports)
+                                          int datastart,
+                                          BlendFileReadReport *reports)
 {
   BlendFileData *bfd = NULL;
-  FileData *fd = filedata_new();
-  fd->filedes = file;
+  FileData *fd = filedata_new(reports);
+  fd->file = BLI_filereader_new_file(file);
+  fd->file->seek(fd->file, datastart, SEEK_SET);
+  /*fd->filedes = file;
   fd->buffersize = actualsize;
-  fd->read = fd_read_data_from_file;
+  fd->read = fd_read_data_from_file;*/
 
   /* needed for library_append and read_libraries */
   BLI_strncpy(fd->relabase, name, sizeof(fd->relabase));
 
-  fd = blo_decode_and_check(fd, reports);
+  fd = blo_decode_and_check(fd, reports->reports);
   if (!fd)
     return NULL;
 
@@ -5713,7 +5223,7 @@ BlendFileData *blo_read_blendafterruntime(int file,
   return bfd;
 }
 
-/* Game engine transition */
+/* UPBGE */
 /* direct datablocks with global linking */
 void *BLO_read_get_new_globaldata_address(BlendLibReader *reader, const void *adr)
 {

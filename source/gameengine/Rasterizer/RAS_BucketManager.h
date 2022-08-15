@@ -31,13 +31,11 @@
 
 #pragma once
 
-
 #include <vector>
 
 #include "MT_Transform.h"
 #include "RAS_MaterialBucket.h"
 
-class RAS_FrameBuffer;
 
 class RAS_BucketManager {
  public:
@@ -80,4 +78,3 @@ class RAS_BucketManager {
     return m_buckets[ALL_BUCKET];
   }
 };
-

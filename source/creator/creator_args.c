@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup creator
@@ -49,7 +35,7 @@
 #  include "BKE_context.h"
 
 #  include "BKE_global.h"
-#  include "BKE_image.h"
+#  include "BKE_image_format.h"
 #  include "BKE_lib_id.h"
 #  include "BKE_main.h"
 #  include "BKE_report.h"
@@ -91,6 +77,8 @@
 #  include "DEG_depsgraph_build.h"
 #  include "DEG_depsgraph_debug.h"
 
+#  include "WM_types.h"
+
 #  include "creator_intern.h" /* own include */
 
 /* -------------------------------------------------------------------- */
@@ -126,7 +114,7 @@ static bool parse_int_relative(const char *str,
     *r_err_msg = msg;
     return false;
   }
-  if ((errno == ERANGE) || ((value < INT_MIN || value > INT_MAX))) {
+  if ((errno == ERANGE) || ((value < INT_MIN) || (value > INT_MAX))) {
     static const char *msg = "exceeds range";
     *r_err_msg = msg;
     return false;
@@ -230,7 +218,7 @@ static bool parse_int_strict_range(const char *str,
     *r_err_msg = msg;
     return false;
   }
-  if ((errno == ERANGE) || ((value < min || value > max))) {
+  if ((errno == ERANGE) || ((value < min) || (value > max))) {
     static const char *msg = "exceeds range";
     *r_err_msg = msg;
     return false;
@@ -281,7 +269,7 @@ static int *parse_int_relative_clamp_n(
   int i = 0;
   while (true) {
     const char *str_end = strchr(str, sep);
-    if ((*str == sep) || (*str == '\0')) {
+    if (ELEM(*str, sep, '\0')) {
       static const char *msg = "incorrect comma use";
       *r_err_msg = msg;
       goto fail;
@@ -503,7 +491,7 @@ static const char arg_handle_print_help_doc[] =
     "Print this help text and exit.";
 static const char arg_handle_print_help_doc_win32[] =
     "\n\t"
-    "Print this help text and exit (windows only).";
+    "Print this help text and exit (Windows only).";
 static int arg_handle_print_help(int UNUSED(argc), const char **UNUSED(argv), void *data)
 {
   bArgs *ba = (bArgs *)data;
@@ -597,9 +585,10 @@ static int arg_handle_print_help(int UNUSED(argc), const char **UNUSED(argv), vo
   BLI_args_print_arg_doc(ba, "--debug-depsgraph-no-threads");
   BLI_args_print_arg_doc(ba, "--debug-depsgraph-time");
   BLI_args_print_arg_doc(ba, "--debug-depsgraph-pretty");
+  BLI_args_print_arg_doc(ba, "--debug-depsgraph-uuid");
+  BLI_args_print_arg_doc(ba, "--debug-ghost");
+  BLI_args_print_arg_doc(ba, "--debug-wintab");
   BLI_args_print_arg_doc(ba, "--debug-gpu");
-  BLI_args_print_arg_doc(ba, "--debug-gpumem");
-  BLI_args_print_arg_doc(ba, "--debug-gpu-shaders");
   BLI_args_print_arg_doc(ba, "--debug-gpu-force-workarounds");
   BLI_args_print_arg_doc(ba, "--debug-wm");
 #  ifdef WITH_XR_OPENXR
@@ -611,11 +600,15 @@ static int arg_handle_print_help(int UNUSED(argc), const char **UNUSED(argv), vo
 
   printf("\n");
   BLI_args_print_arg_doc(ba, "--debug-fpe");
+  BLI_args_print_arg_doc(ba, "--debug-exit-on-error");
   BLI_args_print_arg_doc(ba, "--disable-crash-handler");
   BLI_args_print_arg_doc(ba, "--disable-abort-handler");
 
+  BLI_args_print_arg_doc(ba, "--verbose");
+
   printf("\n");
   printf("Misc Options:\n");
+  BLI_args_print_arg_doc(ba, "--open-last");
   BLI_args_print_arg_doc(ba, "--app-template");
   BLI_args_print_arg_doc(ba, "--factory-startup");
   BLI_args_print_arg_doc(ba, "--enable-event-simulate");
@@ -630,6 +623,7 @@ static int arg_handle_print_help(int UNUSED(argc), const char **UNUSED(argv), vo
   printf("\n");
 
   BLI_args_print_arg_doc(ba, "--help");
+  BLI_args_print_arg_doc(ba, "/?");
 
   /* WIN32 only (ignored for non-win32) */
   BLI_args_print_arg_doc(ba, "-R");
@@ -642,10 +636,15 @@ static int arg_handle_print_help(int UNUSED(argc), const char **UNUSED(argv), vo
   // printf("\n");
   // printf("Experimental Features:\n");
 
-  /* Other options _must_ be last (anything not handled will show here) */
-  printf("\n");
-  printf("Other Options:\n");
-  BLI_args_print_other_doc(ba);
+  /* Other options _must_ be last (anything not handled will show here).
+   *
+   * Note that it's good practice for this to remain empty,
+   * nevertheless print if any exist. */
+  if (BLI_args_has_other_doc(ba)) {
+    printf("\n");
+    printf("Other Options:\n");
+    BLI_args_print_other_doc(ba);
+  }
 
   printf("\n");
   printf("Argument Parsing:\n");
@@ -673,6 +672,9 @@ static int arg_handle_print_help(int UNUSED(argc), const char **UNUSED(argv), vo
   printf("  $BLENDER_USER_DATAFILES   Directory for user data files (icons, translations, ..).\n");
   printf("  $BLENDER_SYSTEM_DATAFILES Directory for system wide data files.\n");
   printf("  $BLENDER_SYSTEM_PYTHON    Directory for system Python libraries.\n");
+#  ifdef WITH_OCIO
+  printf("  $OCIO                     Path to override the OpenColorIO config file.\n");
+#  endif
 #  ifdef WIN32
   printf("  $TEMP                     Store temporary files here.\n");
 #  else
@@ -838,7 +840,7 @@ static int arg_handle_log_show_timestamp_set(int UNUSED(argc),
 }
 
 static const char arg_handle_log_file_set_doc[] =
-    "<filename>\n"
+    "<filepath>\n"
     "\tSet a file to output the log to.";
 static int arg_handle_log_file_set(int argc, const char **argv, void *UNUSED(data))
 {
@@ -868,6 +870,8 @@ static const char arg_handle_log_set_doc[] =
     "\tEnable logging categories, taking a single comma separated argument.\n"
     "\tMultiple categories can be matched using a '.*' suffix,\n"
     "\tso '--log \"wm.*\"' logs every kind of window-manager message.\n"
+    "\tSub-string can be matched using a '*' prefix and suffix,\n"
+    "\tso '--log \"*undo*\"' logs every kind of undo-related message.\n"
     "\tUse \"^\" prefix to ignore, so '--log \"*,^wm.operator.*\"' logs all except for "
     "'wm.operators.*'\n"
     "\tUse \"*\" to log everything.";
@@ -951,6 +955,12 @@ static const char arg_handle_debug_mode_generic_set_doc_wm[] =
     "\n\t"
     "Enable debug messages for the window manager, shows all operators in search, shows "
     "keymap errors.";
+static const char arg_handle_debug_mode_generic_set_doc_ghost[] =
+    "\n\t"
+    "Enable debug messages for Ghost (Linux only).";
+static const char arg_handle_debug_mode_generic_set_doc_wintab[] =
+    "\n\t"
+    "Enable debug messages for Wintab.";
 #  ifdef WITH_XR_OPENXR
 static const char arg_handle_debug_mode_generic_set_doc_xr[] =
     "\n\t"
@@ -964,9 +974,6 @@ static const char arg_handle_debug_mode_generic_set_doc_xr_time[] =
 static const char arg_handle_debug_mode_generic_set_doc_jobs[] =
     "\n\t"
     "Enable time profiling for background jobs.";
-static const char arg_handle_debug_mode_generic_set_doc_gpu[] =
-    "\n\t"
-    "Enable GPU debug context and information for OpenGL 4.3+.";
 static const char arg_handle_debug_mode_generic_set_doc_depsgraph[] =
     "\n\t"
     "Enable all debug messages from dependency graph.";
@@ -988,9 +995,12 @@ static const char arg_handle_debug_mode_generic_set_doc_depsgraph_no_threads[] =
 static const char arg_handle_debug_mode_generic_set_doc_depsgraph_pretty[] =
     "\n\t"
     "Enable colors for dependency graph debug messages.";
-static const char arg_handle_debug_mode_generic_set_doc_gpumem[] =
+static const char arg_handle_debug_mode_generic_set_doc_depsgraph_uuid[] =
     "\n\t"
-    "Enable GPU memory stats in status bar.";
+    "Verify validness of session-wide identifiers assigned to ID datablocks.";
+static const char arg_handle_debug_mode_generic_set_doc_gpu_force_workarounds[] =
+    "\n\t"
+    "Enable workarounds for typical GPU issues and disable all GPU extensions.";
 
 static int arg_handle_debug_mode_generic_set(int UNUSED(argc),
                                              const char **UNUSED(argv),
@@ -1088,6 +1098,20 @@ static int arg_handle_debug_value_set(int argc, const char **argv, void *UNUSED(
   return 0;
 }
 
+static const char arg_handle_debug_gpu_set_doc[] =
+    "\n"
+    "\tEnable GPU debug context and information for OpenGL 4.3+.";
+static int arg_handle_debug_gpu_set(int UNUSED(argc),
+                                    const char **UNUSED(argv),
+                                    void *UNUSED(data))
+{
+  /* Also enable logging because that how gl errors are reported. */
+  const char *gpu_filter = "gpu.*";
+  CLG_type_filter_include(gpu_filter, strlen(gpu_filter));
+  G.debug |= G_DEBUG_GPU;
+  return 0;
+}
+
 static const char arg_handle_debug_fpe_set_doc[] =
     "\n\t"
     "Enable floating-point exceptions.";
@@ -1148,7 +1172,7 @@ static const char arg_handle_env_system_set_doc_python[] =
 
 static int arg_handle_env_system_set(int argc, const char **argv, void *UNUSED(data))
 {
-  /* "--env-system-scripts" --> "BLENDER_SYSTEM_SCRIPTS" */
+  /* `--env-system-scripts` -> `BLENDER_SYSTEM_SCRIPTS` */
 
   char env[64] = "BLENDER";
   char *ch_dst = env + 7;           /* skip BLENDER */
@@ -1160,7 +1184,7 @@ static int arg_handle_env_system_set(int argc, const char **argv, void *UNUSED(d
   }
 
   for (; *ch_src; ch_src++, ch_dst++) {
-    *ch_dst = (*ch_src == '-') ? '_' : (*ch_src) - 32; /* toupper() */
+    *ch_dst = (*ch_src == '-') ? '_' : (*ch_src) - 32; /* Inline #toupper() */
   }
 
   *ch_dst = '\0';
@@ -1186,18 +1210,23 @@ static const char arg_handle_playback_mode_doc[] =
     "\t-s <frame>\n"
     "\t\tPlay from <frame>.\n"
     "\t-e <frame>\n"
-    "\t\tPlay until <frame>.";
+    "\t\tPlay until <frame>.\n"
+    "\t-c <cache_memory>\n"
+    "\t\tAmount of memory in megabytes to allow for caching images during playback.\n"
+    "\t\tZero disables (clamping to a fixed number of frames instead).";
 static int arg_handle_playback_mode(int argc, const char **argv, void *UNUSED(data))
 {
-  /* not if -b was given first */
+  /* Ignore the animation player if `-b` was given first. */
   if (G.background == 0) {
 #  ifdef WITH_FFMPEG
     /* Setup FFmpeg with current debug flags. */
     IMB_ffmpeg_init();
 #  endif
 
-    WM_main_playanim(argc, argv); /* not the same argc and argv as before */
-    exit(0);                      /* 2.4x didn't do this */
+    /* This function knows to skip this argument ('-a'). */
+    WM_main_playanim(argc, argv);
+
+    exit(0);
   }
 
   return -2;
@@ -1306,6 +1335,7 @@ static int arg_handle_register_extension(int UNUSED(argc), const char **UNUSED(a
     G.background = 1;
   }
   BLI_windows_register_blend_extension(G.background);
+  TerminateProcess(GetCurrentProcess(), 0);
 #  else
   (void)data; /* unused */
 #  endif
@@ -1339,7 +1369,7 @@ static int arg_handle_audio_disable(int UNUSED(argc),
                                     const char **UNUSED(argv),
                                     void *UNUSED(data))
 {
-  BKE_sound_force_device("Null");
+  BKE_sound_force_device("None");
   return 0;
 }
 
@@ -1347,7 +1377,7 @@ static const char arg_handle_audio_set_doc[] =
     "\n\t"
     "Force sound system to a specific device."
     "\n\t"
-    "'NULL' 'SDL' 'OPENAL' 'JACK'.";
+    "'None' 'SDL' 'OpenAL' 'CoreAudio' 'JACK' 'PulseAudio' 'WASAPI'.";
 static int arg_handle_audio_set(int argc, const char **argv, void *UNUSED(data))
 {
   if (argc < 1) {
@@ -1440,7 +1470,7 @@ static const char arg_handle_image_type_set_doc[] =
     "\t'TGA' 'RAWTGA' 'JPEG' 'IRIS' 'IRIZ' 'AVIRAW' 'AVIJPEG' 'PNG' 'BMP'\n"
     "\n"
     "\tFormats that can be compiled into Blender, not available on all systems:\n"
-    "\t'HDR' 'TIFF' 'OPEN_EXR' 'OPEN_EXR_MULTILAYER' 'MPEG' 'CINEON' 'DPX' 'DDS' 'JP2'";
+    "\t'HDR' 'TIFF' 'OPEN_EXR' 'OPEN_EXR_MULTILAYER' 'MPEG' 'CINEON' 'DPX' 'DDS' 'JP2' 'WEBP'";
 static int arg_handle_image_type_set(int argc, const char **argv, void *data)
 {
   bContext *C = data;
@@ -1707,7 +1737,7 @@ static int arg_handle_scene_set(int argc, const char **argv, void *data)
       CTX_data_scene_set(C, scene);
 
       /* Set the scene of the first window, see: T55991,
-       * otherwise scrips that run later won't get this scene back from the context. */
+       * otherwise scripts that run later won't get this scene back from the context. */
       wmWindow *win = CTX_wm_window(C);
       if (win == NULL) {
         win = CTX_wm_manager(C)->windows.first;
@@ -1815,7 +1845,7 @@ static int arg_handle_frame_skip_set(int argc, const char **argv, void *data)
 }
 
 static const char arg_handle_python_file_run_doc[] =
-    "<filename>\n"
+    "<filepath>\n"
     "\tRun the given Python script file.";
 static int arg_handle_python_file_run(int argc, const char **argv, void *data)
 {
@@ -1825,12 +1855,12 @@ static int arg_handle_python_file_run(int argc, const char **argv, void *data)
   /* workaround for scripts not getting a bpy.context.scene, causes internal errors elsewhere */
   if (argc > 1) {
     /* Make the path absolute because its needed for relative linked blends to be found */
-    char filename[FILE_MAX];
-    BLI_strncpy(filename, argv[1], sizeof(filename));
-    BLI_path_abs_from_cwd(filename, sizeof(filename));
+    char filepath[FILE_MAX];
+    BLI_strncpy(filepath, argv[1], sizeof(filepath));
+    BLI_path_abs_from_cwd(filepath, sizeof(filepath));
 
     bool ok;
-    BPY_CTX_SETUP(ok = BPY_run_filepath(C, filename, NULL));
+    BPY_CTX_SETUP(ok = BPY_run_filepath(C, filepath, NULL));
     if (!ok && app_state.exit_code_on_error.python) {
       printf("\nError: script failed, file: '%s', exiting.\n", argv[1]);
       BPY_python_end();
@@ -1980,7 +2010,7 @@ static int arg_handle_python_use_system_env_set(int UNUSED(argc),
 
 static const char arg_handle_addons_set_doc[] =
     "<addon(s)>\n"
-    "\tComma separated list of add-ons (no spaces).";
+    "\tComma separated list (no spaces) of add-ons to enable in addition to any default add-ons.";
 static int arg_handle_addons_set(int argc, const char **argv, void *data)
 {
   /* workaround for scripts not getting a bpy.context.scene, causes internal errors elsewhere */
@@ -2015,25 +2045,27 @@ static int arg_handle_load_file(int UNUSED(argc), const char **argv, void *data)
   bool success;
 
   /* Make the path absolute because its needed for relative linked blends to be found */
-  char filename[FILE_MAX];
+  char filepath[FILE_MAX];
 
-  /* note, we could skip these, but so far we always tried to load these files */
+  /* NOTE: we could skip these, but so far we always tried to load these files. */
   if (argv[0][0] == '-') {
     fprintf(stderr, "unknown argument, loading as file: %s\n", argv[0]);
   }
 
-  BLI_strncpy(filename, argv[0], sizeof(filename));
-  BLI_path_abs_from_cwd(filename, sizeof(filename));
+  BLI_strncpy(filepath, argv[0], sizeof(filepath));
+  BLI_path_slash_native(filepath);
+  BLI_path_abs_from_cwd(filepath, sizeof(filepath));
+  BLI_path_normalize(NULL, filepath);
 
   /* load the file */
   BKE_reports_init(&reports, RPT_PRINT);
-  WM_file_autoexec_init(filename);
-  success = WM_file_read(C, filename, &reports);
+  WM_file_autoexec_init(filepath);
+  success = WM_file_read(C, filepath, &reports);
   BKE_reports_clear(&reports);
 
   if (success) {
     if (G.background) {
-      /* ensuer we use 'C->data.scene' for background render */
+      /* Ensure we use 'C->data.scene' for background render. */
       CTX_wm_window_set(C, NULL);
     }
   }
@@ -2049,26 +2081,37 @@ static int arg_handle_load_file(int UNUSED(argc), const char **argv, void *data)
       return -1;
     }
 
-    if (BLO_has_bfile_extension(filename)) {
+    if (BLO_has_bfile_extension(filepath)) {
       /* Just pretend a file was loaded, so the user can press Save and it'll
-       * save at the filename from the CLI. */
-      BLI_strncpy(G_MAIN->name, filename, FILE_MAX);
-      G.relbase_valid = true;
-      G.save_over = true;
-      printf("... opened default scene instead; saving will write to: %s\n", filename);
+       * save at the filepath from the CLI. */
+      STRNCPY(G_MAIN->filepath, filepath);
+      printf("... opened default scene instead; saving will write to: %s\n", filepath);
     }
     else {
       printf(
           "Error: argument has no '.blend' file extension, not using as new file, exiting! %s\n",
-          filename);
+          filepath);
       G.is_break = true;
       WM_exit(C);
     }
   }
 
-  G.file_loaded = 1;
-
   return 0;
+}
+
+static const char arg_handle_load_last_file_doc[] =
+    "\n\t"
+    "Open the most recently opened blend file, instead of the default startup file.";
+static int arg_handle_load_last_file(int UNUSED(argc), const char **UNUSED(argv), void *data)
+{
+  if (BLI_listbase_is_empty(&G.recent_files)) {
+    printf("Warning: no recent files known, opening default startup file instead.\n");
+    return -1;
+  }
+
+  const RecentFile *recent_file = G.recent_files.first;
+  const char *fake_argv[] = {recent_file->filepath};
+  return arg_handle_load_file(ARRAY_SIZE(fake_argv), fake_argv, data);
 }
 
 void main_args_setup(bContext *C, bArgs *ba, SYS_SystemHandle *syshandle)
@@ -2098,6 +2141,15 @@ void main_args_setup(bContext *C, bArgs *ba, SYS_SystemHandle *syshandle)
 
   BLI_args_add(ba, "-t", "--threads", CB(arg_handle_threads_set), NULL);
 
+  /* Include in the environment pass so it's possible display errors initializing subsystems,
+   * especially `bpy.appdir` since it's useful to show errors finding paths on startup. */
+  BLI_args_add(ba, NULL, "--log", CB(arg_handle_log_set), ba);
+  BLI_args_add(ba, NULL, "--log-level", CB(arg_handle_log_level_set), ba);
+  BLI_args_add(ba, NULL, "--log-show-basename", CB(arg_handle_log_show_basename_set), ba);
+  BLI_args_add(ba, NULL, "--log-show-backtrace", CB(arg_handle_log_show_backtrace_set), ba);
+  BLI_args_add(ba, NULL, "--log-show-timestamp", CB(arg_handle_log_show_timestamp_set), ba);
+  BLI_args_add(ba, NULL, "--log-file", CB(arg_handle_log_file_set), ba);
+
   /* Pass: Background Mode & Settings
    *
    * Also and commands that exit after usage. */
@@ -2118,13 +2170,6 @@ void main_args_setup(bContext *C, bArgs *ba, SYS_SystemHandle *syshandle)
   BLI_args_add(ba, "-b", "--background", CB(arg_handle_background_mode_set), NULL);
 
   BLI_args_add(ba, "-a", NULL, CB(arg_handle_playback_mode), NULL);
-
-  BLI_args_add(ba, NULL, "--log", CB(arg_handle_log_set), ba);
-  BLI_args_add(ba, NULL, "--log-level", CB(arg_handle_log_level_set), ba);
-  BLI_args_add(ba, NULL, "--log-show-basename", CB(arg_handle_log_show_basename_set), ba);
-  BLI_args_add(ba, NULL, "--log-show-backtrace", CB(arg_handle_log_show_backtrace_set), ba);
-  BLI_args_add(ba, NULL, "--log-show-timestamp", CB(arg_handle_log_show_timestamp_set), ba);
-  BLI_args_add(ba, NULL, "--log-file", CB(arg_handle_log_file_set), ba);
 
   BLI_args_add(ba, "-d", "--debug", CB(arg_handle_debug_mode_set), ba);
 
@@ -2178,8 +2223,13 @@ void main_args_setup(bContext *C, bArgs *ba, SYS_SystemHandle *syshandle)
   BLI_args_add(ba,
                NULL,
                "--debug-ghost",
-               CB_EX(arg_handle_debug_mode_generic_set, handlers),
+               CB_EX(arg_handle_debug_mode_generic_set, ghost),
                (void *)G_DEBUG_GHOST);
+  BLI_args_add(ba,
+               NULL,
+               "--debug-wintab",
+               CB_EX(arg_handle_debug_mode_generic_set, wintab),
+               (void *)G_DEBUG_WINTAB);
   BLI_args_add(ba, NULL, "--debug-all", CB(arg_handle_debug_mode_all), NULL);
 
   BLI_args_add(ba, NULL, "--debug-io", CB(arg_handle_debug_mode_io), NULL);
@@ -2200,8 +2250,8 @@ void main_args_setup(bContext *C, bArgs *ba, SYS_SystemHandle *syshandle)
                "--debug-jobs",
                CB_EX(arg_handle_debug_mode_generic_set, jobs),
                (void *)G_DEBUG_JOBS);
-  BLI_args_add(
-      ba, NULL, "--debug-gpu", CB_EX(arg_handle_debug_mode_generic_set, gpu), (void *)G_DEBUG_GPU);
+  BLI_args_add(ba, NULL, "--debug-gpu", CB(arg_handle_debug_gpu_set), NULL);
+
   BLI_args_add(ba,
                NULL,
                "--debug-depsgraph",
@@ -2241,22 +2291,12 @@ void main_args_setup(bContext *C, bArgs *ba, SYS_SystemHandle *syshandle)
   BLI_args_add(ba,
                NULL,
                "--debug-depsgraph-uuid",
-               CB_EX(arg_handle_debug_mode_generic_set, depsgraph_build),
+               CB_EX(arg_handle_debug_mode_generic_set, depsgraph_uuid),
                (void *)G_DEBUG_DEPSGRAPH_UUID);
   BLI_args_add(ba,
                NULL,
-               "--debug-gpumem",
-               CB_EX(arg_handle_debug_mode_generic_set, gpumem),
-               (void *)G_DEBUG_GPU_MEM);
-  BLI_args_add(ba,
-               NULL,
-               "--debug-gpu-shaders",
-               CB_EX(arg_handle_debug_mode_generic_set, gpumem),
-               (void *)G_DEBUG_GPU_SHADERS);
-  BLI_args_add(ba,
-               NULL,
                "--debug-gpu-force-workarounds",
-               CB_EX(arg_handle_debug_mode_generic_set, gpumem),
+               CB_EX(arg_handle_debug_mode_generic_set, gpu_force_workarounds),
                (void *)G_DEBUG_GPU_FORCE_WORKAROUNDS);
   BLI_args_add(ba, NULL, "--debug-exit-on-error", CB(arg_handle_debug_exit_on_error), NULL);
 
@@ -2306,6 +2346,8 @@ void main_args_setup(bContext *C, bArgs *ba, SYS_SystemHandle *syshandle)
   BLI_args_add(ba, "-F", "--render-format", CB(arg_handle_image_type_set), C);
   BLI_args_add(ba, "-t", "--threads", CB(arg_handle_threads_set), NULL);
   BLI_args_add(ba, "-x", "--use-extension", CB(arg_handle_extension_set), C);
+
+  BLI_args_add(ba, NULL, "--open-last", CB(arg_handle_load_last_file), C);
 
 #  undef CB
 #  undef CB_EX

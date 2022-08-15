@@ -31,19 +31,16 @@
 
 #pragma once
 
-
 #include "BL_ArmatureChannel.h"
 #include "BL_ArmatureConstraint.h"
 #include "KX_GameObject.h"
 
 struct AnimationEvalContext;
-struct bArmature;
 struct Bone;
 struct bPose;
-struct bConstraint;
 struct Object;
 class MT_Matrix4x4;
-class BL_BlenderSceneConverter;
+class BL_SceneConverter;
 class RAS_DebugDraw;
 
 class BL_ArmatureObject : public KX_GameObject {
@@ -56,8 +53,7 @@ class BL_ArmatureObject : public KX_GameObject {
   EXP_ListValue<BL_ArmatureChannel> *m_poseChannels;
   Object *m_objArma;
   Object *m_origObjArma;
-  // Need for BKE_pose_where_is.
-  Scene *m_scene;
+
   double m_lastframe;
   size_t m_constraintNumber;
   size_t m_channelNumber;
@@ -69,13 +65,10 @@ class BL_ArmatureObject : public KX_GameObject {
   double m_lastapplyframe;
 
  public:
-  BL_ArmatureObject(void *sgReplicationInfo,
-                    SG_Callbacks callbacks,
-                    Object *armature,
-                    Scene *scene);
+  BL_ArmatureObject();
   virtual ~BL_ArmatureObject();
 
-  virtual EXP_Value *GetReplica();
+  virtual KX_PythonProxy *NewInstance();
   virtual void ProcessReplica();
   virtual int GetGameObjectType() const;
   virtual void ReParentLogic();
@@ -99,7 +92,7 @@ class BL_ArmatureObject : public KX_GameObject {
   void DrawDebug(RAS_DebugDraw &debugDraw);
 
   // for constraint python API
-  void LoadConstraints(BL_BlenderSceneConverter *converter);
+  void LoadConstraints(BL_SceneConverter *converter);
   size_t GetConstraintNumber() const;
   BL_ArmatureConstraint *GetConstraint(const std::string &posechannel,
                                        const std::string &constraint);
@@ -120,14 +113,19 @@ class BL_ArmatureObject : public KX_GameObject {
   /// Returns the bone length.  The end of the bone is in the local y direction.
   float GetBoneLength(Bone *bone) const;
 
+  virtual void SetBlenderObject(Object *obj);
+
 #ifdef WITH_PYTHON
 
   // PYTHON
-  static PyObject *pyattr_get_constraints(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
-  static PyObject *pyattr_get_channels(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *game_object_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
+
+  static PyObject *pyattr_get_constraints(EXP_PyObjectPlus *self_v,
+                                          const EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *pyattr_get_channels(EXP_PyObjectPlus *self_v,
+                                       const EXP_PYATTRIBUTE_DEF *attrdef);
   EXP_PYMETHOD_DOC_NOARGS(BL_ArmatureObject, update);
   EXP_PYMETHOD_DOC_NOARGS(BL_ArmatureObject, draw);
 
 #endif /* WITH_PYTHON */
 };
-

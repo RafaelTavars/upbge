@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2001-2002 by NaN Holding BV.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2001-2002 NaN Holding BV. All rights reserved. */
 
 /** \file
  * \ingroup bke
@@ -59,6 +43,7 @@
 #include "BKE_fluid.h"
 #include "BKE_global.h"
 #include "BKE_layer.h"
+#include "BKE_mesh.h"
 #include "BKE_modifier.h"
 #include "BKE_object.h"
 #include "BKE_particle.h"
@@ -158,16 +143,16 @@ static void precalculate_effector(struct Depsgraph *depsgraph, EffectorCache *ef
     BLI_rng_srandom(eff->pd->rng, eff->pd->seed + cfra);
   }
 
-  if (eff->pd->forcefield == PFIELD_GUIDE && eff->ob->type == OB_CURVE) {
+  if (eff->pd->forcefield == PFIELD_GUIDE && eff->ob->type == OB_CURVES_LEGACY) {
     Curve *cu = eff->ob->data;
     if (cu->flag & CU_PATH) {
-      if (eff->ob->runtime.curve_cache == NULL || eff->ob->runtime.curve_cache->path == NULL ||
-          eff->ob->runtime.curve_cache->path->data == NULL) {
-        BKE_displist_make_curveTypes(depsgraph, eff->scene, eff->ob, false, false);
+      if (eff->ob->runtime.curve_cache == NULL ||
+          eff->ob->runtime.curve_cache->anim_path_accum_length == NULL) {
+        BKE_displist_make_curveTypes(depsgraph, eff->scene, eff->ob, false);
       }
 
-      if (eff->ob->runtime.curve_cache->path && eff->ob->runtime.curve_cache->path->data) {
-        where_on_path(
+      if (eff->ob->runtime.curve_cache->anim_path_accum_length) {
+        BKE_where_on_path(
             eff->ob, 0.0, eff->guide_loc, eff->guide_dir, NULL, &eff->guide_radius, NULL);
         mul_m4_v3(eff->ob->obmat, eff->guide_loc);
         mul_mat3_m4_v3(eff->ob->obmat, eff->guide_dir);
@@ -176,7 +161,7 @@ static void precalculate_effector(struct Depsgraph *depsgraph, EffectorCache *ef
   }
   else if (eff->pd->shape == PFIELD_SHAPE_SURFACE) {
     eff->surmd = (SurfaceModifierData *)BKE_modifiers_findby_type(eff->ob, eModifierType_Surface);
-    if (eff->ob->type == OB_CURVE) {
+    if (eff->ob->type == OB_CURVES_LEGACY) {
       eff->flag |= PE_USE_NORMAL_DATA;
     }
   }
@@ -221,9 +206,6 @@ static void add_effector_evaluation(ListBase **effectors,
   precalculate_effector(depsgraph, eff);
 }
 
-/* Create list of effector relations in the collection or entire scene.
- * This is used by the depsgraph to build relations, as well as faster
- * lookup of effectors during evaluation. */
 ListBase *BKE_effector_relations_create(Depsgraph *depsgraph,
                                         ViewLayer *view_layer,
                                         Collection *collection)
@@ -270,11 +252,70 @@ void BKE_effector_relations_free(ListBase *lb)
   }
 }
 
-/* Create effective list of effectors from relations built beforehand. */
+/* Check that the force field isn't disabled via its flags. */
+static bool is_effector_enabled(PartDeflect *pd, bool use_rotation)
+{
+  switch (pd->forcefield) {
+    case PFIELD_BOID:
+    case PFIELD_GUIDE:
+      return true;
+
+    case PFIELD_TEXTURE:
+      return (pd->flag & PFIELD_DO_LOCATION) != 0 && pd->tex != NULL;
+
+    default:
+      if (use_rotation) {
+        return (pd->flag & (PFIELD_DO_LOCATION | PFIELD_DO_ROTATION)) != 0;
+      }
+      else {
+        return (pd->flag & PFIELD_DO_LOCATION) != 0;
+      }
+  }
+}
+
+/* Check that the force field won't have zero effect due to strength settings. */
+static bool is_effector_nonzero_strength(PartDeflect *pd)
+{
+  if (pd->f_strength != 0.0f) {
+    return true;
+  }
+
+  if (pd->forcefield == PFIELD_TEXTURE) {
+    return false;
+  }
+
+  if (pd->f_noise > 0.0f || pd->f_flow != 0.0f) {
+    return true;
+  }
+
+  switch (pd->forcefield) {
+    case PFIELD_BOID:
+    case PFIELD_GUIDE:
+      return true;
+
+    case PFIELD_VORTEX:
+      return pd->shape != PFIELD_SHAPE_POINT;
+
+    case PFIELD_DRAG:
+      return pd->f_damp != 0.0f;
+
+    default:
+      return false;
+  }
+}
+
+/* Check if the force field will affect its user. */
+static bool is_effector_relevant(PartDeflect *pd, EffectorWeights *weights, bool use_rotation)
+{
+  return (weights->weight[pd->forcefield] != 0.0f) && is_effector_enabled(pd, use_rotation) &&
+         is_effector_nonzero_strength(pd);
+}
+
 ListBase *BKE_effectors_create(Depsgraph *depsgraph,
                                Object *ob_src,
                                ParticleSystem *psys_src,
-                               EffectorWeights *weights)
+                               EffectorWeights *weights,
+                               bool use_rotation)
 {
   Scene *scene = DEG_get_evaluated_scene(depsgraph);
   ListBase *relations = DEG_get_effector_relations(depsgraph, weights->group);
@@ -299,7 +340,8 @@ ListBase *BKE_effectors_create(Depsgraph *depsgraph,
       }
 
       PartDeflect *pd = (relation->pd == relation->psys->part->pd) ? part->pd : part->pd2;
-      if (weights->weight[pd->forcefield] == 0.0f) {
+
+      if (!is_effector_relevant(pd, weights, use_rotation)) {
         continue;
       }
 
@@ -310,7 +352,7 @@ ListBase *BKE_effectors_create(Depsgraph *depsgraph,
       if (ob == ob_src) {
         continue;
       }
-      if (weights->weight[ob->pd->forcefield] == 0.0f) {
+      if (!is_effector_relevant(ob->pd, weights, use_rotation)) {
         continue;
       }
       if (ob->pd->shape == PFIELD_SHAPE_POINTS && BKE_object_get_evaluated_mesh(ob) == NULL) {
@@ -420,7 +462,9 @@ static void eff_tri_ray_hit(void *UNUSED(userData),
   hit->index = 1;
 }
 
-// get visibility of a wind ray
+/**
+ * Get visibility of a wind ray.
+ */
 static float eff_calc_visibility(ListBase *colliders,
                                  EffectorCache *eff,
                                  EffectorData *efd,
@@ -486,7 +530,7 @@ static float eff_calc_visibility(ListBase *colliders,
   return visibility;
 }
 
-// noise function for wind e.g.
+/* Noise function for wind e.g. */
 static float wind_func(struct RNG *rng, float strength)
 {
   int random = (BLI_rng_get_int(rng) + 1) % 128; /* max 2357 */
@@ -593,11 +637,11 @@ float effector_falloff(EffectorCache *eff,
   return falloff;
 }
 
-int closest_point_on_surface(SurfaceModifierData *surmd,
-                             const float co[3],
-                             float surface_co[3],
-                             float surface_nor[3],
-                             float surface_vel[3])
+bool closest_point_on_surface(SurfaceModifierData *surmd,
+                              const float co[3],
+                              float surface_co[3],
+                              float surface_nor[3],
+                              float surface_vel[3])
 {
   BVHTreeNearest nearest;
 
@@ -624,18 +668,18 @@ int closest_point_on_surface(SurfaceModifierData *surmd,
 
       mul_v3_fl(surface_vel, (1.0f / 3.0f));
     }
-    return 1;
+    return true;
   }
 
-  return 0;
+  return false;
 }
-int get_effector_data(EffectorCache *eff,
-                      EffectorData *efd,
-                      EffectedPoint *point,
-                      int real_velocity)
+bool get_effector_data(EffectorCache *eff,
+                       EffectorData *efd,
+                       EffectedPoint *point,
+                       int real_velocity)
 {
   float cfra = DEG_get_ctime(eff->depsgraph);
-  int ret = 0;
+  bool ret = false;
 
   /* In case surface object is in Edit mode when loading the .blend,
    * surface modifier is never executed and bvhtree never built, see T48415. */
@@ -655,10 +699,11 @@ int get_effector_data(EffectorCache *eff,
   }
   else if (eff->pd && eff->pd->shape == PFIELD_SHAPE_POINTS) {
     /* TODO: hair and points object support */
-    Mesh *me_eval = BKE_object_get_evaluated_mesh(eff->ob);
+    const Mesh *me_eval = BKE_object_get_evaluated_mesh(eff->ob);
+    const float(*vert_normals)[3] = BKE_mesh_vertex_normals_ensure(me_eval);
     if (me_eval != NULL) {
       copy_v3_v3(efd->loc, me_eval->mvert[*efd->index].co);
-      normal_short_to_float_v3(efd->nor, me_eval->mvert[*efd->index].no);
+      copy_v3_v3(efd->nor, vert_normals[*efd->index]);
 
       mul_m4_v3(eff->ob->obmat, efd->loc);
       mul_mat3_m4_v3(eff->ob->obmat, efd->nor);
@@ -667,7 +712,7 @@ int get_effector_data(EffectorCache *eff,
 
       efd->size = 0.0f;
 
-      ret = 1;
+      ret = true;
     }
   }
   else if (eff->psys) {
@@ -712,7 +757,7 @@ int get_effector_data(EffectorCache *eff,
     /* use center of object for distance calculus */
     const Object *ob = eff->ob;
 
-    /* use z-axis as normal*/
+    /* Use z-axis as normal. */
     normalize_v3_v3(efd->nor, ob->obmat[2]);
 
     if (eff->pd && ELEM(eff->pd->shape, PFIELD_SHAPE_PLANE, PFIELD_SHAPE_LINE)) {
@@ -735,7 +780,7 @@ int get_effector_data(EffectorCache *eff,
     zero_v3(efd->vel);
     efd->size = 0.0f;
 
-    ret = 1;
+    ret = true;
   }
 
   if (ret) {
@@ -769,7 +814,7 @@ static void get_effector_tot(
 
   if (eff->pd->shape == PFIELD_SHAPE_POINTS) {
     /* TODO: hair and points object support */
-    Mesh *me_eval = BKE_object_get_evaluated_mesh(eff->ob);
+    const Mesh *me_eval = BKE_object_get_evaluated_mesh(eff->ob);
     *tot = me_eval != NULL ? me_eval->totvert : 1;
 
     if (*tot && eff->pd->forcefield == PFIELD_HARMONIC && point->index >= 0) {
@@ -800,7 +845,7 @@ static void get_effector_tot(
       int totpart = eff->psys->totpart;
       int amount = eff->psys->part->effector_amount;
 
-      *step = (totpart > amount) ? totpart / amount : 1;
+      *step = (totpart > amount) ? (int)ceil((float)totpart / (float)amount) : 1;
     }
   }
   else {
@@ -822,8 +867,6 @@ static void do_texture_effector(EffectorCache *eff,
   if (!eff->pd->tex) {
     return;
   }
-
-  result[0].nor = result[1].nor = result[2].nor = result[3].nor = NULL;
 
   strength = eff->pd->f_strength * efd->falloff;
 
@@ -847,9 +890,9 @@ static void do_texture_effector(EffectorCache *eff,
       eff->pd->tex, tex_co, NULL, NULL, 0, result, 0, NULL, scene_color_manage, false);
 
   if (hasrgb && mode == PFIELD_TEX_RGB) {
-    force[0] = (0.5f - result->tr) * strength;
-    force[1] = (0.5f - result->tg) * strength;
-    force[2] = (0.5f - result->tb) * strength;
+    force[0] = (0.5f - result->trgba[0]) * strength;
+    force[1] = (0.5f - result->trgba[1]) * strength;
+    force[2] = (0.5f - result->trgba[2]) * strength;
   }
   else if (nabla != 0) {
     strength /= nabla;
@@ -872,7 +915,8 @@ static void do_texture_effector(EffectorCache *eff,
       /* generate intensity if texture only has rgb value */
       if (hasrgb & TEX_RGB) {
         for (int i = 0; i < 4; i++) {
-          result[i].tin = (1.0f / 3.0f) * (result[i].tr + result[i].tg + result[i].tb);
+          result[i].tin = (1.0f / 3.0f) *
+                          (result[i].trgba[0] + result[i].trgba[1] + result[i].trgba[2]);
         }
       }
       force[0] = (result[0].tin - result[1].tin) * strength;
@@ -882,12 +926,12 @@ static void do_texture_effector(EffectorCache *eff,
     else { /*PFIELD_TEX_CURL*/
       float dbdy, dgdz, drdz, dbdx, dgdx, drdy;
 
-      dbdy = result[2].tb - result[0].tb;
-      dgdz = result[3].tg - result[0].tg;
-      drdz = result[3].tr - result[0].tr;
-      dbdx = result[1].tb - result[0].tb;
-      dgdx = result[1].tg - result[0].tg;
-      drdy = result[2].tr - result[0].tr;
+      dbdy = result[2].trgba[2] - result[0].trgba[2];
+      dgdz = result[3].trgba[1] - result[0].trgba[1];
+      drdz = result[3].trgba[0] - result[0].trgba[0];
+      dbdx = result[1].trgba[2] - result[0].trgba[2];
+      dgdx = result[1].trgba[1] - result[0].trgba[1];
+      drdy = result[2].trgba[0] - result[0].trgba[0];
 
       force[0] = (dbdy - dgdz) * strength;
       force[1] = (drdz - dbdx) * strength;
@@ -903,7 +947,9 @@ static void do_texture_effector(EffectorCache *eff,
     madd_v3_v3fl(force, efd->nor, fac);
   }
 
-  add_v3_v3(total_force, force);
+  if (eff->pd->flag & PFIELD_DO_LOCATION) {
+    add_v3_v3(total_force, force);
+  }
 }
 static void do_physical_effector(EffectorCache *eff,
                                  EffectorData *efd,
@@ -918,6 +964,7 @@ static void do_physical_effector(EffectorCache *eff,
   float strength = pd->f_strength;
   float damp = pd->f_damp;
   float noise_factor = pd->f_noise;
+  float flow_falloff = efd->falloff;
 
   if (noise_factor > 0.0f) {
     strength += wind_func(rng, noise_factor);
@@ -1027,6 +1074,7 @@ static void do_physical_effector(EffectorCache *eff,
       break;
     case PFIELD_FLUIDFLOW:
       zero_v3(force);
+      flow_falloff = 0;
 #ifdef WITH_FLUID
       if (pd->f_source) {
         float density;
@@ -1036,8 +1084,7 @@ static void do_physical_effector(EffectorCache *eff,
             influence *= density;
           }
           mul_v3_fl(force, influence);
-          /* apply flow */
-          madd_v3_v3fl(total_force, point->vel, -pd->f_flow * influence);
+          flow_falloff = influence;
         }
       }
 #endif
@@ -1047,9 +1094,8 @@ static void do_physical_effector(EffectorCache *eff,
   if (pd->flag & PFIELD_DO_LOCATION) {
     madd_v3_v3fl(total_force, force, 1.0f / point->vel_to_sec);
 
-    if (ELEM(pd->forcefield, PFIELD_HARMONIC, PFIELD_DRAG, PFIELD_FLUIDFLOW) == 0 &&
-        pd->f_flow != 0.0f) {
-      madd_v3_v3fl(total_force, point->vel, -pd->f_flow * efd->falloff);
+    if (!ELEM(pd->forcefield, PFIELD_HARMONIC, PFIELD_DRAG) && pd->f_flow != 0.0f) {
+      madd_v3_v3fl(total_force, point->vel, -pd->f_flow * flow_falloff);
     }
   }
 
@@ -1065,20 +1111,6 @@ static void do_physical_effector(EffectorCache *eff,
   }
 }
 
-/*  -------- BKE_effectors_apply() --------
- * generic force/speed system, now used for particles and softbodies
- * scene       = scene where it runs in, for time and stuff
- * lb           = listbase with objects that take part in effecting
- * opco     = global coord, as input
- * force        = accumulator for force
- * wind_force   = accumulator for force only acting perpendicular to a surface
- * speed        = actual current speed which can be altered
- * cur_time = "external" time in frames, is constant for static particles
- * loc_time = "local" time in frames, range <0-1> for the lifetime of particle
- * par_layer    = layer the caller is in
- * flags        = only used for softbody wind now
- * guide        = old speed of particle
- */
 void BKE_effectors_apply(ListBase *effectors,
                          ListBase *colliders,
                          EffectorWeights *weights,
@@ -1087,6 +1119,22 @@ void BKE_effectors_apply(ListBase *effectors,
                          float *wind_force,
                          float *impulse)
 {
+  /* WARNING(@campbellbarton): historic comment?
+   * Many of these parameters don't exist!
+   *
+   * scene        = scene where it runs in, for time and stuff.
+   * lb           = listbase with objects that take part in effecting.
+   * opco         = global coord, as input.
+   * force        = accumulator for force.
+   * wind_force   = accumulator for force only acting perpendicular to a surface.
+   * speed        = actual current speed which can be altered.
+   * cur_time     = "external" time in frames, is constant for static particles.
+   * loc_time     = "local" time in frames, range <0-1> for the lifetime of particle.
+   * par_layer    = layer the caller is in.
+   * flags        = only used for soft-body wind now.
+   * guide        = old speed of particle.
+   */
+
   /*
    * Modifies the force on a particle according to its
    * relation with the effector object

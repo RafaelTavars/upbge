@@ -1,30 +1,15 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2001-2002 by NaN Holding BV.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2001-2002 NaN Holding BV. All rights reserved. */
 
 /** \file
- * \ingroup MEM
+ * \ingroup intern_mem
  *
  * Guarded memory allocation, and boundary-write detection.
  */
 
 #include <stdarg.h>
 #include <stddef.h> /* offsetof */
+#include <stdio.h>  /* printf */
 #include <stdlib.h>
 #include <string.h> /* memcpy */
 #include <sys/types.h>
@@ -69,7 +54,7 @@
 #  define DEBUG_MEMCOUNTER_ERROR_VAL 0
 static int _mallocn_count = 0;
 
-/* breakpoint here */
+/* Break-point here. */
 static void memcount_raise(const char *name)
 {
   fprintf(stderr, "%s: memcount-leak, %d\n", name, _mallocn_count);
@@ -88,7 +73,7 @@ typedef struct localListBase {
   void *first, *last;
 } localListBase;
 
-/* note: keep this struct aligned (e.g., irix/gcc) - Hos */
+/* NOTE(@hos): keep this struct aligned (e.g., IRIX/GCC). */
 typedef struct MemHead {
   int tag1;
   size_t len;
@@ -97,9 +82,8 @@ typedef struct MemHead {
   const char *nextname;
   int tag2;
   short pad1;
-  short alignment; /* if non-zero aligned alloc was used
-                    * and alignment is stored here.
-                    */
+  /* if non-zero aligned allocation was used and alignment is stored here. */
+  short alignment;
 #ifdef DEBUG_MEMCOUNTER
   int _count;
 #endif
@@ -870,7 +854,7 @@ void MEM_guarded_freeN(void *vmemh)
 
   if (memh == NULL) {
     MemorY_ErroR("free", "attempt to free NULL pointer");
-    /* print_error(err_stream, "%d\n", (memh+4000)->tag1); */
+    // print_error(err_stream, "%d\n", (memh+4000)->tag1);
     return;
   }
 
@@ -1214,5 +1198,19 @@ const char *MEM_guarded_name_ptr(void *vmemh)
   }
 
   return "MEM_guarded_name_ptr(NULL)";
+}
+
+void MEM_guarded_name_ptr_set(void *vmemh, const char *str)
+{
+  if (!vmemh) {
+    return;
+  }
+
+  MemHead *memh = vmemh;
+  memh--;
+  memh->name = str;
+  if (memh->prev) {
+    MEMNEXT(memh->prev)->nextname = str;
+  }
 }
 #endif /* NDEBUG */

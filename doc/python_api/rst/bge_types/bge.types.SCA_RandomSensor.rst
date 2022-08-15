@@ -1,9 +1,11 @@
 SCA_RandomSensor(SCA_ISensor)
 =============================
 
-base class --- :class:`SCA_ISensor`
+.. currentmodule:: bge.types
 
-.. class:: SCA_RandomSensor(SCA_ISensor)
+base class --- :class:`~bge.types.SCA_ISensor`
+
+.. class:: SCA_RandomSensor
 
    This sensor activates randomly.
 

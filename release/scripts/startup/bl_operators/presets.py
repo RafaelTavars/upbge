@@ -1,22 +1,4 @@
-# ##### BEGIN GPL LICENSE BLOCK #####
-#
-#  This program is free software; you can redistribute it and/or
-#  modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2
-#  of the License, or (at your option) any later version.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software Foundation,
-#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# ##### END GPL LICENSE BLOCK #####
-
-# <pep8 compliant>
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 import bpy
 from bpy.types import (
@@ -29,11 +11,13 @@ from bpy.props import (
     StringProperty,
 )
 
+from bpy.app.translations import pgettext_data as data_
+
 # For preset popover menu
 WindowManager.preset_name = StringProperty(
     name="Preset Name",
     description="Name for new preset",
-    default="New Preset"
+    default=data_("New Preset")
 )
 
 
@@ -77,7 +61,7 @@ class AddPresetBase:
                 setattr(cls, attr, trans)
             return trans
 
-        name = name.lower().strip()
+        name = name.strip()
         name = bpy.path.display_name_to_filepath(name)
         trans = maketrans_init()
         # Strip surrounding "_" as they are displayed as spaces.
@@ -114,9 +98,7 @@ class AddPresetBase:
             filename = self.as_filename(name)
 
             target_path = os.path.join("presets", self.preset_subdir)
-            target_path = bpy.utils.user_resource('SCRIPTS',
-                                                  target_path,
-                                                  create=True)
+            target_path = bpy.utils.user_resource('SCRIPTS', path=target_path, create=True)
 
             if not target_path:
                 self.report({'WARNING'}, "Failed to create presets path")
@@ -249,7 +231,7 @@ class ExecutePreset(Operator):
 
         # change the menu title to the most recently chosen option
         preset_class = getattr(bpy.types, self.menu_idname)
-        preset_class.bl_label = bpy.path.display_name(basename(filepath))
+        preset_class.bl_label = bpy.path.display_name(basename(filepath), title_case=False)
 
         ext = splitext(filepath)[1].lower()
 
@@ -282,7 +264,7 @@ class AddPresetRender(AddPresetBase, Operator):
     """Add or remove a Render Preset"""
     bl_idname = "render.preset_add"
     bl_label = "Add Render Preset"
-    preset_menu = "RENDER_PT_presets"
+    preset_menu = "RENDER_PT_format_presets"
 
     preset_defines = [
         "scene = bpy.context.scene"
@@ -384,7 +366,7 @@ class AddPresetFluid(AddPresetBase, Operator):
     """Add or remove a Fluid Preset"""
     bl_idname = "fluid.preset_add"
     bl_label = "Add Fluid Preset"
-    preset_menu = "FLUID_MT_presets"
+    preset_menu = "FLUID_PT_presets"
 
     preset_defines = [
         "fluid = bpy.context.fluid"
@@ -651,7 +633,7 @@ class AddPresetGpencilBrush(AddPresetBase, Operator):
         "settings.uv_random",
         "settings.pen_jitter",
         "settings.use_jitter_pressure",
-        "settings.trim",
+        "settings.use_trim",
     ]
 
     preset_subdir = "gpencil_brush"

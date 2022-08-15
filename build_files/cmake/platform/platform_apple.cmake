@@ -1,30 +1,7 @@
-# ***** BEGIN GPL LICENSE BLOCK *****
-#
-# This program is free software; you can redistribute it and/or
-# modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
-# of the License, or (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software Foundation,
-# Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# The Original Code is Copyright (C) 2016, Blender Foundation
-# All rights reserved.
-# ***** END GPL LICENSE BLOCK *****
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright 2016 Blender Foundation. All rights reserved.
 
 # Libraries configuration for Apple.
-
-if("${CMAKE_OSX_ARCHITECTURES}" STREQUAL "arm64")
-  set(MACOSX_DEPLOYMENT_TARGET 11.00)
-else()
-  set(MACOSX_DEPLOYMENT_TARGET 10.13)
-endif()
 
 macro(find_package_wrapper)
 # do nothing, just satisfy the macro
@@ -56,6 +33,7 @@ list(APPEND ZLIB_LIBRARIES ${BZIP2_LIBRARIES})
 if(WITH_OPENAL)
   find_package(OpenAL)
   if(NOT OPENAL_FOUND)
+    message(WARNING "OpenAL not found, disabling WITH_OPENAL")
     set(WITH_OPENAL OFF)
   endif()
 endif()
@@ -65,6 +43,7 @@ if(WITH_JACK)
     NAMES jackmp
   )
   if(NOT JACK_FRAMEWORK)
+    message(STATUS "JACK not found, disabling WITH_JACK")
     set(WITH_JACK OFF)
   else()
     set(JACK_INCLUDE_DIRS ${JACK_FRAMEWORK}/headers)
@@ -72,7 +51,11 @@ if(WITH_JACK)
 endif()
 
 if(NOT DEFINED LIBDIR)
-  set(LIBDIR ${CMAKE_SOURCE_DIR}/../lib/darwin)
+  if("${CMAKE_OSX_ARCHITECTURES}" STREQUAL "x86_64")
+    set(LIBDIR ${CMAKE_SOURCE_DIR}/../lib/darwin)
+  else()
+    set(LIBDIR ${CMAKE_SOURCE_DIR}/../lib/darwin_${CMAKE_OSX_ARCHITECTURES})
+  endif()
 else()
   message(STATUS "Using pre-compiled LIBDIR: ${LIBDIR}")
 endif()
@@ -88,6 +71,7 @@ set(CMAKE_PREFIX_PATH ${LIB_SUBDIRS})
 # Find precompiled libraries, and avoid system or user-installed ones.
 
 if(EXISTS ${LIBDIR})
+  include(platform_old_libs_update)
   without_system_libs_begin()
 endif()
 
@@ -98,6 +82,7 @@ endif()
 if(WITH_USD)
   find_package(USD)
   if(NOT USD_FOUND)
+    message(STATUS "USD not found, disabling WITH_USD")
     set(WITH_USD OFF)
   endif()
 endif()
@@ -127,25 +112,20 @@ if(WITH_CODEC_SNDFILE)
 endif()
 
 if(WITH_PYTHON)
-  # we use precompiled libraries for py 3.7 and up by default
-  set(PYTHON_VERSION 3.7)
+  # Use precompiled libraries by default.
+  set(PYTHON_VERSION 3.10)
   if(NOT WITH_PYTHON_MODULE AND NOT WITH_PYTHON_FRAMEWORK)
-    # normally cached but not since we include them with blender
-    set(PYTHON_INCLUDE_DIR "${LIBDIR}/python/include/python${PYTHON_VERSION}m")
-    set(PYTHON_EXECUTABLE "${LIBDIR}/python/bin/python${PYTHON_VERSION}m")
-    set(PYTHON_LIBRARY ${LIBDIR}/python/lib/libpython${PYTHON_VERSION}m.a)
+    # Normally cached but not since we include them with blender.
+    set(PYTHON_INCLUDE_DIR "${LIBDIR}/python/include/python${PYTHON_VERSION}")
+    set(PYTHON_EXECUTABLE "${LIBDIR}/python/bin/python${PYTHON_VERSION}")
+    set(PYTHON_LIBRARY ${LIBDIR}/python/lib/libpython${PYTHON_VERSION}.a)
     set(PYTHON_LIBPATH "${LIBDIR}/python/lib/python${PYTHON_VERSION}")
-    # set(PYTHON_LINKFLAGS "-u _PyMac_Error")  # won't  build with this enabled
   else()
-    # module must be compiled against Python framework
+    # Module must be compiled against Python framework.
     set(_py_framework "/Library/Frameworks/Python.framework/Versions/${PYTHON_VERSION}")
-
-    set(PYTHON_INCLUDE_DIR "${_py_framework}/include/python${PYTHON_VERSION}m")
-    set(PYTHON_EXECUTABLE "${_py_framework}/bin/python${PYTHON_VERSION}m")
-    set(PYTHON_LIBPATH "${_py_framework}/lib/python${PYTHON_VERSION}/config-${PYTHON_VERSION}m")
-    # set(PYTHON_LIBRARY python${PYTHON_VERSION})
-    # set(PYTHON_LINKFLAGS "-u _PyMac_Error -framework Python")  # won't  build with this enabled
-
+    set(PYTHON_INCLUDE_DIR "${_py_framework}/include/python${PYTHON_VERSION}")
+    set(PYTHON_EXECUTABLE "${_py_framework}/bin/python${PYTHON_VERSION}")
+    set(PYTHON_LIBPATH "${_py_framework}/lib/python${PYTHON_VERSION}")
     unset(_py_framework)
   endif()
 
@@ -165,18 +145,26 @@ if(WITH_FFTW3)
   find_package(Fftw3)
 endif()
 
+# FreeType compiled with Brotli compression for woff2.
 find_package(Freetype REQUIRED)
+list(APPEND FREETYPE_LIBRARIES
+  ${LIBDIR}/brotli/lib/libbrotlicommon-static.a
+  ${LIBDIR}/brotli/lib/libbrotlidec-static.a)
 
 if(WITH_IMAGE_OPENEXR)
   find_package(OpenEXR)
 endif()
 
 if(WITH_CODEC_FFMPEG)
+  set(FFMPEG_ROOT_DIR ${LIBDIR}/ffmpeg)
   set(FFMPEG_FIND_COMPONENTS
     avcodec avdevice avformat avutil
     mp3lame ogg opus swresample swscale
     theora theoradec theoraenc vorbis vorbisenc
     vorbisfile vpx x264 xvidcore)
+  if(EXISTS ${LIBDIR}/ffmpeg/lib/libaom.a)
+    list(APPEND FFMPEG_FIND_COMPONENTS aom)
+  endif()
   find_package(FFmpeg)
 endif()
 
@@ -202,6 +190,13 @@ set(PLATFORM_LINKFLAGS
 
 list(APPEND PLATFORM_LINKLIBS c++)
 
+if(WITH_OPENIMAGEDENOISE)
+  if("${CMAKE_OSX_ARCHITECTURES}" STREQUAL "arm64")
+    # OpenImageDenoise uses BNNS from the Accelerate framework.
+    string(APPEND PLATFORM_LINKFLAGS " -framework Accelerate")
+  endif()
+endif()
+
 if(WITH_JACK)
   string(APPEND PLATFORM_LINKFLAGS " -F/Library/Frameworks -weak_framework jackmp")
 endif()
@@ -223,7 +218,12 @@ if(WITH_SDL)
   find_package(SDL2)
   set(SDL_INCLUDE_DIR ${SDL2_INCLUDE_DIRS})
   set(SDL_LIBRARY ${SDL2_LIBRARIES})
-  string(APPEND PLATFORM_LINKFLAGS " -framework ForceFeedback")
+  string(APPEND PLATFORM_LINKFLAGS " -framework ForceFeedback -framework GameController")
+  if("${CMAKE_OSX_ARCHITECTURES}" STREQUAL "arm64")
+    # The minimum macOS version of the libraries makes it so this is included in SDL on arm64
+    # but not x86_64.
+    string(APPEND PLATFORM_LINKFLAGS " -framework CoreHaptics")
+  endif()
 endif()
 
 set(PNG_ROOT ${LIBDIR}/png)
@@ -241,6 +241,15 @@ if(WITH_IMAGE_TIFF)
   endif()
 endif()
 
+if(WITH_IMAGE_WEBP)
+  set(WEBP_ROOT_DIR ${LIBDIR}/webp)
+  find_package(WebP)
+  if(NOT WEBP_FOUND)
+    message(WARNING "WebP not found, disabling WITH_IMAGE_WEBP")
+    set(WITH_IMAGE_WEBP OFF)
+  endif()
+endif()
+
 if(WITH_BOOST)
   set(Boost_NO_BOOST_CMAKE ON)
   set(BOOST_ROOT ${LIBDIR}/boost)
@@ -248,9 +257,6 @@ if(WITH_BOOST)
   set(_boost_FIND_COMPONENTS date_time filesystem regex system thread wave)
   if(WITH_INTERNATIONAL)
     list(APPEND _boost_FIND_COMPONENTS locale)
-  endif()
-  if(WITH_CYCLES_NETWORK)
-    list(APPEND _boost_FIND_COMPONENTS serialization)
   endif()
   if(WITH_OPENVDB)
     list(APPEND _boost_FIND_COMPONENTS iostreams)
@@ -293,7 +299,12 @@ if(WITH_OPENIMAGEIO)
 endif()
 
 if(WITH_OPENCOLORIO)
-  find_package(OpenColorIO)
+  find_package(OpenColorIO 2.0.0)
+
+  if(NOT OPENCOLORIO_FOUND)
+    set(WITH_OPENCOLORIO OFF)
+    message(STATUS "OpenColorIO not found, disabling WITH_OPENCOLORIO")
+  endif()
 endif()
 
 if(WITH_OPENVDB)
@@ -305,8 +316,11 @@ if(WITH_OPENVDB)
 endif()
 
 if(WITH_NANOVDB)
-  set(NANOVDB ${LIBDIR}/nanovdb)
-  set(NANOVDB_INCLUDE_DIR ${NANOVDB}/include)
+  find_package(NanoVDB)
+endif()
+
+if(WITH_CPU_SIMD AND SUPPORT_NEON_BUILD)
+  find_package(sse2neon)
 endif()
 
 if(WITH_LLVM)
@@ -314,9 +328,16 @@ if(WITH_LLVM)
   if(NOT LLVM_FOUND)
     message(FATAL_ERROR "LLVM not found.")
   endif()
+  if(WITH_CLANG)
+    find_package(Clang)
+    if(NOT CLANG_FOUND)
+       message(FATAL_ERROR "Clang not found.")
+    endif()
+  endif()
+
 endif()
 
-if(WITH_CYCLES_OSL)
+if(WITH_CYCLES AND WITH_CYCLES_OSL)
   set(CYCLES_OSL ${LIBDIR}/osl)
 
   find_library(OSL_LIB_EXEC NAMES oslexec PATHS ${CYCLES_OSL}/lib)
@@ -326,23 +347,17 @@ if(WITH_CYCLES_OSL)
   list(APPEND OSL_LIBRARIES ${OSL_LIB_COMP} -force_load ${OSL_LIB_EXEC} ${OSL_LIB_QUERY})
   find_path(OSL_INCLUDE_DIR OSL/oslclosure.h PATHS ${CYCLES_OSL}/include)
   find_program(OSL_COMPILER NAMES oslc PATHS ${CYCLES_OSL}/bin)
-  find_path(OSL_SHADER_DIR NAMES stdosl.h PATHS ${CYCLES_OSL}/shaders)
+  find_path(OSL_SHADER_DIR NAMES stdosl.h PATHS ${CYCLES_OSL}/share/OSL/shaders)
 
   if(OSL_INCLUDE_DIR AND OSL_LIBRARIES AND OSL_COMPILER AND OSL_SHADER_DIR)
     set(OSL_FOUND TRUE)
   else()
-    message(STATUS "OSL not found")
+    message(WARNING "OSL not found, disabling WITH_CYCLES_OSL")
     set(WITH_CYCLES_OSL OFF)
   endif()
 endif()
 
-if("${CMAKE_OSX_ARCHITECTURES}" STREQUAL "arm64")
-  set(WITH_CYCLES_EMBREE OFF)
-  set(WITH_OPENIMAGEDENOISE OFF)
-  set(WITH_CPU_SSE OFF)
-endif()
-
-if(WITH_CYCLES_EMBREE)
+if(WITH_CYCLES AND WITH_CYCLES_EMBREE)
   find_package(Embree 3.8.0 REQUIRED)
   # Increase stack size for Embree, only works for executables.
   if(NOT WITH_PYTHON_MODULE)
@@ -365,12 +380,16 @@ if(WITH_OPENIMAGEDENOISE)
 
   if(NOT OPENIMAGEDENOISE_FOUND)
     set(WITH_OPENIMAGEDENOISE OFF)
-    message(STATUS "OpenImageDenoise not found")
+    message(STATUS "OpenImageDenoise not found, disabling WITH_OPENIMAGEDENOISE")
   endif()
 endif()
 
 if(WITH_TBB)
   find_package(TBB)
+  if(NOT TBB_FOUND)
+    message(WARNING "TBB not found, disabling WITH_TBB")
+    set(WITH_TBB OFF)
+  endif()
 endif()
 
 if(WITH_POTRACE)
@@ -383,32 +402,16 @@ endif()
 
 # CMake FindOpenMP doesn't know about AppleClang before 3.12, so provide custom flags.
 if(WITH_OPENMP)
-  if(CMAKE_C_COMPILER_ID MATCHES "Clang" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL "7.0")
+  if(CMAKE_C_COMPILER_ID MATCHES "Clang")
     # Use OpenMP from our precompiled libraries.
     message(STATUS "Using ${LIBDIR}/openmp for OpenMP")
     set(OPENMP_CUSTOM ON)
     set(OPENMP_FOUND ON)
     set(OpenMP_C_FLAGS "-Xclang -fopenmp -I'${LIBDIR}/openmp/include'")
     set(OpenMP_CXX_FLAGS "-Xclang -fopenmp -I'${LIBDIR}/openmp/include'")
-    string(APPEND CMAKE_EXE_LINKER_FLAGS " -L'${LIBDIR}/openmp/lib' -lomp")
-
-    # Copy libomp.dylib to allow executables like datatoc and tests to work.
-    # `@executable_path/../Resources/lib/` is a default dylib search path.
-    # For single config generator datatoc, tests etc.
-    execute_process(
-      COMMAND mkdir -p ${CMAKE_BINARY_DIR}/Resources/lib
-      COMMAND cp -p ${LIBDIR}/openmp/lib/libomp.dylib ${CMAKE_BINARY_DIR}/Resources/lib/libomp.dylib
-    )
-    # For multi-config generator datatoc, etc.
-    execute_process(
-      COMMAND mkdir -p ${CMAKE_BINARY_DIR}/bin/Resources/lib
-      COMMAND cp -p ${LIBDIR}/openmp/lib/libomp.dylib ${CMAKE_BINARY_DIR}/bin/Resources/lib/libomp.dylib
-    )
-    # For multi-config generator tests.
-    execute_process(
-      COMMAND mkdir -p ${CMAKE_BINARY_DIR}/bin/tests/Resources/lib
-      COMMAND cp -p ${LIBDIR}/openmp/lib/libomp.dylib ${CMAKE_BINARY_DIR}/bin/tests/Resources/lib/libomp.dylib
-    )
+    set(OpenMP_LIBRARY_DIR "${LIBDIR}/openmp/lib/")
+    set(OpenMP_LINKER_FLAGS "-L'${OpenMP_LIBRARY_DIR}' -lomp")
+    set(OpenMP_LIBRARY "${OpenMP_LIBRARY_DIR}/libomp.dylib")
   endif()
 endif()
 
@@ -427,6 +430,17 @@ if(WITH_GMP)
     set(WITH_GMP OFF)
   endif()
 endif()
+
+if(WITH_HARU)
+  find_package(Haru)
+  if(NOT HARU_FOUND)
+    message(WARNING "Haru not found, disabling WITH_HARU")
+    set(WITH_HARU OFF)
+  endif()
+endif()
+
+set(ZSTD_ROOT_DIR ${LIBDIR}/zstd)
+find_package(Zstd REQUIRED)
 
 if(EXISTS ${LIBDIR})
   without_system_libs_end()
@@ -451,15 +465,14 @@ else()
   set(CMAKE_CXX_FLAGS_RELEASE "-O2 -mdynamic-no-pic")
 endif()
 
-if(${XCODE_VERSION} VERSION_EQUAL 5 OR ${XCODE_VERSION} VERSION_GREATER 5)
-  # Xcode 5 is always using CLANG, which has too low template depth of 128 for libmv
-  string(APPEND CMAKE_CXX_FLAGS " -ftemplate-depth=1024")
-endif()
+# Clang has too low template depth of 128 for libmv.
+string(APPEND CMAKE_CXX_FLAGS " -ftemplate-depth=1024")
 
 # Avoid conflicts with Luxrender, and other plug-ins that may use the same
 # libraries as Blender with a different version or build options.
+set(PLATFORM_SYMBOLS_MAP ${CMAKE_SOURCE_DIR}/source/creator/symbols_apple.map)
 string(APPEND PLATFORM_LINKFLAGS
-  " -Wl,-unexported_symbols_list,'${CMAKE_SOURCE_DIR}/source/creator/osx_locals.map'"
+  " -Wl,-unexported_symbols_list,'${PLATFORM_SYMBOLS_MAP}'"
 )
 
 string(APPEND CMAKE_CXX_FLAGS " -stdlib=libc++")
@@ -468,8 +481,11 @@ string(APPEND PLATFORM_LINKFLAGS " -stdlib=libc++")
 # Suppress ranlib "has no symbols" warnings (workaround for T48250)
 set(CMAKE_C_ARCHIVE_CREATE   "<CMAKE_AR> Scr <TARGET> <LINK_FLAGS> <OBJECTS>")
 set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> Scr <TARGET> <LINK_FLAGS> <OBJECTS>")
-set(CMAKE_C_ARCHIVE_FINISH   "<CMAKE_RANLIB> -no_warning_for_no_symbols -c <TARGET>")
-set(CMAKE_CXX_ARCHIVE_FINISH "<CMAKE_RANLIB> -no_warning_for_no_symbols -c <TARGET>")
+# llvm-ranlib doesn't support this flag. Xcode's libtool does.
+if(NOT ${CMAKE_RANLIB} MATCHES ".*llvm-ranlib$")
+  set(CMAKE_C_ARCHIVE_FINISH   "<CMAKE_RANLIB> -no_warning_for_no_symbols -c <TARGET>")
+  set(CMAKE_CXX_ARCHIVE_FINISH "<CMAKE_RANLIB> -no_warning_for_no_symbols -c <TARGET>")
+endif()
 
 if(WITH_COMPILER_CCACHE)
   if(NOT CMAKE_GENERATOR STREQUAL "Xcode")
@@ -484,3 +500,18 @@ if(WITH_COMPILER_CCACHE)
     endif()
   endif()
 endif()
+
+# For binaries that are built but not installed (also not distributed) (datatoc,
+# makesdna, tests, etc.), we add an rpath to the OpenMP library dir through
+# CMAKE_BUILD_RPATH. This avoids having to make many copies of the dylib next to each binary.
+#
+# For the installed Python module and installed Blender executable, CMAKE_INSTALL_RPATH
+# is modified to find the dylib in an adjacent folder. Install step puts the libraries there.
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+list(APPEND CMAKE_BUILD_RPATH "${OpenMP_LIBRARY_DIR}")
+
+set(CMAKE_SKIP_INSTALL_RPATH FALSE)
+list(APPEND CMAKE_INSTALL_RPATH "@loader_path/../Resources/${BLENDER_VERSION}/lib")
+
+# Same as `CFBundleIdentifier` in Info.plist.
+set(CMAKE_XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "org.blenderfoundation.blender")

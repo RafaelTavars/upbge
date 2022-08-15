@@ -30,7 +30,7 @@
 #include "BLI_math.h"
 #include "DNA_object_types.h"
 
-#include "BL_BlenderDataConversion.h"
+#include "BL_DataConversion.h"
 #include "EXP_ListWrapper.h"
 #include "KX_LodLevel.h"
 #include "KX_Scene.h"
@@ -97,10 +97,10 @@ inline bool KX_LodManager::LodLevelIterator::operator>(float distance2) const
 KX_LodManager::KX_LodManager(Object *ob,
                              KX_Scene *scene,
                              RAS_Rasterizer *rasty,
-                             BL_BlenderSceneConverter *converter,
+                             BL_SceneConverter *converter,
                              bool libloading,
                              bool converting_during_runtime)
-    : m_refcount(1), m_distanceFactor(1.0f)
+    : m_refcount(1), m_distanceFactor(ob->lodfactor)
 {
   if (BLI_listbase_count_at_most(&ob->lodlevels, 2) > 1) {
     Mesh *lodmesh = (Mesh *)ob->data;
@@ -139,7 +139,8 @@ KX_LodManager::KX_LodManager(Object *ob,
   }
 }
 
-KX_LodManager::KX_LodManager(RAS_MeshObject *meshObj, Object *lodsource) : m_refcount(1), m_distanceFactor(1.0f)
+KX_LodManager::KX_LodManager(RAS_MeshObject *meshObj, Object *lodsource)
+    : m_refcount(1), m_distanceFactor(1.0f)
 {
   KX_LodLevel *lodLevel = new KX_LodLevel(
       0.0f, 0.0f, 0, meshObj, lodsource, OB_LOD_USE_MESH | OB_LOD_USE_MAT);
@@ -252,15 +253,16 @@ static PyObject *kx_lod_manager_get_levels_item_cb(void *self_v, int index)
   return ((KX_LodManager *)self_v)->GetLevel(index)->GetProxy();
 }
 
-PyObject *KX_LodManager::pyattr_get_levels(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef)
+PyObject *KX_LodManager::pyattr_get_levels(EXP_PyObjectPlus *self_v,
+                                           const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   return (new EXP_ListWrapper(self_v,
-                           ((KX_LodManager *)self_v)->GetProxy(),
-                           nullptr,
-                           kx_lod_manager_get_levels_size_cb,
-                           kx_lod_manager_get_levels_item_cb,
-                           nullptr,
-                           nullptr))
+                              ((KX_LodManager *)self_v)->GetProxy(),
+                              nullptr,
+                              kx_lod_manager_get_levels_size_cb,
+                              kx_lod_manager_get_levels_item_cb,
+                              nullptr,
+                              nullptr))
       ->NewProxy(true);
 }
 

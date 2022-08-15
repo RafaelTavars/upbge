@@ -1,29 +1,18 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup modifiers
  */
 
+#include "BKE_geometry_set.hh"
 #include "BKE_lib_query.h"
 #include "BKE_mesh_runtime.h"
 #include "BKE_modifier.h"
 #include "BKE_object.h"
 #include "BKE_texture.h"
 #include "BKE_volume.h"
+
+#include "BLT_translation.h"
 
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
@@ -48,6 +37,7 @@
 #include "RE_texture.h"
 
 #include "RNA_access.h"
+#include "RNA_prototypes.h"
 
 #include "BLI_math_vector.h"
 
@@ -94,7 +84,7 @@ static void foreachTexLink(ModifierData *md, Object *ob, TexWalkFunc walk, void 
   walk(userData, ob, md, "texture");
 }
 
-static bool dependsOnTime(ModifierData *md)
+static bool dependsOnTime(struct Scene *UNUSED(scene), ModifierData *md)
 {
   VolumeDisplaceModifierData *vdmd = reinterpret_cast<VolumeDisplaceModifierData *>(md);
   if (vdmd->texture) {
@@ -180,7 +170,7 @@ template<typename GridType> struct DisplaceOp {
     TexResult texture_result = {0};
     BKE_texture_get_value(
         nullptr, this->texture, const_cast<float *>(pos.asV()), &texture_result, false);
-    return {texture_result.tr, texture_result.tg, texture_result.tb};
+    return {texture_result.trgba[0], texture_result.trgba[1], texture_result.trgba[2]};
   }
 };
 
@@ -200,9 +190,8 @@ struct DisplaceGridOp {
 
   template<typename GridType> void operator()()
   {
-    if constexpr (std::is_same_v<GridType, openvdb::points::PointDataGrid> ||
-                  std::is_same_v<GridType, openvdb::StringGrid> ||
-                  std::is_same_v<GridType, openvdb::MaskGrid>) {
+    if constexpr (blender::
+                      is_same_any_v<GridType, openvdb::points::PointDataGrid, openvdb::MaskGrid>) {
       /* We don't support displacing these grid types yet. */
       return;
     }
@@ -284,7 +273,7 @@ struct DisplaceGridOp {
 
 #endif
 
-static Volume *modifyVolume(ModifierData *md, const ModifierEvalContext *ctx, Volume *volume)
+static void displace_volume(ModifierData *md, const ModifierEvalContext *ctx, Volume *volume)
 {
 #ifdef WITH_OPENVDB
   VolumeDisplaceModifierData *vdmd = reinterpret_cast<VolumeDisplaceModifierData *>(md);
@@ -293,7 +282,7 @@ static Volume *modifyVolume(ModifierData *md, const ModifierEvalContext *ctx, Vo
   BKE_volume_load(volume, DEG_get_bmain(ctx->depsgraph));
   const int grid_amount = BKE_volume_num_grids(volume);
   for (int grid_index = 0; grid_index < grid_amount; grid_index++) {
-    VolumeGrid *volume_grid = BKE_volume_grid_get(volume, grid_index);
+    VolumeGrid *volume_grid = BKE_volume_grid_get_for_write(volume, grid_index);
     BLI_assert(volume_grid != nullptr);
 
     openvdb::GridBase::Ptr grid = BKE_volume_grid_openvdb_for_write(volume, volume_grid, false);
@@ -303,16 +292,24 @@ static Volume *modifyVolume(ModifierData *md, const ModifierEvalContext *ctx, Vo
     BKE_volume_grid_type_operation(grid_type, displace_grid_op);
   }
 
-  return volume;
 #else
-  UNUSED_VARS(md, ctx);
+  UNUSED_VARS(md, volume, ctx);
   BKE_modifier_set_error(ctx->object, md, "Compiled without OpenVDB");
-  return volume;
 #endif
 }
 
+static void modifyGeometrySet(ModifierData *md,
+                              const ModifierEvalContext *ctx,
+                              GeometrySet *geometry_set)
+{
+  Volume *input_volume = geometry_set->get_volume_for_write();
+  if (input_volume != nullptr) {
+    displace_volume(md, ctx, input_volume);
+  }
+}
+
 ModifierTypeInfo modifierType_VolumeDisplace = {
-    /* name */ "Volume Displace",
+    /* name */ N_("Volume Displace"),
     /* structName */ "VolumeDisplaceModifierData",
     /* structSize */ sizeof(VolumeDisplaceModifierData),
     /* srna */ &RNA_VolumeDisplaceModifier,
@@ -327,9 +324,7 @@ ModifierTypeInfo modifierType_VolumeDisplace = {
     /* deformVertsEM */ nullptr,
     /* deformMatricesEM */ nullptr,
     /* modifyMesh */ nullptr,
-    /* modifyHair */ nullptr,
-    /* modifyGeometrySet */ nullptr,
-    /* modifyVolume */ modifyVolume,
+    /* modifyGeometrySet */ modifyGeometrySet,
 
     /* initData */ initData,
     /* requiredDataMask */ nullptr,

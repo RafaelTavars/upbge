@@ -1,10 +1,10 @@
-/* Apache License, Version 2.0 */
+/* SPDX-License-Identifier: Apache-2.0 */
 
 #include "testing/testing.h"
 
 #include "BLI_hash_mm2a.h"
 
-/* Note: Reference results are taken from reference implementation
+/* NOTE: Reference results are taken from reference implementation
  * (cpp code, CMurmurHash2A variant):
  * https://smhasher.googlecode.com/svn-history/r130/trunk/MurmurHash2.cpp
  */

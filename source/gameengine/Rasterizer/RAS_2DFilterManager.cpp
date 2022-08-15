@@ -51,7 +51,7 @@ RAS_2DFilterManager::RAS_2DFilterManager()
 
 RAS_2DFilterManager::~RAS_2DFilterManager()
 {
-  for (const RAS_PassTo2DFilter::value_type& pair : m_filters) {
+  for (const RAS_PassTo2DFilter::value_type &pair : m_filters) {
     RAS_2DFilter *filter = pair.second;
     delete filter;
   }
@@ -87,7 +87,9 @@ RAS_FrameBuffer *RAS_2DFilterManager::RenderFilters(RAS_Rasterizer *rasty,
 {
   if (m_filters.empty()) {
     // No filters, discard.
-    return inputfb;
+    GPU_framebuffer_bind(targetfb->GetFrameBuffer());
+    rasty->DrawFrameBuffer(inputfb, targetfb);
+    return targetfb;
   }
 
   /* Set ogl states */

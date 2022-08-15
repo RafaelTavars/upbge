@@ -1,11 +1,11 @@
 BL_Texture(EXP_Value)
-==================
+=====================
 
-.. module:: bge.types
+.. currentmodule:: bge.types
 
 base class --- :class:`EXP_Value`
 
-.. class:: BL_Texture(EXP_Value)
+.. class:: BL_Texture
 
    This is kept for backward compatibility with some scripts (bindCode mainly).
 

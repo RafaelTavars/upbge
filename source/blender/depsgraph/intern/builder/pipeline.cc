@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2020 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2020 Blender Foundation. All rights reserved. */
 
 #include "pipeline.h"
 
@@ -37,10 +21,6 @@ AbstractBuilderPipeline::AbstractBuilderPipeline(::Depsgraph *graph)
       bmain_(deg_graph_->bmain),
       scene_(deg_graph_->scene),
       view_layer_(deg_graph_->view_layer)
-{
-}
-
-AbstractBuilderPipeline::~AbstractBuilderPipeline()
 {
 }
 
@@ -98,11 +78,11 @@ void AbstractBuilderPipeline::build_step_finalize()
   if (G.debug_value == 799) {
     deg_graph_transitive_reduction(deg_graph_);
   }
-  /* Store pointers to commonly used valuated datablocks. */
+  /* Store pointers to commonly used evaluated datablocks. */
   deg_graph_->scene_cow = (Scene *)deg_graph_->get_cow_id(&deg_graph_->scene->id);
   /* Flush visibility layer and re-schedule nodes for update. */
   deg_graph_build_finalize(bmain_, deg_graph_);
-  DEG_graph_on_visible_update(bmain_, reinterpret_cast<::Depsgraph *>(deg_graph_), false);
+  DEG_graph_tag_on_visible_update(reinterpret_cast<::Depsgraph *>(deg_graph_), false);
 #if 0
   if (!DEG_debug_consistency_check(deg_graph_)) {
     printf("Consistency validation failed, ABORTING!\n");
@@ -110,7 +90,7 @@ void AbstractBuilderPipeline::build_step_finalize()
   }
 #endif
   /* Relations are up to date. */
-  deg_graph_->need_update = false;
+  deg_graph_->need_update_relations = false;
 }
 
 unique_ptr<DepsgraphNodeBuilder> AbstractBuilderPipeline::construct_node_builder()

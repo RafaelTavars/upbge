@@ -36,23 +36,20 @@
 #include "GPU_matrix.h"
 #include "GPU_viewport.h"
 
+#include "DNA_camera_types.h"
 #include "KX_Globals.h"
 #include "KX_PyMath.h"
+#include "KX_RayCast.h"
 #include "RAS_ICanvas.h"
 
-KX_Camera::KX_Camera(void *sgReplicationInfo,
-                     SG_Callbacks callbacks,
-                     const RAS_CameraData &camdata,
-                     bool frustum_culling,
-                     bool delete_node)
-    : KX_GameObject(sgReplicationInfo, callbacks),
-      m_camdata(camdata),
+KX_Camera::KX_Camera()
+    : KX_GameObject(),
       m_gpuViewport(nullptr),  // eevee
       m_dirty(true),
       m_normalized(false),
-      m_frustum_culling(frustum_culling),
       m_set_projection_matrix(false),
-      m_delete_node(delete_node),
+      m_delete_node(false),
+      m_activityCulling(false),
       m_lodDistanceFactor(1.0f),
       m_showDebugCameraFrustum(false)
 {
@@ -72,6 +69,35 @@ KX_Camera::~KX_Camera()
   }
 }
 
+void KX_Camera::SetBlenderObject(Object *obj)
+{
+  KX_GameObject::SetBlenderObject(obj);
+
+  Camera *ca = static_cast<Camera *>(obj->data);
+
+  RAS_CameraData camdata(ca->lens,
+                         ca->ortho_scale,
+                         ca->sensor_x,
+                         ca->sensor_y,
+                         ca->sensor_fit,
+                         ca->shiftx,
+                         ca->shifty,
+                         ca->clip_start,
+                         ca->clip_end,
+                         ca->type == CAM_PERSP);
+
+  SetName(ca->id.name + 2);
+  SetLodDistanceFactor(ca->lodfactor);
+  SetActivityCulling(ca->gameflag & GAME_CAM_OBJECT_ACTIVITY_CULLING);
+
+  SetCameraData(camdata);
+}
+
+void KX_Camera::SetCameraData(const RAS_CameraData &camdata)
+{
+  m_camdata = camdata;
+}
+
 GPUViewport *KX_Camera::GetGPUViewport()
 {
   if (!m_gpuViewport) {
@@ -88,14 +114,9 @@ void KX_Camera::RemoveGPUViewport()
   }
 }
 
-EXP_Value *KX_Camera::GetReplica()
+KX_PythonProxy *KX_Camera::NewInstance()
 {
-  KX_Camera *replica = new KX_Camera(*this);
-
-  // this will copy properties and so on...
-  replica->ProcessReplica();
-
-  return replica;
+  return new KX_Camera(*this);
 }
 
 void KX_Camera::ProcessReplica()
@@ -253,6 +274,16 @@ void KX_Camera::SetLodDistanceFactor(float lodfactor)
   m_lodDistanceFactor = lodfactor;
 }
 
+bool KX_Camera::GetActivityCulling() const
+{
+  return m_activityCulling;
+}
+
+void KX_Camera::SetActivityCulling(bool enable)
+{
+  m_activityCulling = enable;
+}
+
 void KX_Camera::ExtractFrustum()
 {
   if (m_dirty) {
@@ -265,11 +296,6 @@ const SG_Frustum &KX_Camera::GetFrustum()
 {
   ExtractFrustum();
   return m_frustum;
-}
-
-bool KX_Camera::GetFrustumCulling() const
-{
-  return m_frustum_culling;
 }
 
 void KX_Camera::EnableViewport(bool viewport)
@@ -311,6 +337,11 @@ int KX_Camera::GetViewportTop() const
   return m_camdata.m_viewporttop;
 }
 
+void KX_Camera::MarkForDeletion()
+{
+  m_delete_node = true;
+}
+
 #ifdef WITH_PYTHON
 //----------------------------------------------------------------------------
 // Python
@@ -331,7 +362,6 @@ PyMethodDef KX_Camera::Methods[] = {
 
 PyAttributeDef KX_Camera::Attributes[] = {
 
-    EXP_PYATTRIBUTE_BOOL_RW("frustum_culling", KX_Camera, m_frustum_culling),
     EXP_PYATTRIBUTE_RW_FUNCTION(
         "perspective", KX_Camera, pyattr_get_perspective, pyattr_set_perspective),
 
@@ -349,12 +379,14 @@ PyAttributeDef KX_Camera::Attributes[] = {
         "useViewport", KX_Camera, pyattr_get_use_viewport, pyattr_set_use_viewport),
 
     EXP_PYATTRIBUTE_RW_FUNCTION("projection_matrix",
-                               KX_Camera,
-                               pyattr_get_projection_matrix,
-                               pyattr_set_projection_matrix),
+                                KX_Camera,
+                                pyattr_get_projection_matrix,
+                                pyattr_set_projection_matrix),
     EXP_PYATTRIBUTE_RO_FUNCTION("modelview_matrix", KX_Camera, pyattr_get_modelview_matrix),
     EXP_PYATTRIBUTE_RO_FUNCTION("camera_to_world", KX_Camera, pyattr_get_camera_to_world),
     EXP_PYATTRIBUTE_RO_FUNCTION("world_to_camera", KX_Camera, pyattr_get_world_to_camera),
+
+    EXP_PYATTRIBUTE_BOOL_RW("activityCulling", KX_Camera, m_activityCulling),
 
     /* Grrr, functions for constants? */
     EXP_PYATTRIBUTE_RO_FUNCTION("INSIDE", KX_Camera, pyattr_get_INSIDE),
@@ -363,6 +395,19 @@ PyAttributeDef KX_Camera::Attributes[] = {
 
     EXP_PYATTRIBUTE_NULL  // Sentinel
 };
+
+PyObject *KX_Camera::game_object_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+  KX_Camera *obj = new KX_Camera();
+
+  PyObject *proxy = py_base_new(type, PyTuple_Pack(1, obj->GetProxy()), kwds);
+  if (!proxy) {
+    delete obj;
+    return nullptr;
+  }
+
+  return proxy;
+}
 
 PyTypeObject KX_Camera::Type = {PyVarObject_HEAD_INIT(nullptr, 0) "KX_Camera",
                                 sizeof(EXP_PyObjectPlus_Proxy),
@@ -400,25 +445,25 @@ PyTypeObject KX_Camera::Type = {PyVarObject_HEAD_INIT(nullptr, 0) "KX_Camera",
                                 0,
                                 0,
                                 0,
-                                py_base_new};
+                                game_object_new};
 
 EXP_PYMETHODDEF_DOC_VARARGS(KX_Camera,
-                           sphereInsideFrustum,
-                           "sphereInsideFrustum(center, radius) -> Integer\n"
-                           "\treturns INSIDE, OUTSIDE or INTERSECT if the given sphere is\n"
-                           "\tinside/outside/intersects this camera's viewing frustum.\n\n"
-                           "\tcenter = the center of the sphere (in world coordinates.)\n"
-                           "\tradius = the radius of the sphere\n\n"
-                           "\tExample:\n"
-                           "\timport bge.logic\n\n"
-                           "\tco = bge.logic.getCurrentController()\n"
-                           "\tcam = co.GetOwner()\n\n"
-                           "\t# A sphere of radius 4.0 located at [x, y, z] = [1.0, 1.0, 1.0]\n"
-                           "\tif (cam.sphereInsideFrustum([1.0, 1.0, 1.0], 4) != cam.OUTSIDE):\n"
-                           "\t\t# Sphere is inside frustum !\n"
-                           "\t\t# Do something useful !\n"
-                           "\telse:\n"
-                           "\t\t# Sphere is outside frustum\n")
+                            sphereInsideFrustum,
+                            "sphereInsideFrustum(center, radius) -> Integer\n"
+                            "\treturns INSIDE, OUTSIDE or INTERSECT if the given sphere is\n"
+                            "\tinside/outside/intersects this camera's viewing frustum.\n\n"
+                            "\tcenter = the center of the sphere (in world coordinates.)\n"
+                            "\tradius = the radius of the sphere\n\n"
+                            "\tExample:\n"
+                            "\timport bge.logic\n\n"
+                            "\tco = bge.logic.getCurrentController()\n"
+                            "\tcam = co.GetOwner()\n\n"
+                            "\t# A sphere of radius 4.0 located at [x, y, z] = [1.0, 1.0, 1.0]\n"
+                            "\tif (cam.sphereInsideFrustum([1.0, 1.0, 1.0], 4) != cam.OUTSIDE):\n"
+                            "\t\t# Sphere is inside frustum !\n"
+                            "\t\t# Do something useful !\n"
+                            "\telse:\n"
+                            "\t\t# Sphere is outside frustum\n")
 {
   PyObject *pycenter;
   float radius;
@@ -483,20 +528,20 @@ EXP_PYMETHODDEF_DOC_O(
 }
 
 EXP_PYMETHODDEF_DOC_O(KX_Camera,
-                     pointInsideFrustum,
-                     "pointInsideFrustum(point) -> Bool\n"
-                     "\treturns 1 if the given point is inside this camera's viewing frustum.\n\n"
-                     "\tpoint = The point to test (in world coordinates.)\n\n"
-                     "\tExample:\n"
-                     "\timport bge.logic\n\n"
-                     "\tco = bge.logic.getCurrentController()\n"
-                     "\tcam = co.GetOwner()\n\n"
-                     "\t# Test point [0.0, 0.0, 0.0]"
-                     "\tif (cam.pointInsideFrustum([0.0, 0.0, 0.0])):\n"
-                     "\t\t# Point is inside frustum !\n"
-                     "\t\t# Do something useful !\n"
-                     "\telse:\n"
-                     "\t\t# Box is outside the frustum !\n")
+                      pointInsideFrustum,
+                      "pointInsideFrustum(point) -> Bool\n"
+                      "\treturns 1 if the given point is inside this camera's viewing frustum.\n\n"
+                      "\tpoint = The point to test (in world coordinates.)\n\n"
+                      "\tExample:\n"
+                      "\timport bge.logic\n\n"
+                      "\tco = bge.logic.getCurrentController()\n"
+                      "\tcam = co.GetOwner()\n\n"
+                      "\t# Test point [0.0, 0.0, 0.0]"
+                      "\tif (cam.pointInsideFrustum([0.0, 0.0, 0.0])):\n"
+                      "\t\t# Point is inside frustum !\n"
+                      "\t\t# Do something useful !\n"
+                      "\telse:\n"
+                      "\t\t# Box is outside the frustum !\n")
 {
   MT_Vector3 point;
   if (PyVecTo(value, point)) {
@@ -508,32 +553,34 @@ EXP_PYMETHODDEF_DOC_O(KX_Camera,
   return nullptr;
 }
 
-EXP_PYMETHODDEF_DOC_NOARGS(KX_Camera,
-                          getCameraToWorld,
-                          "getCameraToWorld() -> Matrix4x4\n"
-                          "\treturns the camera to world transformation matrix, as a list of four "
-                          "lists of four values.\n\n"
-                          "\tie: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, "
-                          "0.0], [0.0, 0.0, 0.0, 1.0]])\n")
+EXP_PYMETHODDEF_DOC_NOARGS(
+    KX_Camera,
+    getCameraToWorld,
+    "getCameraToWorld() -> Matrix4x4\n"
+    "\treturns the camera to world transformation matrix, as a list of four "
+    "lists of four values.\n\n"
+    "\tie: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, "
+    "0.0], [0.0, 0.0, 0.0, 1.0]])\n")
 {
   return PyObjectFrom(MT_Matrix4x4(GetCameraToWorld())); /* new ref */
 }
 
-EXP_PYMETHODDEF_DOC_NOARGS(KX_Camera,
-                          getWorldToCamera,
-                          "getWorldToCamera() -> Matrix4x4\n"
-                          "\treturns the world to camera transformation matrix, as a list of four "
-                          "lists of four values.\n\n"
-                          "\tie: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, "
-                          "0.0], [0.0, 0.0, 0.0, 1.0]])\n")
+EXP_PYMETHODDEF_DOC_NOARGS(
+    KX_Camera,
+    getWorldToCamera,
+    "getWorldToCamera() -> Matrix4x4\n"
+    "\treturns the world to camera transformation matrix, as a list of four "
+    "lists of four values.\n\n"
+    "\tie: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, "
+    "0.0], [0.0, 0.0, 0.0, 1.0]])\n")
 {
   return PyObjectFrom(MT_Matrix4x4(GetWorldToCamera())); /* new ref */
 }
 
 EXP_PYMETHODDEF_DOC_VARARGS(KX_Camera,
-                           setViewport,
-                           "setViewport(left, bottom, right, top)\n"
-                           "Sets this camera's viewport\n")
+                            setViewport,
+                            "setViewport(left, bottom, right, top)\n"
+                            "Sets this camera's viewport\n")
 {
   int left, bottom, right, top;
   if (!PyArg_ParseTuple(args, "iiii:setViewport", &left, &bottom, &right, &top))
@@ -544,9 +591,9 @@ EXP_PYMETHODDEF_DOC_VARARGS(KX_Camera,
 }
 
 EXP_PYMETHODDEF_DOC_NOARGS(KX_Camera,
-                          setOnTop,
-                          "setOnTop()\n"
-                          "Sets this camera's viewport on top\n")
+                           setOnTop,
+                           "setOnTop()\n"
+                           "Sets this camera's viewport on top\n")
 {
   GetScene()->SetCameraOnTop(this);
   Py_RETURN_NONE;
@@ -701,7 +748,8 @@ int KX_Camera::pyattr_set_far(EXP_PyObjectPlus *self_v,
   return PY_SET_ATTR_SUCCESS;
 }
 
-PyObject *KX_Camera::pyattr_get_shift_x(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef)
+PyObject *KX_Camera::pyattr_get_shift_x(EXP_PyObjectPlus *self_v,
+                                        const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   KX_Camera *self = static_cast<KX_Camera *>(self_v);
   return PyFloat_FromDouble(self->m_camdata.m_shift_x);
@@ -724,7 +772,8 @@ int KX_Camera::pyattr_set_shift_x(EXP_PyObjectPlus *self_v,
   return PY_SET_ATTR_SUCCESS;
 }
 
-PyObject *KX_Camera::pyattr_get_shift_y(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef)
+PyObject *KX_Camera::pyattr_get_shift_y(EXP_PyObjectPlus *self_v,
+                                        const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   KX_Camera *self = static_cast<KX_Camera *>(self_v);
   return PyFloat_FromDouble(self->m_camdata.m_shift_y);
@@ -810,15 +859,18 @@ PyObject *KX_Camera::pyattr_get_world_to_camera(EXP_PyObjectPlus *self_v,
   return PyObjectFrom(MT_Matrix4x4(self->GetWorldToCamera()));
 }
 
-PyObject *KX_Camera::pyattr_get_INSIDE(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef)
+PyObject *KX_Camera::pyattr_get_INSIDE(EXP_PyObjectPlus *self_v,
+                                       const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   return PyLong_FromLong(INSIDE);
 }
-PyObject *KX_Camera::pyattr_get_OUTSIDE(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef)
+PyObject *KX_Camera::pyattr_get_OUTSIDE(EXP_PyObjectPlus *self_v,
+                                        const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   return PyLong_FromLong(OUTSIDE);
 }
-PyObject *KX_Camera::pyattr_get_INTERSECT(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef)
+PyObject *KX_Camera::pyattr_get_INTERSECT(EXP_PyObjectPlus *self_v,
+                                          const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   return PyLong_FromLong(INTERSECT);
 }
@@ -925,7 +977,7 @@ EXP_PYMETHODDEF_DOC_O(KX_Camera, getScreenPosition, "getScreenPosition()\n")
 
   KX_GetActiveEngine()->GetCanvas()->GetViewportArea().Pack(viewport);
 
-  GPU_matrix_project(vec, modelmatrix, projmatrix, viewport, win);
+  GPU_matrix_project_3fv(vec, modelmatrix, projmatrix, viewport, win);
 
   vect[0] = (win[0] - viewport[0]) / viewport[2];
   vect[1] = (win[1] - viewport[1]) / viewport[3];
@@ -944,8 +996,8 @@ EXP_PYMETHODDEF_DOC_O(KX_Camera, getScreenPosition, "getScreenPosition()\n")
 
 EXP_PYMETHODDEF_DOC_VARARGS(KX_Camera, getScreenVect, "getScreenVect()\n")
 {
-  double x, y;
-  if (!PyArg_ParseTuple(args, "dd:getScreenVect", &x, &y))
+  float x, y;
+  if (!PyArg_ParseTuple(args, "ff:getScreenVect", &x, &y))
     return nullptr;
 
   y = 1.0 - y;  // to follow Blender window coordinate system (Top-Down)
@@ -953,13 +1005,13 @@ EXP_PYMETHODDEF_DOC_VARARGS(KX_Camera, getScreenVect, "getScreenVect()\n")
   GLint viewport[4];
   GLfloat vec[3];
   GLfloat win[3];
-  GLfloat modelmatrix[4][4];
+  GLfloat modelmatrixinv[4][4];
   GLfloat projmatrix[4][4];
 
   MT_Matrix4x4 m_modelmatrix = MT_Matrix4x4(GetWorldToCamera());
   MT_Matrix4x4 m_projmatrix = this->GetProjectionMatrix();
 
-  m_modelmatrix.getValue((float *)modelmatrix);
+  m_modelmatrix.inverse().getValue((float *)modelmatrixinv);
   m_projmatrix.getValue((float *)projmatrix);
 
   KX_GetActiveEngine()->GetCanvas()->GetViewportArea().Pack(viewport);
@@ -972,7 +1024,7 @@ EXP_PYMETHODDEF_DOC_VARARGS(KX_Camera, getScreenVect, "getScreenVect()\n")
 
   vec[2] = 0.f;
 
-  GPU_matrix_unproject(vec, modelmatrix, projmatrix, viewport, win);
+  GPU_matrix_unproject_3fv(vec, modelmatrixinv, projmatrix, viewport, win);
 
   MT_Vector3 campos = NodeGetWorldPosition();
   MT_Vector3 screenpos(win[0], win[1], win[2]);
@@ -984,41 +1036,73 @@ EXP_PYMETHODDEF_DOC_VARARGS(KX_Camera, getScreenVect, "getScreenVect()\n")
 EXP_PYMETHODDEF_DOC_VARARGS(KX_Camera, getScreenRay, "getScreenRay()\n")
 {
   MT_Vector3 vect;
-  double x, y, dist;
+  float x, y, dist;
   char *propName = nullptr;
 
-  if (!PyArg_ParseTuple(args, "ddd|s:getScreenRay", &x, &y, &dist, &propName))
+  if (!PyArg_ParseTuple(args, "fff|s:getScreenRay", &x, &y, &dist, &propName))
     return nullptr;
 
-  PyObject *argValue = PyTuple_New(2);
-  PyTuple_SET_ITEM(argValue, 0, PyFloat_FromDouble(x));
-  PyTuple_SET_ITEM(argValue, 1, PyFloat_FromDouble(y));
+  y = 1.0 - y;  // to follow Blender window coordinate system (Top-Down)
 
-  if (!PyVecTo(PygetScreenVect(argValue), vect)) {
-    Py_DECREF(argValue);
-    PyErr_SetString(PyExc_TypeError,
-                    "Error in getScreenRay. Invalid 2D coordinate. "
-                    "Expected a normalized 2D screen coordinate, "
-                    "a distance and an optional property argument");
-    return nullptr;
+  GLint viewport[4];
+  GLfloat modelmatrixinv[4][4];
+  GLfloat projmatrix[4][4];
+
+  MT_Matrix4x4 m_modelmatrix = MT_Matrix4x4(GetWorldToCamera());
+  MT_Matrix4x4 m_projmatrix = this->GetProjectionMatrix();
+
+  m_modelmatrix.inverse().getValue((float *)modelmatrixinv);
+  m_projmatrix.getValue((float *)projmatrix);
+
+  KX_GetActiveEngine()->GetCanvas()->GetViewportArea().Pack(viewport);
+
+  MT_Vector3 fromPoint;
+  MT_Vector3 toPoint;
+
+  // Unproject a point in near plane.
+  MT_Vector3 point;
+
+  point[0] = x * viewport[2];
+  point[1] = y * viewport[3];
+
+  point[0] += viewport[0];
+  point[1] += viewport[1];
+
+  point[2] = 0.f;
+
+  float screenpos[3];
+  GPU_matrix_unproject_3fv(point.getValue(), modelmatrixinv, projmatrix, viewport, screenpos);
+
+  // For perpspective the vector is from camera center to unprojected point.
+  if (m_camdata.m_perspective) {
+    fromPoint = NodeGetWorldPosition();
+    toPoint = MT_Vector3(screenpos);
   }
-  Py_DECREF(argValue);
-
-  dist = -dist;
-  vect += NodeGetWorldPosition();
-
-  argValue = (propName ? PyTuple_New(3) : PyTuple_New(2));
-  if (argValue) {
-    PyTuple_SET_ITEM(argValue, 0, PyObjectFrom(vect));
-    PyTuple_SET_ITEM(argValue, 1, PyFloat_FromDouble(dist));
-    if (propName)
-      PyTuple_SET_ITEM(argValue, 2, PyUnicode_FromString(propName));
-
-    PyObject *ret = this->PyrayCastTo(argValue, nullptr);
-    Py_DECREF(argValue);
-    return ret;
+  // For orthographic the vector is the same as the -Z rotation axis but start from unprojected
+  // point.
+  else {
+    fromPoint = MT_Vector3(screenpos);
+    toPoint = fromPoint - NodeGetWorldOrientation().getColumn(2);
   }
 
-  return nullptr;
+  if (dist != 0.0f) {
+    toPoint = fromPoint + (toPoint - fromPoint).safe_normalized() * dist;
+  }
+
+  PHY_IPhysicsEnvironment *pe = GetScene()->GetPhysicsEnvironment();
+  PHY_IPhysicsController *spc = m_pPhysicsController;
+  KX_GameObject *parent = GetParent();
+  if (!spc && parent) {
+    spc = parent->GetPhysicsController();
+  }
+
+  std::string prop = propName ? (std::string)propName : "";
+  RayCastData rayData(prop, false, (1u << OB_MAX_COL_MASKS) - 1);
+  KX_RayCast::Callback<KX_Camera, RayCastData> callback(this, spc, &rayData);
+  if (KX_RayCast::RayTest(pe, fromPoint, toPoint, callback) && rayData.m_hitObject) {
+    return rayData.m_hitObject->GetProxy();
+  }
+
+  Py_RETURN_NONE;
 }
 #endif

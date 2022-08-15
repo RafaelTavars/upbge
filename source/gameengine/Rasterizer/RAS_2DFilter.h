@@ -22,13 +22,11 @@
 
 #pragma once
 
-
 #include <memory>
 
 #include "RAS_2DFilterData.h"
 #include "RAS_Shader.h"
 
-class RAS_2DFilterManager;
 class RAS_Rasterizer;
 class RAS_ICanvas;
 class RAS_FrameBuffer;
@@ -107,4 +105,3 @@ class RAS_2DFilter : public virtual RAS_Shader {
   /// Finalizes the execution stage of the filter.
   void End();
 };
-

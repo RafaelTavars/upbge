@@ -1,36 +1,20 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2001-2002 by NaN Holding BV.
- * All rights reserved.
- * API's for creating vertex groups from bones
- * - Interfaces with heat weighting in meshlaplacian
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2001-2002 NaN Holding BV. All rights reserved. */
 
 /** \file
  * \ingroup edarmature
+ * API's for creating vertex groups from bones
+ * - Interfaces with heat weighting in meshlaplacian.
  */
 
 #include "DNA_armature_types.h"
 #include "DNA_mesh_types.h"
+#include "DNA_meshdata_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
 #include "BLI_math.h"
 #include "BLI_string_utils.h"
 
@@ -49,8 +33,6 @@
 
 #include "ED_armature.h"
 #include "ED_mesh.h"
-
-#include "eigen_capi.h"
 
 #include "armature_intern.h"
 #include "meshlaplacian.h"
@@ -481,7 +463,7 @@ void ED_object_vgroup_calc_from_armature(ReportList *reports,
   bArmature *arm = par->data;
 
   if (mode == ARM_GROUPS_NAME) {
-    const int defbase_tot = BLI_listbase_count(&ob->defbase);
+    const int defbase_tot = BKE_object_defgroup_count(ob);
     int defbase_add;
     /* Traverse the bone list, trying to create empty vertex
      * groups corresponding to the bone.
@@ -489,8 +471,8 @@ void ED_object_vgroup_calc_from_armature(ReportList *reports,
     defbase_add = bone_looper(ob, arm->bonebase.first, NULL, vgroup_add_unique_bone_cb);
 
     if (defbase_add) {
-      /* its possible there are DWeight's outside the range of the current
-       * objects deform groups, in this case the new groups wont be empty T33889. */
+      /* It's possible there are DWeights outside the range of the current
+       * object's deform groups. In this case the new groups won't be empty T33889. */
       ED_vgroup_data_clamp_range(ob->data, defbase_tot);
     }
   }

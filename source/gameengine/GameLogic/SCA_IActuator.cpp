@@ -31,8 +31,7 @@
 
 #include "SCA_IActuator.h"
 
-#include <algorithm>
-
+#include "CM_List.h"
 #include "CM_Message.h"
 
 SCA_IActuator::SCA_IActuator(SCA_IObject *gameobj, KX_ACTUATOR_TYPE type)
@@ -85,18 +84,20 @@ bool SCA_IActuator::IsPositiveEvent() const
 void SCA_IActuator::Activate(SG_DList &head)
 {
   if (QEmpty()) {
-    InsertActiveQList(m_gameobj->m_activeActuators);
-    head.AddBack(&m_gameobj->m_activeActuators);
+    SG_QList &list = m_gameobj->GetActiveActuators();
+    InsertActiveQList(list);
+    head.AddBack(&list);
   }
 }
 
 void SCA_IActuator::Deactivate()
 {
   if (QDelink()) {
+    SG_QList &list = m_gameobj->GetActiveActuators();
     // the actuator was in the active list
-    if (m_gameobj->m_activeActuators.QEmpty()) {
+    if (list.QEmpty()) {
       // the owner object has no more active actuators, remove it from the global list
-      m_gameobj->m_activeActuators.Delink();
+      list.Delink();
     }
   }
 }
@@ -147,12 +148,7 @@ void SCA_IActuator::LinkToController(SCA_IController *controller)
 
 void SCA_IActuator::UnlinkController(SCA_IController *controller)
 {
-  std::vector<SCA_IController *>::iterator it = std::find(
-      m_linkedcontrollers.begin(), m_linkedcontrollers.end(), controller);
-  if (it != m_linkedcontrollers.end()) {
-    m_linkedcontrollers.erase(it);
-  }
-  else {
+  if (!CM_ListRemoveIfFound(m_linkedcontrollers, controller)) {
     CM_LogicBrickWarning(this,
                          "Missing link from actuator " << m_gameobj->GetName() << ":" << GetName()
                                                        << " to controller "

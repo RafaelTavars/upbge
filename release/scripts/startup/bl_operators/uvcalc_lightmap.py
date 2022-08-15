@@ -1,22 +1,4 @@
-# ##### BEGIN GPL LICENSE BLOCK #####
-#
-#  This program is free software; you can redistribute it and/or
-#  modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2
-#  of the License, or (at your option) any later version.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
-#
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software Foundation,
-#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-#
-# ##### END GPL LICENSE BLOCK #####
-
-# <pep8 compliant>
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 import bpy
 from bpy.types import Operator
@@ -568,8 +550,7 @@ def unwrap(operator, context, **kwargs):
     meshes = list({
         me for obj in context.selected_objects
         if obj.type == 'MESH'
-        for me in (obj.data,)
-        if me.polygons and me.library is None
+        if (me := obj.data).polygons and me.library is None
     })
 
     if not meshes:
@@ -615,8 +596,8 @@ class LightMapPack(Operator):
     PREF_PACK_IN_ONE: BoolProperty(
         name="Share Texture Space",
         description=(
-            "Objects Share texture space, map all objects "
-            "into 1 uvmap"
+            "Objects share texture space, map all objects "
+            "into a single UV map"
         ),
         default=True,
     )
@@ -629,7 +610,7 @@ class LightMapPack(Operator):
         name="New Image",
         description=(
             "Assign new images for every mesh (only one if "
-            "shared tex space enabled)"
+            "Share Texture Space is enabled)"
         ),
         default=False,
     )

@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup freestyle
@@ -37,14 +23,6 @@ namespace Freestyle {
 
 // Cell
 /////////
-
-SphericalGrid::Cell::Cell()
-{
-}
-
-SphericalGrid::Cell::~Cell()
-{
-}
 
 void SphericalGrid::Cell::setDimensions(real x, real y, real sizeX, real sizeY)
 {
@@ -87,10 +65,6 @@ SphericalGrid::Iterator::Iterator(SphericalGrid &grid, Vec3r &center, real /*eps
   _current = _cell->faces.begin();
 }
 
-SphericalGrid::Iterator::~Iterator()
-{
-}
-
 // SphericalGrid
 /////////////////
 
@@ -121,9 +95,7 @@ SphericalGrid::SphericalGrid(OccluderSource &source,
   }
 }
 
-SphericalGrid::~SphericalGrid()
-{
-}
+SphericalGrid::~SphericalGrid() = default;
 
 void SphericalGrid::assignCells(OccluderSource & /*source*/,
                                 GridDensityProvider &density,
@@ -236,10 +208,6 @@ const Vec3r &SphericalGrid::viewpoint() const
 bool SphericalGrid::enableQI() const
 {
   return _enableQI;
-}
-
-SphericalGrid::Transform::Transform()
-{
 }
 
 Vec3r SphericalGrid::Transform::operator()(const Vec3r &point) const

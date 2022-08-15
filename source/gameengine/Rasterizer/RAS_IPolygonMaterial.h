@@ -31,7 +31,6 @@
 
 #pragma once
 
-
 #include <map>
 #include <string>
 
@@ -39,15 +38,15 @@
 #include "RAS_MeshObject.h"
 #include "RAS_Texture.h"
 
-class RAS_Rasterizer;
 class RAS_MaterialShader;
+class SCA_IScene;
+
 struct Material;
 struct Scene;
 struct GameSettings;
 
 enum MaterialProps {
   RAS_MULTILIGHT = (1 << 1),
-  RAS_BLENDERGLSL = (1 << 3),
   RAS_CASTSHADOW = (1 << 4),
   RAS_ONLYSHADOW = (1 << 5),
 };
@@ -112,18 +111,7 @@ class RAS_IPolyMaterial {
   virtual Scene *GetBlenderScene() const = 0;
   virtual SCA_IScene *GetScene() const = 0;
   virtual void ReleaseMaterial() = 0;
-  virtual void GetRGBAColor(unsigned char *rgba) const;
   virtual bool UsesLighting() const;
-
-  virtual void UpdateIPO(MT_Vector4 rgba,
-                         MT_Vector3 specrgb,
-                         MT_Scalar hard,
-                         MT_Scalar spec,
-                         MT_Scalar ref,
-                         MT_Scalar emit,
-                         MT_Scalar ambient,
-                         MT_Scalar alpha,
-                         MT_Scalar specalpha) = 0;
 
   /**
    * \return the equivalent drawing mode for the material settings (equivalent to old TexFace
@@ -136,4 +124,3 @@ class RAS_IPolyMaterial {
    */
   virtual void OnConstruction() = 0;
 };
-

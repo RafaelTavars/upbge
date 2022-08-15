@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2005 by the Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2005 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup modifiers
@@ -52,6 +36,7 @@
 #include "UI_resources.h"
 
 #include "RNA_access.h"
+#include "RNA_prototypes.h"
 
 #include "MOD_modifiertypes.h"
 #include "MOD_ui_common.h"
@@ -95,7 +80,7 @@ static void freeData(ModifierData *md)
   }
 }
 
-static bool dependsOnTime(ModifierData *UNUSED(md))
+static bool dependsOnTime(struct Scene *UNUSED(scene), ModifierData *UNUSED(md))
 {
   return true;
 }
@@ -104,7 +89,7 @@ static void deformVerts(ModifierData *md,
                         const ModifierEvalContext *ctx,
                         Mesh *mesh,
                         float (*vertexCos)[3],
-                        int numVerts)
+                        int verts_num)
 {
   CollisionModifierData *collmd = (CollisionModifierData *)md;
   Mesh *mesh_src;
@@ -122,7 +107,7 @@ static void deformVerts(ModifierData *md,
   }
 
   if (mesh == NULL) {
-    mesh_src = MOD_deform_mesh_eval_get(ob, NULL, NULL, NULL, numVerts, false, false);
+    mesh_src = MOD_deform_mesh_eval_get(ob, NULL, NULL, NULL, verts_num, false);
   }
   else {
     /* Not possible to use get_mesh() in this case as we'll modify its vertices
@@ -135,7 +120,6 @@ static void deformVerts(ModifierData *md,
     uint mvert_num = 0;
 
     BKE_mesh_vert_coords_apply(mesh_src, vertexCos);
-    BKE_mesh_calc_normals(mesh_src);
 
     current_time = DEG_get_ctime(ctx->depsgraph);
 
@@ -168,10 +152,10 @@ static void deformVerts(ModifierData *md,
         mul_m4_v3(ob->obmat, collmd->x[i].co);
       }
 
-      collmd->xnew = MEM_dupallocN(collmd->x);          // frame end position
-      collmd->current_x = MEM_dupallocN(collmd->x);     // inter-frame
-      collmd->current_xnew = MEM_dupallocN(collmd->x);  // inter-frame
-      collmd->current_v = MEM_dupallocN(collmd->x);     // inter-frame
+      collmd->xnew = MEM_dupallocN(collmd->x);         /* Frame end position. */
+      collmd->current_x = MEM_dupallocN(collmd->x);    /* Inter-frame. */
+      collmd->current_xnew = MEM_dupallocN(collmd->x); /* Inter-frame. */
+      collmd->current_v = MEM_dupallocN(collmd->x);    /* Inter-frame. */
 
       collmd->mvert_num = mvert_num;
 
@@ -222,7 +206,7 @@ static void deformVerts(ModifierData *md,
         }
       }
 
-      /* happens on file load (ONLY when i decomment changes in readfile.c) */
+      /* Happens on file load (ONLY when I un-comment changes in readfile.c) */
       if (!collmd->bvhtree) {
         collmd->bvhtree = bvhtree_build_from_mvert(
             collmd->current_x, collmd->tri, collmd->tri_num, ob->pd->pdef_sboft);
@@ -252,7 +236,7 @@ static void deformVerts(ModifierData *md,
 
 static void updateDepsgraph(ModifierData *UNUSED(md), const ModifierUpdateDepsgraphContext *ctx)
 {
-  DEG_add_modifier_to_transform_relation(ctx->node, "Collision Modifier");
+  DEG_add_depends_on_transform_relation(ctx->node, "Collision Modifier");
 }
 
 static void panel_draw(const bContext *UNUSED(C), Panel *panel)
@@ -261,7 +245,7 @@ static void panel_draw(const bContext *UNUSED(C), Panel *panel)
 
   PointerRNA *ptr = modifier_panel_get_property_pointers(panel, NULL);
 
-  uiItemL(layout, IFACE_("Settings are inside the Physics tab"), ICON_NONE);
+  uiItemL(layout, TIP_("Settings are inside the Physics tab"), ICON_NONE);
 
   modifier_panel_end(layout, ptr);
 }
@@ -275,15 +259,15 @@ static void blendRead(BlendDataReader *UNUSED(reader), ModifierData *md)
 {
   CollisionModifierData *collmd = (CollisionModifierData *)md;
 #if 0
-      // TODO: CollisionModifier should use pointcache
-      // + have proper reset events before enabling this
+      /* TODO: #CollisionModifier should use point-cache
+       * + have proper reset events before enabling this. */
       collmd->x = newdataadr(fd, collmd->x);
       collmd->xnew = newdataadr(fd, collmd->xnew);
       collmd->mfaces = newdataadr(fd, collmd->mfaces);
 
-      collmd->current_x = MEM_calloc_arrayN(collmd->numverts, sizeof(MVert), "current_x");
-      collmd->current_xnew = MEM_calloc_arrayN(collmd->numverts, sizeof(MVert), "current_xnew");
-      collmd->current_v = MEM_calloc_arrayN(collmd->numverts, sizeof(MVert), "current_v");
+      collmd->current_x = MEM_calloc_arrayN(collmd->mvert_num, sizeof(MVert), "current_x");
+      collmd->current_xnew = MEM_calloc_arrayN(collmd->mvert_num, sizeof(MVert), "current_xnew");
+      collmd->current_v = MEM_calloc_arrayN(collmd->mvert_num, sizeof(MVert), "current_v");
 #endif
 
   collmd->x = NULL;
@@ -300,7 +284,7 @@ static void blendRead(BlendDataReader *UNUSED(reader), ModifierData *md)
 }
 
 ModifierTypeInfo modifierType_Collision = {
-    /* name */ "Collision",
+    /* name */ N_("Collision"),
     /* structName */ "CollisionModifierData",
     /* structSize */ sizeof(CollisionModifierData),
     /* srna */ &RNA_CollisionModifier,
@@ -315,9 +299,7 @@ ModifierTypeInfo modifierType_Collision = {
     /* deformVertsEM */ NULL,
     /* deformMatricesEM */ NULL,
     /* modifyMesh */ NULL,
-    /* modifyHair */ NULL,
     /* modifyGeometrySet */ NULL,
-    /* modifyVolume */ NULL,
 
     /* initData */ initData,
     /* requiredDataMask */ NULL,

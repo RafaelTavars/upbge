@@ -27,18 +27,14 @@
 #include "RAS_DebugDraw.h"
 
 #include "BLF_api.h"
-#include "DNA_scene_types.h"
 #include "DRW_render.h"
 #include "GPU_immediate.h"
 #include "GPU_matrix.h"
 
-#include "EXP_ListValue.h"
 #include "KX_Globals.h"
 #include "KX_KetsjiEngine.h"
 #include "RAS_ICanvas.h"
 #include "RAS_OpenGLDebugDraw.h"
-
-#include "draw_debug.h"
 
 RAS_OpenGLDebugDraw::RAS_OpenGLDebugDraw()
 {
@@ -144,24 +140,25 @@ void RAS_OpenGLDebugDraw::Flush(RAS_Rasterizer *rasty,
     if (!debugDraw->m_lines.empty()) {
       for (int i = 0; i < debugDraw->m_lines.size(); i++) {
         RAS_DebugDraw::Line l = debugDraw->m_lines[i];
-        DRW_debug_line_bge(l.m_from.getValue(), l.m_to.getValue(), l.m_color.getValue());
+        //DRW_debug_line_bge(l.m_from.getValue(), l.m_to.getValue(), l.m_color.getValue());
       }
     }
     /* The Performances profiler */
     const unsigned int left = canvas->GetViewportArea().GetLeft();
-    const unsigned int top = canvas->GetWindowArea().GetTop() - canvas->GetViewportArea().GetBottom();
+    const unsigned int top = canvas->GetWindowArea().GetTop() -
+                             canvas->GetViewportArea().GetBottom();
     if (!debugDraw->m_boxes2D.empty()) {
       for (const RAS_DebugDraw::Box2D &b : debugDraw->m_boxes2D) {
-        DRW_debug_box_2D_bge(left + b.m_pos[0], top - b.m_pos[1], b.m_size[0], b.m_size[1]);
+        //DRW_debug_box_2D_bge(left + b.m_pos[0], top - b.m_pos[1], b.m_size[0], b.m_size[1]);
       }
     }
     if (!debugDraw->m_texts2D.empty()) {
       for (const RAS_DebugDraw::Text2D &t : debugDraw->m_texts2D) {
-        DRW_debug_text_2D_bge(left + t.m_pos[0], top - t.m_pos[1], t.m_text.c_str());
+        //DRW_debug_text_2D_bge(left + t.m_pos[0], top - t.m_pos[1], t.m_text.c_str());
       }
     }
   }
-  else { // Non viewport render pipeline
+  else {  // Non viewport render pipeline
     if (!debugDraw->m_lines.empty()) {
       GPUVertFormat *format = immVertexFormat();
       uint pos = GPU_vertformat_attr_add(format, "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
@@ -207,8 +204,6 @@ void RAS_OpenGLDebugDraw::Flush(RAS_Rasterizer *rasty,
     GPU_depth_test(GPU_DEPTH_ALWAYS);
 
     /* The Performances profiler */
-
-    const unsigned int width = canvas->GetWidth();
     const unsigned int height = canvas->GetHeight();
 
     if (!debugDraw->m_boxes2D.empty()) {

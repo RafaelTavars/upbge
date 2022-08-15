@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2009, Blender Foundation
- * This is a new part of Blender
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2009 Blender Foundation. */
 
 /** \file
  * \ingroup edgpencil
@@ -27,9 +11,7 @@
 
 #include "BLI_sys_types.h"
 
-#include "BKE_brush.h"
 #include "BKE_context.h"
-#include "BKE_gpencil.h"
 #include "BKE_paint.h"
 
 #include "DNA_brush_types.h"
@@ -45,9 +27,6 @@
 #include "RNA_access.h"
 
 #include "ED_gpencil.h"
-#include "ED_object.h"
-#include "ED_select_utils.h"
-#include "ED_transform.h"
 
 #include "gpencil_intern.h"
 
@@ -560,6 +539,7 @@ void ED_operatortypes_gpencil(void)
   WM_operatortype_append(GPENCIL_OT_select_first);
   WM_operatortype_append(GPENCIL_OT_select_last);
   WM_operatortype_append(GPENCIL_OT_select_alternate);
+  WM_operatortype_append(GPENCIL_OT_select_random);
   WM_operatortype_append(GPENCIL_OT_select_vertex_color);
 
   WM_operatortype_append(GPENCIL_OT_duplicate);
@@ -606,6 +586,7 @@ void ED_operatortypes_gpencil(void)
 
   WM_operatortype_append(GPENCIL_OT_layer_mask_add);
   WM_operatortype_append(GPENCIL_OT_layer_mask_remove);
+  WM_operatortype_append(GPENCIL_OT_layer_mask_move);
 
   WM_operatortype_append(GPENCIL_OT_hide);
   WM_operatortype_append(GPENCIL_OT_reveal);
@@ -626,6 +607,7 @@ void ED_operatortypes_gpencil(void)
 
   WM_operatortype_append(GPENCIL_OT_convert);
   WM_operatortype_append(GPENCIL_OT_bake_mesh_animation);
+  WM_operatortype_append(GPENCIL_OT_bake_grease_pencil_animation);
 
   WM_operatortype_append(GPENCIL_OT_image_to_grease_pencil);
 #ifdef WITH_POTRACE
@@ -652,9 +634,11 @@ void ED_operatortypes_gpencil(void)
   WM_operatortype_append(GPENCIL_OT_stroke_merge_by_distance);
   WM_operatortype_append(GPENCIL_OT_stroke_merge_material);
   WM_operatortype_append(GPENCIL_OT_stroke_reset_vertex_color);
+  WM_operatortype_append(GPENCIL_OT_stroke_normalize);
 
   WM_operatortype_append(GPENCIL_OT_material_to_vertex_color);
   WM_operatortype_append(GPENCIL_OT_extract_palette_vertex);
+  WM_operatortype_append(GPENCIL_OT_materials_copy_to_object);
 
   WM_operatortype_append(GPENCIL_OT_transform_fill);
   WM_operatortype_append(GPENCIL_OT_reset_transform_fill);

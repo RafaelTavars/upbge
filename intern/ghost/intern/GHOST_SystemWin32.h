@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2001-2002 by NaN Holding BV.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2001-2002 NaN Holding BV. All rights reserved. */
 
 /** \file
  * \ingroup GHOST
@@ -64,21 +48,19 @@ class GHOST_SystemWin32 : public GHOST_System {
    ** Time(r) functionality
    ***************************************************************************************/
 
-  GHOST_TUns64 millisSinceStart(__int64 ms) const;
-
   /**
    * This method converts performance counter measurements into milliseconds since the start of the
    * system process.
    * \return The number of milliseconds since the start of the system process.
    */
-  GHOST_TUns64 performanceCounterToMillis(__int64 perf_ticks) const;
+  uint64_t performanceCounterToMillis(__int64 perf_ticks) const;
 
   /**
    * This method converts system ticks into milliseconds since the start of the
    * system process.
    * \return The number of milliseconds since the start of the system process.
    */
-  GHOST_TUns64 tickCountToMillis(__int64 ticks) const;
+  uint64_t tickCountToMillis(__int64 ticks) const;
 
   /**
    * Returns the system time.
@@ -86,7 +68,7 @@ class GHOST_SystemWin32 : public GHOST_System {
    * This overloaded method uses the high frequency timer if available.
    * \return The number of milliseconds.
    */
-  GHOST_TUns64 getMilliSeconds() const;
+  uint64_t getMilliSeconds() const;
 
   /***************************************************************************************
    ** Display/window management functionality
@@ -96,19 +78,19 @@ class GHOST_SystemWin32 : public GHOST_System {
    * Returns the number of displays on this system.
    * \return The number of displays.
    */
-  GHOST_TUns8 getNumDisplays() const;
+  uint8_t getNumDisplays() const;
 
   /**
    * Returns the dimensions of the main display on this system.
    * \return The dimension of the main display.
    */
-  void getMainDisplayDimensions(GHOST_TUns32 &width, GHOST_TUns32 &height) const;
+  void getMainDisplayDimensions(uint32_t &width, uint32_t &height) const;
 
   /**
    * Returns the dimensions of all displays on this system.
    * \return The dimension of the main display.
    */
-  void getAllDisplayDimensions(GHOST_TUns32 &width, GHOST_TUns32 &height) const;
+  void getAllDisplayDimensions(uint32_t &width, uint32_t &height) const;
 
   /**
    * Create a new window.
@@ -128,10 +110,10 @@ class GHOST_SystemWin32 : public GHOST_System {
    * \return The new window (or 0 if creation failed).
    */
   GHOST_IWindow *createWindow(const char *title,
-                              GHOST_TInt32 left,
-                              GHOST_TInt32 top,
-                              GHOST_TUns32 width,
-                              GHOST_TUns32 height,
+                              int32_t left,
+                              int32_t top,
+                              uint32_t width,
+                              uint32_t height,
                               GHOST_TWindowState state,
                               GHOST_TDrawingContextType type,
                               GHOST_GLSettings glSettings,
@@ -140,8 +122,8 @@ class GHOST_SystemWin32 : public GHOST_System {
                               const GHOST_IWindow *parentWindow = 0);
 
   /**
-   * Create a new offscreen context.
-   * Never explicitly delete the window, use disposeContext() instead.
+   * Create a new off-screen context.
+   * Never explicitly delete the window, use #disposeContext() instead.
    * \return The new context (or 0 if creation failed).
    */
   GHOST_IContext *createOffscreenContext(GHOST_GLSettings glSettings);
@@ -154,8 +136,8 @@ class GHOST_SystemWin32 : public GHOST_System {
   GHOST_TSuccess disposeContext(GHOST_IContext *context);
 
   /**
-   * Create a new offscreen DirectX context.
-   * Never explicitly delete the context, use disposeContext() instead.
+   * Create a new off-screen DirectX context.
+   * Never explicitly delete the context, use #disposeContext() instead.
    * This is for GHOST internal, Win32 specific use, so it can be called statically.
    *
    * \return The new context (or 0 if creation failed).
@@ -191,7 +173,7 @@ class GHOST_SystemWin32 : public GHOST_System {
    * \param y: The y-coordinate of the cursor.
    * \return Indication of success.
    */
-  GHOST_TSuccess getCursorPosition(GHOST_TInt32 &x, GHOST_TInt32 &y) const;
+  GHOST_TSuccess getCursorPosition(int32_t &x, int32_t &y) const;
 
   /**
    * Updates the location of the cursor (location in screen coordinates).
@@ -199,7 +181,7 @@ class GHOST_SystemWin32 : public GHOST_System {
    * \param y: The y-coordinate of the cursor.
    * \return Indication of success.
    */
-  GHOST_TSuccess setCursorPosition(GHOST_TInt32 x, GHOST_TInt32 y);
+  GHOST_TSuccess setCursorPosition(int32_t x, int32_t y);
 
   /***************************************************************************************
    ** Access to mouse button and keyboard states.
@@ -224,14 +206,14 @@ class GHOST_SystemWin32 : public GHOST_System {
    * \param selection: Used by X11 only.
    * \return Returns the Clipboard.
    */
-  GHOST_TUns8 *getClipboard(bool selection) const;
+  char *getClipboard(bool selection) const;
 
   /**
    * Puts buffer to system clipboard.
    * \param selection: Used by X11 only.
    * \return No return.
    */
-  void putClipboard(GHOST_TInt8 *buffer, bool selection) const;
+  void putClipboard(const char *buffer, bool selection) const;
 
   /**
    * Show a system message box
@@ -277,6 +259,16 @@ class GHOST_SystemWin32 : public GHOST_System {
    */
   void setTabletAPI(GHOST_TTabletAPI api) override;
 
+  /***************************************************************************************
+   ** Debug Info
+   ***************************************************************************************/
+
+  /**
+   * Specify which debug messages are to be shown.
+   * \param debug: Flag for systems to debug.
+   */
+  void initDebug(GHOST_Debug debug) override;
+
  protected:
   /**
    * Initializes the system.
@@ -318,7 +310,7 @@ class GHOST_SystemWin32 : public GHOST_System {
    */
   static GHOST_EventButton *processButtonEvent(GHOST_TEventType type,
                                                GHOST_WindowWin32 *window,
-                                               GHOST_TButtonMask mask);
+                                               GHOST_TButton mask);
 
   /**
    * Creates tablet events from Wintab events.
@@ -340,8 +332,9 @@ class GHOST_SystemWin32 : public GHOST_System {
   /**
    * Creates cursor event.
    * \param window: The window receiving the event (the active window).
+   * \return The event created.
    */
-  static void processCursorEvent(GHOST_WindowWin32 *window);
+  static GHOST_EventCursor *processCursorEvent(GHOST_WindowWin32 *window);
 
   /**
    * Handles a mouse wheel event.
@@ -361,8 +354,8 @@ class GHOST_SystemWin32 : public GHOST_System {
   static GHOST_EventKey *processKeyEvent(GHOST_WindowWin32 *window, RAWINPUT const &raw);
 
   /**
-   * Process special keys (VK_OEM_*), to see if current key layout
-   * gives us anything special, like ! on french AZERTY.
+   * Process special keys `VK_OEM_*`, to see if current key layout
+   * gives us anything special, like `!` on French AZERTY.
    * \param vKey: The virtual key from #hardKey.
    * \param scanCode: The ScanCode of pressed key (similar to PS/2 Set 1).
    */
@@ -414,6 +407,16 @@ class GHOST_SystemWin32 : public GHOST_System {
 #endif
 
   /**
+   * Drives Direct Manipulation update.
+   */
+  void driveTrackpad();
+
+  /**
+   * Creates trackpad events for the active window.
+   */
+  void processTrackpad();
+
+  /**
    * Returns the local state of the modifier keys (from the message queue).
    * \param keys: The state of the keys.
    */
@@ -437,16 +440,11 @@ class GHOST_SystemWin32 : public GHOST_System {
   static LRESULT WINAPI s_wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
   /**
-   * Toggles console
-   * \param action:
-   * - 0 - Hides
-   * - 1 - Shows
-   * - 2 - Toggles
-   * - 3 - Hides if it runs not from  command line
-   * - * - Does nothing
+   * Set the Console State
+   * \param action: console state
    * \return current status (1 -visible, 0 - hidden)
    */
-  int toggleConsole(int action);
+  int setConsoleWindowState(GHOST_TConsoleWindowState action);
 
   /** The current state of the modifier keys. */
   GHOST_ModifierKeys m_modifierKeys;
@@ -472,13 +470,6 @@ class GHOST_SystemWin32 : public GHOST_System {
 
   /** Wheel delta accumulator. */
   int m_wheelDeltaAccum;
-
-  /** Last mouse x position. */
-  int m_mousePosX;
-  /** Last mouse y position. */
-  int m_mousePosY;
-  /** Last mouse timestamp. */
-  DWORD m_mouseTimestamp;
 };
 
 inline void GHOST_SystemWin32::retrieveModifierKeys(GHOST_ModifierKeys &keys) const

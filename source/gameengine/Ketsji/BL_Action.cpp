@@ -26,21 +26,20 @@
 
 #include "BL_Action.h"
 
-#include "BL_ArmatureObject.h"
-#include "BL_IpoConvert.h"
-#include "CM_Message.h"
-
 #include "BKE_action.h"
 #include "BKE_context.h"
 #include "BKE_modifier.h"
 #include "BKE_node.h"
-#include "BKE_object.h"
 #include "BLI_listbase.h"
+#include "BLI_string.h"
+#include "DNA_gpencil_modifier_types.h"
 #include "DNA_key_types.h"
 #include "DNA_mesh_types.h"
-#include "DNA_node_types.h"
 #include "RNA_access.h"
-#include "depsgraph/DEG_depsgraph_query.h"
+
+#include "BL_ArmatureObject.h"
+#include "BL_IpoConvert.h"
+#include "CM_Message.h"
 
 BL_Action::BL_Action(class KX_GameObject *gameobj)
     : m_action(nullptr),
@@ -155,22 +154,6 @@ bool BL_Action::Play(const std::string &name,
     m_sg_contr_list.push_back(sg_contr);
     m_obj->GetSGNode()->AddSGController(sg_contr);
     sg_contr->SetNode(m_obj->GetSGNode());
-  }
-
-  // Now try materials
-  for (unsigned short i = 0, meshcount = m_obj->GetMeshCount(); i < meshcount; ++i) {
-    RAS_MeshObject *mesh = m_obj->GetMesh(i);
-    for (unsigned short j = 0, matcount = mesh->NumMaterials(); j < matcount; ++j) {
-      RAS_MeshMaterial *meshmat = mesh->GetMeshMaterial(j);
-      RAS_IPolyMaterial *polymat = meshmat->GetBucket()->GetPolyMaterial();
-
-      sg_contr = BL_CreateMaterialIpo(m_action, polymat, m_obj, kxscene);
-      if (sg_contr) {
-        m_sg_contr_list.push_back(sg_contr);
-        m_obj->GetSGNode()->AddSGController(sg_contr);
-        sg_contr->SetNode(m_obj->GetSGNode());
-      }
-    }
   }
 
   // Extra controllers
@@ -309,6 +292,58 @@ void BL_Action::BlendShape(Key *key, float srcweight, std::vector<float> &blends
 {
 }
 
+enum eActionType {
+  ACT_TYPE_MODIFIER = 0,
+  ACT_TYPE_GPMODIFIER,
+  ACT_TYPE_CONSTRAINT,
+  ACT_TYPE_IDPROP,
+};
+
+/* Ensure name of data (ModifierData, bConstraint...) matches m_action's FCurve rna path */
+static bool ActionMatchesName(bAction *action, char *name, eActionType type)
+{
+  // std::cout << "curves listbase len: " << BLI_listbase_count(&action->curves) << std::endl;
+  LISTBASE_FOREACH (FCurve *, fcu, &action->curves) {
+    if (fcu->rna_path) {
+      char pattern[256];
+      char md_name_esc[sizeof(name) * 2];
+      switch (type) {
+        case ACT_TYPE_MODIFIER:
+          BLI_str_escape(md_name_esc, name, sizeof(md_name_esc));
+          BLI_snprintf(pattern, sizeof(pattern), "modifiers[\"%s\"]", md_name_esc);
+          break;
+        case ACT_TYPE_GPMODIFIER:
+          BLI_str_escape(md_name_esc, name, sizeof(md_name_esc));
+          BLI_snprintf(pattern, sizeof(pattern), "grease_pencil_modifiers[\"%s\"]", md_name_esc);
+          break;
+        case ACT_TYPE_CONSTRAINT:
+          BLI_str_escape(md_name_esc, name, sizeof(md_name_esc));
+          BLI_snprintf(pattern, sizeof(pattern), "constraints[\"%s\"]", md_name_esc);
+          break;
+        case ACT_TYPE_IDPROP:
+          BLI_str_escape(md_name_esc, name, sizeof(md_name_esc));
+          BLI_snprintf(pattern, sizeof(pattern), "[\"%s\"]", md_name_esc);
+          break;
+        default:
+          BLI_str_escape(pattern, "", sizeof(pattern));
+          break;
+      }
+      // std::cout << "fcu name: " << fcu->rna_path << std::endl;
+      // std::cout << "data name: " << pattern << std::endl;
+      /* Find a correspondance between ob->modifier/ob->constraint... and actuator action
+       * (m_action) */
+      if (strstr(fcu->rna_path, pattern)) {
+        // std::cout << "fcu and name match" << std::endl;
+        return true;
+      }
+    }
+    // std::cout << "fcu and name DON'T match" << std::endl;
+    return false;
+  }
+  // std::cout << "fcu and name DON'T match" << std::endl;
+  return false;
+}
+
 void BL_Action::Update(float curtime, bool applyToObject)
 {
   /* Don't bother if we're done with the animation and if the animation was already applied to the
@@ -374,16 +409,18 @@ void BL_Action::Update(float curtime, bool applyToObject)
 
   Object *ob = m_obj->GetBlenderObject();  // eevee
 
-  /* Create an AnimationEvalContext based on the current local frame time (See comment in constructor) */
+  /* Create an AnimationEvalContext based on the current local frame time (See comment in
+   * constructor) */
   AnimationEvalContext animEvalContext = BKE_animsys_eval_context_construct_at(&m_animEvalCtx,
-                                                                                 m_localframe);
+                                                                               m_localframe);
 
   if (m_obj->GetGameObjectType() == SCA_IObject::OBJ_ARMATURE) {
-    DEG_id_tag_update(&ob->id, ID_RECALC_TRANSFORM);
-
-    // BKE_object_where_is_calc_time(depsgraph, sc, ob, m_localframe);
-
-    scene->ResetTaaSamples();
+    if (ob->gameflag & OB_OVERLAY_COLLECTION) {
+      scene->AppendToIdsToUpdateInOverlayPass(&ob->id, ID_RECALC_TRANSFORM);
+    }
+    else {
+      scene->AppendToIdsToUpdateInAllRenderPasses(&ob->id, ID_RECALC_TRANSFORM);
+    }
 
     BL_ArmatureObject *obj = (BL_ArmatureObject *)m_obj;
 
@@ -413,6 +450,9 @@ void BL_Action::Update(float curtime, bool applyToObject)
     obj->UpdateTimestep(curtime);
   }
   else {
+    /* To skip some code if not needed */
+    bool actionIsUpdated = false;
+
     /* WARNING: The check to be sure the right action is played (to know if the action
      * which is in the actuator will be the one which will be played)
      * might be wrong (if (ob->adt && ob->adt->action == m_action) playaction;)
@@ -420,113 +460,162 @@ void BL_Action::Update(float curtime, bool applyToObject)
      * then another check should be found to ensure to play the right action.
      */
     // TEST KEYFRAMED MODIFIERS (WRONG CODE BUT JUST FOR TESTING PURPOSE)
-    for (ModifierData *md = (ModifierData *)ob->modifiers.first; md;
-         md = (ModifierData *)md->next) {
+    LISTBASE_FOREACH (ModifierData *, md, &ob->modifiers) {
+      bool isRightAction = ActionMatchesName(m_action, md->name, ACT_TYPE_MODIFIER);
       // TODO: We need to find the good notifier per action
-      if (!BKE_modifier_is_non_geometrical(md) && ob->adt &&
-          ob->adt->action->id.name == m_action->id.name) {
-        DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
+      if (isRightAction && !BKE_modifier_is_non_geometrical(md)) {
+        if (ob->gameflag & OB_OVERLAY_COLLECTION) {
+          scene->AppendToIdsToUpdateInOverlayPass(&ob->id, ID_RECALC_GEOMETRY);
+        }
+        else {
+          scene->AppendToIdsToUpdateInAllRenderPasses(&ob->id, ID_RECALC_GEOMETRY);
+        }
         PointerRNA ptrrna;
         RNA_id_pointer_create(&ob->id, &ptrrna);
         animsys_evaluate_action(&ptrrna, m_action, &animEvalContext, false);
-        scene->ResetTaaSamples();
+        actionIsUpdated = true;
         break;
       }
       /* HERE we can add other modifier action types,
        * if some actions require another notifier than ID_RECALC_GEOMETRY */
     }
-    // TEST FollowPath action
-    for (bConstraint *con = (bConstraint *)ob->constraints.first; con;
-         con = (bConstraint *)con->next) {
-      if (con) {
-        if (ob->adt && ob->adt->action->id.name == m_action->id.name) {
+
+    if (!actionIsUpdated) {
+      LISTBASE_FOREACH (GpencilModifierData *, gpmd, &ob->greasepencil_modifiers) {
+        // TODO: We need to find the good notifier per action (maybe all ID_RECALC_GEOMETRY except
+        // the Color ones)
+        bool isRightAction = ActionMatchesName(m_action, gpmd->name, ACT_TYPE_GPMODIFIER);
+        if (isRightAction) {
+          if (ob->gameflag & OB_OVERLAY_COLLECTION) {
+            scene->AppendToIdsToUpdateInOverlayPass(&ob->id, ID_RECALC_GEOMETRY);
+          }
+          else {
+            scene->AppendToIdsToUpdateInAllRenderPasses(&ob->id, ID_RECALC_GEOMETRY);
+          }
+          PointerRNA ptrrna;
+          RNA_id_pointer_create(&ob->id, &ptrrna);
+          animsys_evaluate_action(&ptrrna, m_action, &animEvalContext, false);
+          actionIsUpdated = true;
+          break;
+        }
+      }
+    }
+
+    if (!actionIsUpdated) {
+      // TEST FollowPath action
+      LISTBASE_FOREACH (bConstraint *, con, &ob->constraints) {
+        if (ActionMatchesName(m_action, con->name, ACT_TYPE_CONSTRAINT)) {
           if (!scene->OrigObCanBeTransformedInRealtime(ob)) {
             break;
           }
-          DEG_id_tag_update(&ob->id, ID_RECALC_TRANSFORM);
+          if (ob->gameflag & OB_OVERLAY_COLLECTION) {
+            scene->AppendToIdsToUpdateInOverlayPass(&ob->id, ID_RECALC_TRANSFORM);
+          }
+          else {
+            scene->AppendToIdsToUpdateInAllRenderPasses(&ob->id, ID_RECALC_TRANSFORM);
+          }
           PointerRNA ptrrna;
           RNA_id_pointer_create(&ob->id, &ptrrna);
           animsys_evaluate_action(&ptrrna, m_action, &animEvalContext, false);
 
           m_obj->ForceIgnoreParentTx();
-
-          scene->ResetTaaSamples();
+          actionIsUpdated = true;
           break;
+          /* HERE we can add other constraint action types,
+           * if some actions require another notifier than ID_RECALC_TRANSFORM */
         }
-        /* HERE we can add other constraint action types,
-         * if some actions require another notifier than ID_RECALC_TRANSFORM */
       }
     }
 
-    // Node Trees actions (Geometry one and Shader ones (material, world))
-    Main *bmain = KX_GetActiveEngine()->GetConverter()->GetMain();
-    FOREACH_NODETREE_BEGIN (bmain, nodetree, id) {
-      switch (nodetree->type) {
-        case NTREE_GEOMETRY:
-        {
-          if (nodetree->adt && nodetree->adt->action->id.name == m_action->id.name) {
-            DEG_id_tag_update(&nodetree->id, 0);
-            PointerRNA ptrrna;
-            RNA_id_pointer_create(&nodetree->id, &ptrrna);
-            animsys_evaluate_action(&ptrrna, m_action, &animEvalContext, false);
-            scene->ResetTaaSamples();
+    // TEST IDPROP ACTIONS
+    if (!actionIsUpdated) {
+      if (ob->id.properties) {
+        LISTBASE_FOREACH (IDProperty *, prop, &ob->id.properties->data.group) {
+          if (prop->type == IDP_GROUP) {
+            continue;
           }
-          break;
-        }
-        case NTREE_SHADER:
-        {
-          if (nodetree->adt && nodetree->adt->action->id.name == m_action->id.name) {
-            DEG_id_tag_update(&nodetree->id, ID_RECALC_SHADING);
+          if (ActionMatchesName(m_action, prop->name, ACT_TYPE_IDPROP)) {
+            if (ob->gameflag & OB_OVERLAY_COLLECTION) {
+              scene->AppendToIdsToUpdateInOverlayPass(&ob->id, ID_RECALC_TRANSFORM);
+            }
+            else {
+              scene->AppendToIdsToUpdateInAllRenderPasses(&ob->id, ID_RECALC_TRANSFORM);
+            }
             PointerRNA ptrrna;
-            RNA_id_pointer_create(&nodetree->id, &ptrrna);
+            RNA_id_pointer_create(&ob->id, &ptrrna);
             animsys_evaluate_action(&ptrrna, m_action, &animEvalContext, false);
-            scene->ResetTaaSamples();
+            actionIsUpdated = true;
+            break;
           }
-          break;
         }
-        default:
-          break;
       }
     }
-    FOREACH_NODETREE_END;
 
-    // TEST Shapekeys action
-    Mesh *me = (Mesh *)ob->data;
-    if (ob->type == OB_MESH && me) {
-      const bool bHasShapeKey = me->key && me->key->type == KEY_RELATIVE;
-      if (bHasShapeKey && me->key->adt && me->key->adt->action->id.name == m_action->id.name) {
-        DEG_id_tag_update(&me->id, ID_RECALC_GEOMETRY);
-        Key *key = me->key;
-
-        PointerRNA ptrrna;
-        RNA_id_pointer_create(&key->id, &ptrrna);
-        animsys_evaluate_action(&ptrrna, m_action, &animEvalContext, false);
-
-        // Handle blending between shape actions
-        if (m_blendin && m_blendframe < m_blendin) {
-          IncrementBlending(curtime);
-
-          float weight = 1.f - (m_blendframe / m_blendin);
-
-          // We go through and clear out the keyblocks so there isn't any interference
-          // from other shape actions
-          KeyBlock *kb;
-          for (kb = (KeyBlock *)key->block.first; kb; kb = (KeyBlock *)kb->next) {
-            kb->curval = 0.f;
+    if (!actionIsUpdated) {
+      // Node Trees actions (Geometry one and Shader ones (material, world))
+      Main *bmain = KX_GetActiveEngine()->GetConverter()->GetMain();
+      FOREACH_NODETREE_BEGIN (bmain, nodetree, id) {
+        bool isRightAction = false;
+        isRightAction = (nodetree->adt && nodetree->adt->action == m_action);
+        if (!isRightAction && nodetree->adt && nodetree->adt->nla_tracks.first) {
+          LISTBASE_FOREACH (NlaTrack *, track, &nodetree->adt->nla_tracks) {
+            LISTBASE_FOREACH (NlaStrip *, strip, &track->strips) {
+              if (strip->act == m_action) {
+                isRightAction = true;
+                break;
+              }
+            }
           }
-
-          // Now blend the shape
-          BlendShape(key, weight, m_blendinshape);
         }
-        //// Handle layer blending
-        // if (m_layer_weight >= 0) {
-        //  shape_deformer->GetShape(m_blendshape);
-        //  BlendShape(key, m_layer_weight, m_blendshape);
-        //}
+        if (isRightAction) {
+          scene->AppendToIdsToUpdateInAllRenderPasses(&nodetree->id, (IDRecalcFlag)0);
+          PointerRNA ptrrna;
+          RNA_id_pointer_create(&nodetree->id, &ptrrna);
+          animsys_evaluate_action(&ptrrna, m_action, &animEvalContext, false);
+          actionIsUpdated = true;
+          break;
+        }
+      }
+      FOREACH_NODETREE_END;
+    }
 
-        // shape_deformer->SetLastFrame(curtime);
+    if (!actionIsUpdated) {
+      // TEST Shapekeys action
+      Mesh *me = (Mesh *)ob->data;
+      if (ob->type == OB_MESH && me) {
+        const bool bHasShapeKey = me->key && me->key->type == KEY_RELATIVE;
+        if (bHasShapeKey && me->key->adt && me->key->adt->action == m_action) {
+          scene->AppendToIdsToUpdateInAllRenderPasses(&me->id, ID_RECALC_GEOMETRY);
+          Key *key = me->key;
 
-        scene->ResetTaaSamples();
+          PointerRNA ptrrna;
+          RNA_id_pointer_create(&key->id, &ptrrna);
+          animsys_evaluate_action(&ptrrna, m_action, &animEvalContext, false);
+
+          // Handle blending between shape actions
+          if (m_blendin && m_blendframe < m_blendin) {
+            IncrementBlending(curtime);
+
+            // float weight = 1.f - (m_blendframe / m_blendin);
+
+            // We go through and clear out the keyblocks so there isn't any interference
+            // from other shape actions
+            KeyBlock *kb;
+            for (kb = (KeyBlock *)key->block.first; kb; kb = (KeyBlock *)kb->next) {
+              kb->curval = 0.f;
+            }
+
+            // Now blend the shape
+            // BlendShape(key, weight, m_blendinshape);
+          }
+          //// Handle layer blending
+          // if (m_layer_weight >= 0) {
+          //  shape_deformer->GetShape(m_blendshape);
+          //  BlendShape(key, m_layer_weight, m_blendshape);
+          //}
+
+          // shape_deformer->SetLastFrame(curtime);
+        }
       }
     }
   }

@@ -31,7 +31,6 @@
 
 #pragma once
 
-
 #include "KX_IInterpolator.h"
 #include "MT_Scalar.h"
 
@@ -48,9 +47,9 @@ class KX_ScalarInterpolator : public KX_IInterpolator {
   {
   }
   virtual void Execute(float currentTime) const;
-  void SetNewTarget(MT_Scalar *newtarget)
+  void SetTarget(MT_Scalar *target)
   {
-    m_target = newtarget;
+    m_target = target;
   }
   MT_Scalar *GetTarget()
   {
@@ -61,4 +60,3 @@ class KX_ScalarInterpolator : public KX_IInterpolator {
   MT_Scalar *m_target;
   KX_IScalarInterpolator *m_ipo;
 };
-

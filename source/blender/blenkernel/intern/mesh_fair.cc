@@ -1,24 +1,9 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Mesh Fairing algorithm designed by Brett Fedack, used in the addon "Mesh Fairing":
- * https://github.com/fedackb/mesh-fairing.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup bke
+ * Mesh Fairing algorithm designed by Brett Fedack, used in the addon "Mesh Fairing":
+ * https://github.com/fedackb/mesh-fairing.
  */
 
 #include "BLI_map.hh"
@@ -65,7 +50,7 @@ class FairingContext {
                                           float r_adj_prev[3]) = 0;
 
   /* Get the other vertex index for a loop. */
-  virtual int other_vertex_index_from_loop(const int loop, const unsigned int v) = 0;
+  virtual int other_vertex_index_from_loop(const int loop, const uint v) = 0;
 
   int vertex_count_get()
   {
@@ -172,7 +157,7 @@ class FairingContext {
     }
 
     /* Early return, nothing to do. */
-    if (num_affected_vertices == 0 || num_affected_vertices == totvert_) {
+    if (ELEM(num_affected_vertices, 0, totvert_)) {
       return;
     }
 
@@ -257,7 +242,7 @@ class MeshFairingContext : public FairingContext {
     copy_v3_v3(r_adj_prev, co_[ME_POLY_LOOP_PREV(mloop_, p, corner)->v]);
   }
 
-  int other_vertex_index_from_loop(const int loop, const unsigned int v) override
+  int other_vertex_index_from_loop(const int loop, const uint v) override
   {
     MEdge *e = &medge_[mloop_[loop].e];
     if (e->v1 == v) {
@@ -293,8 +278,8 @@ class BMeshFairingContext : public FairingContext {
     }
 
     bmloop_.reserve(bm->totloop);
-    vlmap_ = (MeshElemMap *)MEM_calloc_arrayN(sizeof(MeshElemMap), bm->totvert, "bmesh loop map");
-    vlmap_mem_ = (int *)MEM_malloc_arrayN(sizeof(int), bm->totloop, "bmesh loop map mempool");
+    vlmap_ = (MeshElemMap *)MEM_calloc_arrayN(bm->totvert, sizeof(MeshElemMap), "bmesh loop map");
+    vlmap_mem_ = (int *)MEM_malloc_arrayN(bm->totloop, sizeof(int), "bmesh loop map mempool");
 
     BMVert *v;
     BMLoop *l;
@@ -332,7 +317,7 @@ class BMeshFairingContext : public FairingContext {
     copy_v3_v3(r_adj_prev, bmloop_[loop]->prev->v->co);
   }
 
-  int other_vertex_index_from_loop(const int loop, const unsigned int v) override
+  int other_vertex_index_from_loop(const int loop, const uint v) override
   {
     BMLoop *l = bmloop_[loop];
     BMVert *bmvert = BM_vert_at_index(bm, v);
@@ -475,7 +460,7 @@ static void prefair_and_fair_vertices(FairingContext *fairing_context,
 
   /* Fair. */
   VoronoiVertexWeight *voronoi_vertex_weights = new VoronoiVertexWeight(fairing_context);
-  /* TODO: Implemente cotangent loop weights. */
+  /* TODO: Implement cotangent loop weights. */
   fairing_context->fair_vertices(
       affected_vertices, depth, voronoi_vertex_weights, uniform_loop_weights);
 

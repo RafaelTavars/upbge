@@ -31,7 +31,6 @@
 
 #pragma once
 
-
 #ifdef _MSC_VER
 #  pragma warning(disable : 4786)
 #endif
@@ -49,13 +48,9 @@
 class RAS_OpenGLRasterizer;
 class RAS_FrameBuffer;
 class RAS_ICanvas;
-class RAS_IDisplayArray;
-class SCA_IScene;
 struct KX_ClientObjectInfo;
 class KX_RayCast;
-struct GPUShader;
 struct GPUTexture;
-struct GPUViewport;
 struct DRWShadingGroup;
 
 typedef struct ViewPortMatrices {
@@ -568,6 +563,5 @@ class RAS_Rasterizer {
    */
   void PrintHardwareInfo();
 
-  const unsigned char* GetGraphicsCardVendor();
+  const unsigned char *GetGraphicsCardVendor();
 };
-

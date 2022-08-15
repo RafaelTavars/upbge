@@ -26,7 +26,6 @@
 
 #pragma once
 
-
 #include <string>
 
 #include "KX_ISystem.h"
@@ -36,7 +35,7 @@
 
 class KX_Scene;
 class KX_ISystem;
-class BL_BlenderConverter;
+class BL_Converter;
 class KX_NetworkMessageManager;
 class RAS_ICanvas;
 class DEV_EventConsumer;
@@ -76,7 +75,7 @@ class LA_Launcher {
   /// The rasterizer.
   RAS_Rasterizer *m_rasterizer;
   /// Converts Blender data files.
-  BL_BlenderConverter *m_converter;
+  BL_Converter *m_converter;
   /// Manage messages.
   KX_NetworkMessageManager *m_networkMessageManager;
 
@@ -175,4 +174,3 @@ class LA_Launcher {
   static int PythonEngineNextFrame(void *state);
 #endif  // WITH_PYTHON
 };
-

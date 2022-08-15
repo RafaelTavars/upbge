@@ -1,5 +1,11 @@
-#pragma once
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2017 Tristan Porteries */
 
+/** \file SG_Frustum.h
+ *  \ingroup bgesg
+ */
+
+#pragma once
 
 #include <array>
 
@@ -31,4 +37,3 @@ class SG_Frustum {
                              const MT_Matrix4x4 &mat) const;
   TestType FrustumInsideFrustum(const SG_Frustum &frustum) const;
 };
-

@@ -34,11 +34,6 @@
 #include "BLI_blenlib.h"
 #include "DNA_curve_types.h"
 #include "MEM_guardedalloc.h"
-#include "depsgraph/DEG_depsgraph.h"
-
-#include "EXP_StringValue.h"
-
-#define MAX_BGE_TEXT_LEN 1024  // eevee
 
 static std::vector<std::string> split_string(std::string str)
 {
@@ -59,17 +54,8 @@ static std::vector<std::string> split_string(std::string str)
   return text;
 }
 
-KX_FontObject::KX_FontObject(void *sgReplicationInfo,
-                             SG_Callbacks callbacks,
-                             RAS_Rasterizer *rasterizer,
-                             Object *ob)
-    : KX_GameObject(sgReplicationInfo, callbacks), m_object(ob), m_rasterizer(rasterizer)
+KX_FontObject::KX_FontObject() : KX_GameObject(), m_object(nullptr), m_rasterizer(nullptr)
 {
-  Curve *text = static_cast<Curve *>(ob->data);
-
-  SetText(text->str);
-
-  m_backupText = std::string(text->str);  // eevee
 }
 
 KX_FontObject::~KX_FontObject()
@@ -79,11 +65,9 @@ KX_FontObject::~KX_FontObject()
   UpdateCurveText(m_backupText);  // eevee
 }
 
-EXP_Value *KX_FontObject::GetReplica()
+KX_PythonProxy *KX_FontObject::NewInstance()
 {
-  KX_FontObject *replica = new KX_FontObject(*this);
-  replica->ProcessReplica();
-  return replica;
+  return new KX_FontObject(*this);
 }
 
 void KX_FontObject::ProcessReplica()
@@ -110,12 +94,14 @@ void KX_FontObject::UpdateCurveText(std::string newText)  // eevee
   cu->len = BLI_strlen_utf8(newText.c_str());
   cu->strinfo = (CharInfo *)MEM_callocN((cu->len_char32 + 4) * sizeof(CharInfo), "texteditinfo");
   cu->str = (char *)MEM_mallocN(cu->len + sizeof(wchar_t), "str");
-  BLI_strncpy(cu->str, newText.c_str(), MAX_BGE_TEXT_LEN);
+  BLI_strncpy(cu->str, newText.c_str(), FILE_MAX);
 
-  DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
-  DEG_id_tag_update(&ob->id, ID_RECALC_COPY_ON_WRITE);
-
-  GetScene()->ResetTaaSamples();
+  if (ob->gameflag & OB_OVERLAY_COLLECTION) {
+    GetScene()->AppendToIdsToUpdateInOverlayPass(&ob->id, ID_RECALC_GEOMETRY);
+  }
+  else {
+    GetScene()->AppendToIdsToUpdateInAllRenderPasses(&ob->id, ID_RECALC_GEOMETRY);
+  }
 }
 
 void KX_FontObject::UpdateTextFromProperty()
@@ -128,11 +114,41 @@ void KX_FontObject::UpdateTextFromProperty()
   }
 }
 
+void KX_FontObject::SetRasterizer(RAS_Rasterizer *rasterizer)
+{
+  m_rasterizer = rasterizer;
+}
+
+void KX_FontObject::SetBlenderObject(Object *obj)
+{
+  KX_GameObject::SetBlenderObject(obj);
+
+  if (obj) {
+    Curve *text = static_cast<Curve *>(obj->data);
+
+    m_backupText = std::string(text->str);  // eevee
+
+    SetText(text->str);
+  }
+}
+
 #ifdef WITH_PYTHON
 
 /* ------------------------------------------------------------------------- */
 /* Python Integration Hooks					                                 */
 /* ------------------------------------------------------------------------- */
+PyObject *KX_FontObject::game_object_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+  KX_FontObject *obj = new KX_FontObject();
+
+  PyObject *proxy = py_base_new(type, PyTuple_Pack(1, obj->GetProxy()), kwds);
+  if (!proxy) {
+    delete obj;
+    return nullptr;
+  }
+
+  return proxy;
+}
 
 PyTypeObject KX_FontObject::Type = {PyVarObject_HEAD_INIT(nullptr, 0) "KX_FontObject",
                                     sizeof(EXP_PyObjectPlus_Proxy),
@@ -170,7 +186,7 @@ PyTypeObject KX_FontObject::Type = {PyVarObject_HEAD_INIT(nullptr, 0) "KX_FontOb
                                     0,
                                     0,
                                     0,
-                                    py_base_new};
+                                    game_object_new};
 
 PyMethodDef KX_FontObject::Methods[] = {
     {nullptr, nullptr}  // Sentinel

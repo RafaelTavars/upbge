@@ -1,9 +1,11 @@
 SCA_PropertySensor(SCA_ISensor)
 ===============================
 
-base class --- :class:`SCA_ISensor`
+.. currentmodule:: bge.types
 
-.. class:: SCA_PropertySensor(SCA_ISensor)
+base class --- :class:`~bge.types.SCA_ISensor`
+
+.. class:: SCA_PropertySensor
 
    Activates when the game object property matches.
 

@@ -31,7 +31,6 @@
 
 #pragma once
 
-
 void BL_ConvertActuators(const char *maggiename,
                          struct Object *blenderobject,
                          class KX_GameObject *gameobj,
@@ -40,5 +39,4 @@ void BL_ConvertActuators(const char *maggiename,
                          class KX_KetsjiEngine *ketsjiEngine,
                          int activeLayerBitInfo,
                          bool isInActiveLayer,
-                         class BL_BlenderSceneConverter *converter);
-
+                         class BL_SceneConverter *converter);

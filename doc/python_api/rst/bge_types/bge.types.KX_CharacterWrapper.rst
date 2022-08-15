@@ -1,11 +1,11 @@
 KX_CharacterWrapper(EXP_PyObjectPlus)
-=================================
+=====================================
 
-.. module:: bge.types
+.. currentmodule:: bge.types
 
-base class --- :class:`EXP_PyObjectPlus`
+base class --- :class:`~bge.types.EXP_PyObjectPlus`
 
-.. class:: KX_CharacterWrapper(EXP_PyObjectPlus)
+.. class:: KX_CharacterWrapper
 
    A wrapper to expose character physics options.
 

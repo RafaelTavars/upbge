@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2001-2002 by NaN Holding BV.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2001-2002 NaN Holding BV. All rights reserved. */
 
 /** \file
  * \ingroup edtransform
@@ -40,7 +24,6 @@
 
 /* -------------------------------------------------------------------- */
 /** \name Curve/Surfaces Transform Creation
- *
  * \{ */
 
 /**
@@ -79,7 +62,7 @@ static int bezt_select_to_transform_triple_flag(const BezTriple *bezt, const boo
   return flag;
 }
 
-void createTransCurveVerts(TransInfo *t)
+static void createTransCurveVerts(bContext *UNUSED(C), TransInfo *t)
 {
 
 #define SEL_F1 (1 << 0)
@@ -278,8 +261,8 @@ void createTransCurveVerts(TransInfo *t)
               }
               td->ext = NULL;
 
-              /* TODO - make points scale */
-              if (t->mode == TFM_CURVE_SHRINKFATTEN) { /* || t->mode==TFM_RESIZE) {*/
+              /* TODO: make points scale. */
+              if (t->mode == TFM_CURVE_SHRINKFATTEN /* `|| t->mode == TFM_RESIZE` */) {
                 td->val = &(bezt->radius);
                 td->ival = bezt->radius;
               }
@@ -298,7 +281,7 @@ void createTransCurveVerts(TransInfo *t)
               }
 
               if ((bezt_tx & SEL_F1) == 0 && (bezt_tx & SEL_F3) == 0) {
-                /* If the middle is selected but the sides arnt, this is needed */
+                /* If the middle is selected but the sides aren't, this is needed. */
                 if (hdata == NULL) {
                   /* if the handle was not saved by the previous handle */
                   hdata = initTransDataCurveHandles(td, bezt);
@@ -358,26 +341,6 @@ void createTransCurveVerts(TransInfo *t)
         for (a = nu->pntsu * nu->pntsv, bp = nu->bp; a > 0; a--, bp++) {
           if (bp->hide == 0) {
             if (is_prop_edit || (bp->f1 & SELECT)) {
-              float axismtx[3][3];
-
-              if (t->around == V3D_AROUND_LOCAL_ORIGINS) {
-                if (nu->pntsv == 1) {
-                  float normal[3], plane[3];
-
-                  BKE_nurb_bpoint_calc_normal(nu, bp, normal);
-                  BKE_nurb_bpoint_calc_plane(nu, bp, plane);
-
-                  if (createSpaceNormalTangent(axismtx, normal, plane)) {
-                    /* pass */
-                  }
-                  else {
-                    normalize_v3(normal);
-                    axis_dominant_v3_to_m3(axismtx, normal);
-                    invert_m3(axismtx);
-                  }
-                }
-              }
-
               copy_v3_v3(td->iloc, bp->vec);
               td->loc = bp->vec;
               copy_v3_v3(td->center, td->loc);
@@ -401,9 +364,22 @@ void createTransCurveVerts(TransInfo *t)
 
               copy_m3_m3(td->smtx, smtx);
               copy_m3_m3(td->mtx, mtx);
+
               if (t->around == V3D_AROUND_LOCAL_ORIGINS) {
                 if (nu->pntsv == 1) {
-                  copy_m3_m3(td->axismtx, axismtx);
+                  float normal[3], plane[3];
+
+                  BKE_nurb_bpoint_calc_normal(nu, bp, normal);
+                  BKE_nurb_bpoint_calc_plane(nu, bp, plane);
+
+                  if (createSpaceNormalTangent(td->axismtx, normal, plane)) {
+                    /* pass */
+                  }
+                  else {
+                    normalize_v3(normal);
+                    axis_dominant_v3_to_m3(td->axismtx, normal);
+                    invert_m3(td->axismtx);
+                  }
                 }
               }
 
@@ -424,7 +400,7 @@ void createTransCurveVerts(TransInfo *t)
         calc_distanceCurveVerts(head, tail, cyclic);
       }
 
-      /* TODO - in the case of tilt and radius we can also avoid allocating the
+      /* TODO: in the case of tilt and radius we can also avoid allocating the
        * initTransDataCurveHandles but for now just don't change handle types */
       if ((nu->type == CU_BEZIER) &&
           ELEM(t->mode, TFM_CURVE_SHRINKFATTEN, TFM_TILT, TFM_DUMMY) == 0) {
@@ -439,11 +415,10 @@ void createTransCurveVerts(TransInfo *t)
 #undef SEL_F3
 }
 
-void recalcData_curve(TransInfo *t)
+static void recalcData_curve(TransInfo *t)
 {
   if (t->state != TRANS_CANCEL) {
-    clipMirrorModifier(t);
-    applyProject(t);
+    applySnappingIndividual(t);
   }
 
   FOREACH_TRANS_DATA_CONTAINER (t, tc) {
@@ -451,24 +426,30 @@ void recalcData_curve(TransInfo *t)
     ListBase *nurbs = BKE_curve_editNurbs_get(cu);
     Nurb *nu = nurbs->first;
 
-    DEG_id_tag_update(tc->obedit->data, 0); /* sets recalc flags */
+    DEG_id_tag_update(tc->obedit->data, ID_RECALC_GEOMETRY);
 
     if (t->state == TRANS_CANCEL) {
       while (nu) {
-        /* Cant do testhandlesNurb here, it messes up the h1 and h2 flags */
+        /* Can't do testhandlesNurb here, it messes up the h1 and h2 flags */
         BKE_nurb_handles_calc(nu);
         nu = nu->next;
       }
     }
     else {
-      /* Normal updating */
-      while (nu) {
-        BKE_nurb_test_2d(nu);
-        BKE_nurb_handles_calc(nu);
-        nu = nu->next;
-      }
+      /* Apply clipping after so we never project past the clip plane T25423. */
+      transform_convert_clip_mirror_modifier_apply(tc);
+
+      /* Normal updating. */
+      BKE_curve_dimension_update(cu);
     }
   }
 }
 
 /** \} */
+
+TransConvertTypeInfo TransConvertType_Curve = {
+    /* flags */ (T_EDIT | T_POINTS),
+    /* createTransData */ createTransCurveVerts,
+    /* recalcData */ recalcData_curve,
+    /* special_aftertrans_update */ NULL,
+};

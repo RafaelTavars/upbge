@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup freestyle
@@ -103,17 +89,6 @@ NodeOrthographicCamera::NodeOrthographicCamera(
   projection_matrix_[7] = -(top + bottom) / (top - bottom);
   projection_matrix_[10] = -2.0 / (zFar - zNear);
   projection_matrix_[11] = -(zFar + zNear) / (zFar - zNear);
-}
-
-NodeOrthographicCamera::NodeOrthographicCamera(const NodeOrthographicCamera &iBrother)
-    : NodeCamera(iBrother),
-      left_(iBrother.left_),
-      right_(iBrother.right_),
-      bottom_(iBrother.bottom_),
-      top_(iBrother.top_),
-      zNear_(iBrother.zNear_),
-      zFar_(iBrother.zFar_)
-{
 }
 
 NodePerspectiveCamera::NodePerspectiveCamera() : NodeCamera(NodeCamera::PERSPECTIVE)

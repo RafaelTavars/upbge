@@ -1,11 +1,13 @@
 KX_NavMeshObject(KX_GameObject)
 ===============================
 
-base class --- :class:`KX_GameObject`
+.. currentmodule:: bge.types
 
-.. class:: KX_NavMeshObject(KX_GameObject)
+base class --- :class:`~bge.types.KX_GameObject`
 
-   Python interface for using and controlling navigation meshes. 
+.. class:: KX_NavMeshObject
+
+   Python interface for using and controlling navigation meshes.
 
    .. method:: findPath(start, goal)
 

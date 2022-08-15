@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2018 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2018 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup depsgraph
@@ -59,7 +43,7 @@ static ePhysicsRelationType modifier_to_relation_type(unsigned int modifier_type
       return DEG_PHYSICS_DYNAMIC_BRUSH;
   }
 
-  BLI_assert(!"Unknown collision modifier type");
+  BLI_assert_msg(0, "Unknown collision modifier type");
   return DEG_PHYSICS_RELATIONS_NUM;
 }
 /* Get ID from an ID type object, in a safe manner. This means that object can be nullptr,
@@ -80,7 +64,7 @@ ListBase *DEG_get_effector_relations(const Depsgraph *graph, Collection *collect
   if (hash == nullptr) {
     return nullptr;
   }
-  /* Note: nullptr is a valid lookup key here as it means that the relation is not bound to a
+  /* NOTE: nullptr is a valid lookup key here as it means that the relation is not bound to a
    * specific collection. */
   ID *collection_orig = DEG_get_original_id(object_id_safe(collection));
   return hash->lookup_default(collection_orig, nullptr);
@@ -96,7 +80,7 @@ ListBase *DEG_get_collision_relations(const Depsgraph *graph,
   if (hash == nullptr) {
     return nullptr;
   }
-  /* Note: nullptr is a valid lookup key here as it means that the relation is not bound to a
+  /* NOTE: nullptr is a valid lookup key here as it means that the relation is not bound to a
    * specific collection. */
   ID *collection_orig = DEG_get_original_id(object_id_safe(collection));
   return hash->lookup_default(collection_orig, nullptr);

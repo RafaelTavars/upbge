@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------------------------
  * File:        es3-kepler\FXAA/FXAA3_11.h
  * SDK Version: v3.00
- * Email:       gameworks@nvidia.com
+ * Email:       <gameworks@nvidia.com>
  * Site:        http://developer.nvidia.com/
  *
  * Copyright (c) 2014-2015, NVIDIA CORPORATION. All rights reserved.
@@ -51,7 +51,7 @@
 /*============================================================================
                         FXAA QUALITY - TUNING KNOBS
 ------------------------------------------------------------------------------
-NOTE the other tuning knobs are now in the shader function inputs!
+NOTE: the other tuning knobs are now in the shader function inputs!
 ============================================================================*/
 #ifndef FXAA_QUALITY__PRESET
 /*
@@ -296,7 +296,7 @@ NOTE the other tuning knobs are now in the shader function inputs!
 /* (#B1#) */
 float FxaaLuma(vec4 rgba)
 {
-  /* note: sqrt because the sampled colors are in a linear colorspace!
+  /* NOTE: sqrt because the sampled colors are in a linear colorspace!
    * this approximates a perceptual conversion, which is good enough for the
    * algorithm */
   return sqrt(dot(rgba.rgb, vec3(0.2126, 0.7152, 0.0722)));

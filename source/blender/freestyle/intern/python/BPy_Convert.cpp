@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup freestyle
@@ -60,6 +46,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+using namespace Freestyle;
+using namespace Freestyle::Geometry;
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
@@ -580,7 +569,7 @@ bool Vec3r_ptr_from_PyObject(PyObject *obj, Vec3r &vec)
 
 bool Vec2f_ptr_from_Vector(PyObject *obj, Vec2f &vec)
 {
-  if (!VectorObject_Check(obj) || ((VectorObject *)obj)->size != 2) {
+  if (!VectorObject_Check(obj) || ((VectorObject *)obj)->vec_num != 2) {
     return false;
   }
   if (BaseMath_ReadCallback((BaseMathObject *)obj) == -1) {
@@ -593,7 +582,7 @@ bool Vec2f_ptr_from_Vector(PyObject *obj, Vec2f &vec)
 
 bool Vec3f_ptr_from_Vector(PyObject *obj, Vec3f &vec)
 {
-  if (!VectorObject_Check(obj) || ((VectorObject *)obj)->size != 3) {
+  if (!VectorObject_Check(obj) || ((VectorObject *)obj)->vec_num != 3) {
     return false;
   }
   if (BaseMath_ReadCallback((BaseMathObject *)obj) == -1) {
@@ -607,7 +596,7 @@ bool Vec3f_ptr_from_Vector(PyObject *obj, Vec3f &vec)
 
 bool Vec3r_ptr_from_Vector(PyObject *obj, Vec3r &vec)
 {
-  if (!VectorObject_Check(obj) || ((VectorObject *)obj)->size != 3) {
+  if (!VectorObject_Check(obj) || ((VectorObject *)obj)->vec_num != 3) {
     return false;
   }
   if (BaseMath_ReadCallback((BaseMathObject *)obj) == -1) {
@@ -769,7 +758,7 @@ bool Vec3r_ptr_from_PyTuple(PyObject *obj, Vec3r &vec)
 
 bool float_array_from_PyObject(PyObject *obj, float *v, int n)
 {
-  if (VectorObject_Check(obj) && ((VectorObject *)obj)->size == n) {
+  if (VectorObject_Check(obj) && ((VectorObject *)obj)->vec_num == n) {
     if (BaseMath_ReadCallback((BaseMathObject *)obj) == -1) {
       return false;
     }

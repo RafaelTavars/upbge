@@ -22,7 +22,6 @@
 
 #pragma once
 
-
 #include <map>
 #include <vector>
 
@@ -145,7 +144,9 @@ class CcdShapeConstructionInfo : public CM_RefCount<CcdShapeConstructionInfo> {
     return m_meshObject;
   }
 
-  bool UpdateMesh(class KX_GameObject *gameobj, bool evaluatedMesh = false);
+  bool UpdateMesh(class KX_GameObject *from_gameobj,
+                  class RAS_MeshObject *from_meshobj,
+                  bool evaluatedMesh = false);
 
   CcdShapeConstructionInfo *GetReplica();
 
@@ -212,13 +213,13 @@ struct CcdConstructionInfo {
    * more advanced collision filtering should be done in btCollisionDispatcher::NeedsCollision
    */
   enum CollisionFilterGroups {
-    DefaultFilter = 1,
+    DynamicFilter = 1,
     StaticFilter = 2,
     KinematicFilter = 4,
     DebrisFilter = 8,
     SensorFilter = 16,
     CharacterFilter = 32,
-    AllFilter = DefaultFilter | StaticFilter | KinematicFilter | DebrisFilter | SensorFilter |
+    AllFilter = DynamicFilter | StaticFilter | KinematicFilter | DebrisFilter | SensorFilter |
                 CharacterFilter,
   };
 
@@ -273,8 +274,10 @@ struct CcdConstructionInfo {
         m_bSensor(false),
         m_bCharacter(false),
         m_bGimpact(false),
-        m_collisionFilterGroup(DefaultFilter),
+        m_collisionFilterGroup(DynamicFilter),
         m_collisionFilterMask(AllFilter),
+        m_collisionGroup(0xFFFF),
+        m_collisionMask(0xFFFF),
         m_collisionShape(nullptr),
         m_MotionState(nullptr),
         m_shapeInfo(nullptr),
@@ -399,6 +402,9 @@ struct CcdConstructionInfo {
   short int m_collisionFilterGroup;
   short int m_collisionFilterMask;
 
+  unsigned short m_collisionGroup;
+  unsigned short m_collisionMask;
+
   /** these pointers are used as argument passing for the CcdPhysicsController constructor
    * and not anymore after that
    */
@@ -448,7 +454,7 @@ class btCollisionObject;
 class btSoftBody;
 class btPairCachingGhostObject;
 
-class BlenderBulletCharacterController : public btKinematicCharacterController,
+class CcdCharacter : public btKinematicCharacterController,
                                          public PHY_ICharacter {
  private:
   CcdPhysicsController *m_ctrl;
@@ -457,7 +463,7 @@ class BlenderBulletCharacterController : public btKinematicCharacterController,
   unsigned char m_maxJumps;
 
  public:
-  BlenderBulletCharacterController(CcdPhysicsController *ctrl,
+  CcdCharacter(CcdPhysicsController *ctrl,
                                    btMotionState *motionState,
                                    btPairCachingGhostObject *ghost,
                                    btConvexShape *shape,
@@ -556,7 +562,7 @@ class CleanPairCallback : public btOverlapCallback {
 class CcdPhysicsController : public PHY_IPhysicsController {
  protected:
   btCollisionObject *m_object;
-  BlenderBulletCharacterController *m_characterController;
+  CcdCharacter *m_characterController;
 
   class PHY_IMotionState *m_MotionState;
   btMotionState *m_bulletMotionState;
@@ -579,12 +585,13 @@ class CcdPhysicsController : public PHY_IPhysicsController {
   int m_registerCount;        // needed when multiple sensors use the same controller
   CcdConstructionInfo m_cci;  // needed for replication
 
-  CcdPhysicsController *m_parentCtrl;
+  CcdPhysicsController *m_parentRoot;
 
   int m_savedCollisionFlags;
   short m_savedCollisionFilterGroup;
   short m_savedCollisionFilterMask;
   MT_Scalar m_savedMass;
+  MT_Scalar m_savedFriction;
   bool m_savedDyna;
   bool m_suspended;
 
@@ -617,7 +624,6 @@ class CcdPhysicsController : public PHY_IPhysicsController {
   void ForceWorldTransform(const btMatrix3x3 &mat, const btVector3 &pos);
 
  public:
-
   CcdPhysicsController(const CcdConstructionInfo &ci);
 
   /**
@@ -668,6 +674,7 @@ class CcdPhysicsController : public PHY_IPhysicsController {
   virtual bool SynchronizeMotionStates(float time);
 
   virtual void UpdateSoftBody();
+  virtual void SetSoftBodyTransform(const MT_Vector3 &pos, const MT_Matrix3x3 &ori);
 
   /**
    * Called for every physics simulation step. Use this method for
@@ -700,6 +707,11 @@ class CcdPhysicsController : public PHY_IPhysicsController {
   virtual MT_Scalar GetMass();
   virtual void SetMass(MT_Scalar newmass);
 
+  float GetInertiaFactor() const;
+
+  virtual MT_Scalar GetFriction();
+  virtual void SetFriction(MT_Scalar newfriction);
+
   // physics methods
   virtual void ApplyImpulse(const MT_Vector3 &attach, const MT_Vector3 &impulsein, bool local);
   virtual void ApplyTorque(const MT_Vector3 &torque, bool local);
@@ -708,6 +720,11 @@ class CcdPhysicsController : public PHY_IPhysicsController {
   virtual void SetLinearVelocity(const MT_Vector3 &lin_vel, bool local);
   virtual void Jump();
   virtual void SetActive(bool active);
+
+  virtual unsigned short GetCollisionGroup() const;
+  virtual unsigned short GetCollisionMask() const;
+  virtual void SetCollisionGroup(unsigned short group);
+  virtual void SetCollisionMask(unsigned short mask);
 
   virtual float GetLinearDamping() const;
   virtual float GetAngularDamping() const;
@@ -825,8 +842,6 @@ class CcdPhysicsController : public PHY_IPhysicsController {
 
   static btTransform GetTransformFromMotionState(PHY_IMotionState *motionState);
 
-  void setAabb(const btVector3 &aabbMin, const btVector3 &aabbMax);
-
   class PHY_IMotionState *GetMotionState()
   {
     return m_MotionState;
@@ -842,19 +857,14 @@ class CcdPhysicsController : public PHY_IPhysicsController {
     return m_cci.m_physicsEnv;
   }
 
-  void SetParentCtrl(CcdPhysicsController *parentCtrl)
+  void SetParentRoot(CcdPhysicsController *parentCtrl)
   {
-    m_parentCtrl = parentCtrl;
+    m_parentRoot = parentCtrl;
   }
 
-  CcdPhysicsController *GetParentCtrl()
+  CcdPhysicsController *GetParentRoot() const
   {
-    return m_parentCtrl;
-  }
-
-  const CcdPhysicsController *GetParentCtrl() const
-  {
-    return m_parentCtrl;
+    return m_parentRoot;
   }
 
   virtual bool IsDynamic()
@@ -909,4 +919,3 @@ class DefaultMotionState : public PHY_IMotionState {
   btTransform m_worldTransform;
   btVector3 m_localScaling;
 };
-

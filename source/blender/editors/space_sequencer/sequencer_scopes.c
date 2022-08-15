@@ -1,20 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Author: Peter Schlaile < peter [at] schlaile [dot] de >
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2006-2008 Peter Schlaile < peter [at] schlaile [dot] de >. */
 
 /** \file
  * \ingroup spseq
@@ -30,12 +15,10 @@
 #include "IMB_imbuf.h"
 #include "IMB_imbuf_types.h"
 
-#include "atomic_ops.h"
-
 #include "sequencer_intern.h"
 
-/* XXX, why is this function better than BLI_math version?
- * only difference is it does some normalize after, need to double check on this - campbell */
+/* XXX(@campbellbarton): why is this function better than BLI_math version?
+ * only difference is it does some normalize after, need to double check on this. */
 static void rgb_to_yuv_normalized(const float rgb[3], float yuv[3])
 {
   yuv[0] = 0.299f * rgb[0] + 0.587f * rgb[1] + 0.114f * rgb[2];
@@ -626,8 +609,6 @@ static void vectorscope_put_cross(uchar r, uchar g, uchar b, char *tgt, int w, i
 {
   float rgb[3], yuv[3];
   char *p;
-  int x = 0;
-  int y = 0;
 
   rgb[0] = (float)r / 255.0f;
   rgb[1] = (float)g / 255.0f;
@@ -640,8 +621,8 @@ static void vectorscope_put_cross(uchar r, uchar g, uchar b, char *tgt, int w, i
     r = 255;
   }
 
-  for (y = -size; y <= size; y++) {
-    for (x = -size; x <= size; x++) {
+  for (int y = -size; y <= size; y++) {
+    for (int x = -size; x <= size; x++) {
       char *q = p + 4 * (y * w + x);
       q[0] = r;
       q[1] = g;

@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup edinterface
@@ -47,6 +33,7 @@
 #include "interface_intern.h"
 
 #include "RNA_access.h"
+#include "RNA_prototypes.h"
 
 #ifdef WITH_PYTHON
 #  include "BPY_extern.h"
@@ -70,24 +57,10 @@ static IDProperty *shortcut_property_from_rna(bContext *C, uiBut *but)
 
   /* If this returns null, we won't be able to bind shortcuts to these RNA properties.
    * Support can be added at #wm_context_member_from_ptr. */
-  const char *member_id = WM_context_member_from_ptr(C, &but->rnapoin);
-  if (member_id == NULL) {
+  char *final_data_path = WM_context_path_resolve_property_full(
+      C, &but->rnapoin, but->rnaprop, but->rnaindex);
+  if (final_data_path == NULL) {
     return NULL;
-  }
-
-  const char *data_path = RNA_path_from_ID_to_struct(&but->rnapoin);
-  const char *member_id_data_path = member_id;
-
-  if (data_path) {
-    member_id_data_path = BLI_sprintfN("%s.%s", member_id, data_path);
-    MEM_freeN((void *)data_path);
-  }
-
-  const char *prop_id = RNA_property_identifier(but->rnaprop);
-  const char *final_data_path = BLI_sprintfN("%s.%s", member_id_data_path, prop_id);
-
-  if (member_id != member_id_data_path) {
-    MEM_freeN((void *)member_id_data_path);
   }
 
   /* Create ID property of data path, to pass to the operator. */
@@ -229,7 +202,14 @@ static uiBlock *menu_add_shortcut(bContext *C, ARegion *region, void *arg)
   /* XXX this guess_opname can potentially return a different keymap
    * than being found on adding later... */
   wmKeyMap *km = WM_keymap_guess_opname(C, idname);
-  wmKeyMapItem *kmi = WM_keymap_add_item(km, idname, EVT_AKEY, KM_PRESS, 0, 0);
+  wmKeyMapItem *kmi = WM_keymap_add_item(km,
+                                         idname,
+                                         &(const KeyMapItem_Params){
+                                             .type = EVT_AKEY,
+                                             .value = KM_PRESS,
+                                             .modifier = 0,
+                                             .direction = KM_ANY,
+                                         });
   const int kmi_id = kmi->id;
 
   /* This takes ownership of prop, or prop can be NULL for reset. */
@@ -329,10 +309,24 @@ static void popup_add_shortcut_func(bContext *C, void *arg1, void *UNUSED(arg2))
 
 static bool ui_but_is_user_menu_compatible(bContext *C, uiBut *but)
 {
-  return (but->optype ||
-          (but->rnaprop && (RNA_property_type(but->rnaprop) == PROP_BOOLEAN) &&
-           (WM_context_member_from_ptr(C, &but->rnapoin) != NULL)) ||
-          UI_but_menutype_get(but));
+  bool result = false;
+  if (but->optype) {
+    result = true;
+  }
+  else if (but->rnaprop) {
+    if (RNA_property_type(but->rnaprop) == PROP_BOOLEAN) {
+      char *data_path = WM_context_path_resolve_full(C, &but->rnapoin);
+      if (data_path != NULL) {
+        MEM_freeN(data_path);
+        result = true;
+      }
+    }
+  }
+  else if (UI_but_menutype_get(but)) {
+    result = true;
+  }
+
+  return result;
 }
 
 static bUserMenuItem *ui_but_user_menu_find(bContext *C, uiBut *but, bUserMenu *um)
@@ -343,21 +337,11 @@ static bUserMenuItem *ui_but_user_menu_find(bContext *C, uiBut *but, bUserMenu *
         &um->items, but->optype, prop, but->opcontext);
   }
   if (but->rnaprop) {
-    const char *member_id = WM_context_member_from_ptr(C, &but->rnapoin);
-    const char *data_path = RNA_path_from_ID_to_struct(&but->rnapoin);
-    const char *member_id_data_path = member_id;
-    if (data_path) {
-      member_id_data_path = BLI_sprintfN("%s.%s", member_id, data_path);
-    }
+    char *member_id_data_path = WM_context_path_resolve_full(C, &but->rnapoin);
     const char *prop_id = RNA_property_identifier(but->rnaprop);
     bUserMenuItem *umi = (bUserMenuItem *)ED_screen_user_menu_item_find_prop(
         &um->items, member_id_data_path, prop_id, but->rnaindex);
-    if (data_path) {
-      MEM_freeN((void *)data_path);
-    }
-    if (member_id != member_id_data_path) {
-      MEM_freeN((void *)member_id_data_path);
-    }
+    MEM_freeN(member_id_data_path);
     return umi;
   }
 
@@ -373,13 +357,7 @@ static void ui_but_user_menu_add(bContext *C, uiBut *but, bUserMenu *um)
   BLI_assert(ui_but_is_user_menu_compatible(C, but));
 
   char drawstr[sizeof(but->drawstr)];
-  STRNCPY(drawstr, but->drawstr);
-  if (but->flag & UI_BUT_HAS_SEP_CHAR) {
-    char *sep = strrchr(drawstr, UI_SEP_CHAR);
-    if (sep) {
-      *sep = '\0';
-    }
-  }
+  ui_but_drawstr_without_sep_char(but, drawstr, sizeof(drawstr));
 
   MenuType *mt = NULL;
   if (but->optype) {
@@ -399,7 +377,7 @@ static void ui_but_user_menu_add(bContext *C, uiBut *but, bUserMenu *um)
                    "'%s').label",
                    idname);
           char *expr_result = NULL;
-          if (BPY_run_string_as_string(C, expr_imports, expr, __func__, &expr_result)) {
+          if (BPY_run_string_as_string(C, expr_imports, expr, NULL, &expr_result)) {
             STRNCPY(drawstr, expr_result);
             MEM_freeN(expr_result);
           }
@@ -417,22 +395,12 @@ static void ui_but_user_menu_add(bContext *C, uiBut *but, bUserMenu *um)
         &um->items, drawstr, but->optype, but->opptr ? but->opptr->data : NULL, but->opcontext);
   }
   else if (but->rnaprop) {
-    /* Note: 'member_id' may be a path. */
-    const char *member_id = WM_context_member_from_ptr(C, &but->rnapoin);
-    const char *data_path = RNA_path_from_ID_to_struct(&but->rnapoin);
-    const char *member_id_data_path = member_id;
-    if (data_path) {
-      member_id_data_path = BLI_sprintfN("%s.%s", member_id, data_path);
-    }
+    /* NOTE: 'member_id' may be a path. */
+    char *member_id_data_path = WM_context_path_resolve_full(C, &but->rnapoin);
     const char *prop_id = RNA_property_identifier(but->rnaprop);
-    /* Note, ignore 'drawstr', use property idname always. */
+    /* NOTE: ignore 'drawstr', use property idname always. */
     ED_screen_user_menu_item_add_prop(&um->items, "", member_id_data_path, prop_id, but->rnaindex);
-    if (data_path) {
-      MEM_freeN((void *)data_path);
-    }
-    if (member_id != member_id_data_path) {
-      MEM_freeN((void *)member_id_data_path);
-    }
+    MEM_freeN(member_id_data_path);
   }
   else if ((mt = UI_but_menutype_get(but))) {
     ED_screen_user_menu_item_add_menu(&um->items, drawstr, mt);
@@ -494,7 +462,7 @@ static void ui_but_menu_add_path_operators(uiLayout *layout, PointerRNA *ptr, Pr
   RNA_string_set(&props_ptr, "filepath", dir);
 }
 
-bool ui_popup_context_menu_for_button(bContext *C, uiBut *but)
+bool ui_popup_context_menu_for_button(bContext *C, uiBut *but, const wmEvent *event)
 {
   /* ui_but_is_interactive() may let some buttons through that should not get a context menu - it
    * doesn't make sense for them. */
@@ -542,9 +510,7 @@ bool ui_popup_context_menu_for_button(bContext *C, uiBut *but)
     const PropertyType type = RNA_property_type(prop);
     const PropertySubType subtype = RNA_property_subtype(prop);
     bool is_anim = RNA_property_animateable(ptr, prop);
-    const bool is_editable = RNA_property_editable(ptr, prop);
     const bool is_idprop = RNA_property_is_idprop(prop);
-    const bool is_set = RNA_property_is_set(ptr, prop);
 
     /* second slower test,
      * saved people finding keyframe items in menus when its not possible */
@@ -562,12 +528,12 @@ bool ui_popup_context_menu_for_button(bContext *C, uiBut *but)
     const bool is_overridable = (override_status & RNA_OVERRIDE_STATUS_OVERRIDABLE) != 0;
 
     /* Set the (button_pointer, button_prop)
-     * and pointer data for Python access to the hovered ui element. */
+     * and pointer data for Python access to the hovered UI element. */
     uiLayoutSetContextFromBut(layout, but);
 
     /* Keyframes */
     if (but->flag & UI_BUT_ANIMATED_KEY) {
-      /* replace/delete keyfraemes */
+      /* Replace/delete keyframes. */
       if (is_array_component) {
         uiItemBooleanO(layout,
                        CTX_IFACE_(BLT_I18NCONTEXT_OPERATOR_DEFAULT, "Replace Keyframes"),
@@ -837,12 +803,18 @@ bool ui_popup_context_menu_for_button(bContext *C, uiBut *but)
       else {
         if (is_array_component) {
           ot = WM_operatortype_find("UI_OT_override_type_set_button", false);
-          uiItemFullO_ptr(
-              layout, ot, "Define Overrides", ICON_NONE, NULL, WM_OP_INVOKE_DEFAULT, 0, &op_ptr);
+          uiItemFullO_ptr(layout,
+                          ot,
+                          CTX_IFACE_(BLT_I18NCONTEXT_OPERATOR_DEFAULT, "Define Overrides"),
+                          ICON_NONE,
+                          NULL,
+                          WM_OP_INVOKE_DEFAULT,
+                          0,
+                          &op_ptr);
           RNA_boolean_set(&op_ptr, "all", true);
           uiItemFullO_ptr(layout,
                           ot,
-                          "Define Single Override",
+                          CTX_IFACE_(BLT_I18NCONTEXT_OPERATOR_DEFAULT, "Define Single Override"),
                           ICON_NONE,
                           NULL,
                           WM_OP_INVOKE_DEFAULT,
@@ -853,7 +825,7 @@ bool ui_popup_context_menu_for_button(bContext *C, uiBut *but)
         else {
           uiItemFullO(layout,
                       "UI_OT_override_type_set_button",
-                      "Define Override",
+                      CTX_IFACE_(BLT_I18NCONTEXT_OPERATOR_DEFAULT, "Define Override"),
                       ICON_NONE,
                       NULL,
                       WM_OP_INVOKE_DEFAULT,
@@ -893,12 +865,6 @@ bool ui_popup_context_menu_for_button(bContext *C, uiBut *but)
                      "all",
                      1);
     }
-    if (is_editable /*&& is_idprop*/ && is_set) {
-      uiItemO(layout,
-              CTX_IFACE_(BLT_I18NCONTEXT_OPERATOR_DEFAULT, "Unset"),
-              ICON_NONE,
-              "UI_OT_unset_property_button");
-    }
 
     if (is_idprop && !is_array && ELEM(type, PROP_INT, PROP_FLOAT)) {
       uiItemO(layout,
@@ -936,6 +902,12 @@ bool ui_popup_context_menu_for_button(bContext *C, uiBut *but)
             CTX_IFACE_(BLT_I18NCONTEXT_OPERATOR_DEFAULT, "Copy Data Path"),
             ICON_NONE,
             "UI_OT_copy_data_path_button");
+    uiItemBooleanO(layout,
+                   CTX_IFACE_(BLT_I18NCONTEXT_OPERATOR_DEFAULT, "Copy Full Data Path"),
+                   ICON_NONE,
+                   "UI_OT_copy_data_path_button",
+                   "full_path",
+                   true);
 
     if (ptr->owner_id && !is_whole_array &&
         ELEM(type, PROP_BOOLEAN, PROP_INT, PROP_FLOAT, PROP_ENUM)) {
@@ -953,8 +925,19 @@ bool ui_popup_context_menu_for_button(bContext *C, uiBut *but)
     }
   }
 
-  /* If the button reprents an id, it can set the "id" context pointer. */
-  if (U.experimental.use_asset_browser && ED_asset_can_make_single_from_context(C)) {
+  {
+    const ARegion *region = CTX_wm_menu(C) ? CTX_wm_menu(C) : CTX_wm_region(C);
+    uiButViewItem *view_item_but = (uiButViewItem *)ui_view_item_find_mouse_over(region,
+                                                                                 event->xy);
+    if (view_item_but) {
+      BLI_assert(view_item_but->but.type == UI_BTYPE_VIEW_ITEM);
+      UI_view_item_context_menu_build(C, view_item_but->view_item, uiLayoutColumn(layout, false));
+      uiItemS(layout);
+    }
+  }
+
+  /* If the button represents an id, it can set the "id" context pointer. */
+  if (ED_asset_can_mark_single_from_context(C)) {
     ID *id = CTX_data_pointer_get_type(C, "id", &RNA_ID).data;
 
     /* Gray out items depending on if data-block is an asset. Preferably this could be done via
@@ -1061,7 +1044,7 @@ bool ui_popup_context_menu_for_button(bContext *C, uiBut *but)
 
     /* We do have a shortcut, but only keyboard ones are editable that way... */
     if (kmi) {
-      if (ISKEYBOARD(kmi->type)) {
+      if (ISKEYBOARD(kmi->type) || ISNDOF_BUTTON(kmi->type)) {
 #if 0 /* would rather use a block but, but gets weirdly positioned... */
         uiDefBlockBut(block,
                       menu_change_shortcut,
@@ -1228,6 +1211,19 @@ bool ui_popup_context_menu_for_button(bContext *C, uiBut *but)
     }
   }
 
+  /* UI List item context menu. Scripts can add items to it, by default there's nothing shown. */
+  const ARegion *region = CTX_wm_menu(C) ? CTX_wm_menu(C) : CTX_wm_region(C);
+  const bool is_inside_listbox = ui_list_find_mouse_over(region, event) != NULL;
+  const bool is_inside_listrow = is_inside_listbox ?
+                                     ui_list_row_find_mouse_over(region, event->xy) != NULL :
+                                     false;
+  if (is_inside_listrow) {
+    MenuType *mt = WM_menutype_find("UI_MT_list_item_context_menu", true);
+    if (mt) {
+      UI_menutype_draw(C, mt, uiLayoutColumn(layout, false));
+    }
+  }
+
   MenuType *mt = WM_menutype_find("WM_MT_button_context", true);
   if (mt) {
     UI_menutype_draw(C, mt, uiLayoutColumn(layout, false));
@@ -1246,9 +1242,6 @@ bool ui_popup_context_menu_for_button(bContext *C, uiBut *but)
 /** \name Panel Context Menu
  * \{ */
 
-/**
- * menu to show when right clicking on the panel header
- */
 void ui_popup_context_menu_for_panel(bContext *C, ARegion *region, Panel *panel)
 {
   bScreen *screen = CTX_wm_screen(C);
@@ -1259,6 +1252,9 @@ void ui_popup_context_menu_for_panel(bContext *C, ARegion *region, Panel *panel)
     return;
   }
   if (panel->type->parent != NULL) {
+    return;
+  }
+  if (!UI_panel_can_be_pinned(panel)) {
     return;
   }
 
@@ -1282,7 +1278,6 @@ void ui_popup_context_menu_for_panel(bContext *C, ARegion *region, Panel *panel)
       uiBlock *block = uiLayoutGetBlock(layout);
       uiBut *but = block->buttons.last;
       but->flag |= UI_BUT_HAS_SEP_CHAR;
-      but->drawflag |= UI_BUT_HAS_SHORTCUT;
     }
   }
   UI_popup_menu_end(C, pup);

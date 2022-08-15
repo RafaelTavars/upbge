@@ -1,4 +1,4 @@
-# Apache License, Version 2.0
+# SPDX-License-Identifier: Apache-2.0
 
 # ./blender.bin --background -noaudio --python tests/python/bl_blendfile_io.py
 import bpy
@@ -15,7 +15,8 @@ class TestBlendFileSaveLoadBasic(TestHelper):
         self.args = args
 
     def test_save_load(self):
-        bpy.ops.wm.read_factory_settings()
+        bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True)
+
         bpy.data.meshes.new("OrphanedMesh")
 
         output_dir = self.args.output_dir
@@ -70,6 +71,9 @@ def argparse_create():
 
 def main():
     args = argparse_create().parse_args()
+
+    # Don't write thumbnails into the home directory.
+    bpy.context.preferences.filepaths.file_preview_type = 'NONE'
 
     for Test in TESTS:
         Test(args).run_all_tests()

@@ -1,24 +1,11 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup spoutliner
  */
 
 #include "DNA_ID.h"
+#include "DNA_space_types.h"
 
 #include "BLI_listbase.h"
 #include "BLI_listbase_wrapper.hh"
@@ -26,12 +13,13 @@
 
 #include "BKE_main.h"
 
-#include "../outliner_intern.h"
+#include "../outliner_intern.hh"
+#include "common.hh"
 #include "tree_display.hh"
+#include "tree_element.hh"
 
 namespace blender::ed::outliner {
 
-/* Convenience/readability. */
 template<typename T> using List = ListBaseWrapper<T>;
 
 TreeDisplayIDOrphans::TreeDisplayIDOrphans(SpaceOutliner &space_outliner)
@@ -42,7 +30,7 @@ TreeDisplayIDOrphans::TreeDisplayIDOrphans(SpaceOutliner &space_outliner)
 ListBase TreeDisplayIDOrphans::buildTree(const TreeSourceData &source_data)
 {
   ListBase tree = {nullptr};
-  ListBase *lbarray[MAX_LIBARRAY];
+  ListBase *lbarray[INDEX_ID_MAX];
   short filter_id_type = (space_outliner_.filter & SO_FILTER_ID_TYPE) ?
                              space_outliner_.filter_id_type :
                              0;
@@ -76,7 +64,8 @@ ListBase TreeDisplayIDOrphans::buildTree(const TreeSourceData &source_data)
     /* Add the orphaned data-blocks - these will not be added with any subtrees attached. */
     for (ID *id : List<ID>(lbarray[a])) {
       if (ID_REAL_USERS(id) <= 0) {
-        outliner_add_element(&space_outliner_, (te) ? &te->subtree : &tree, id, te, 0, 0);
+        outliner_add_element(
+            &space_outliner_, (te) ? &te->subtree : &tree, id, te, TSE_SOME_ID, 0);
       }
     }
   }

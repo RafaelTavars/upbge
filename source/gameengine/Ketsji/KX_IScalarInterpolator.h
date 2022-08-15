@@ -31,13 +31,10 @@
 
 #pragma once
 
-
 class KX_IScalarInterpolator {
  public:
-  virtual ~KX_IScalarInterpolator()
-  {
-  }
+  KX_IScalarInterpolator() = default;
+  virtual ~KX_IScalarInterpolator() = default;
 
   virtual float GetValue(float currentTime) const = 0;
 };
-

@@ -31,14 +31,12 @@
 
 #pragma once
 
-
 #include "PHY_IController.h"
 #include <vector>
 
 class PHY_IMotionState;
 class PHY_IPhysicsEnvironment;
 
-class MT_Vector3;
 class MT_Vector3;
 class MT_Matrix3x3;
 
@@ -61,6 +59,7 @@ class PHY_IPhysicsController : public PHY_IController {
   virtual bool SynchronizeMotionStates(float time) = 0;
 
   virtual void UpdateSoftBody() = 0;
+  virtual void SetSoftBodyTransform(const MT_Vector3 &pos, const MT_Matrix3x3 &ori) = 0;
   /**
    * WriteMotionStateToDynamics ynchronizes dynas, kinematic and deformable entities (and do 'late
    * binding')
@@ -87,6 +86,9 @@ class PHY_IPhysicsController : public PHY_IController {
   virtual MT_Scalar GetMass() = 0;
   virtual void SetMass(MT_Scalar newmass) = 0;
 
+  virtual MT_Scalar GetFriction() = 0;
+  virtual void SetFriction(MT_Scalar newfriction) = 0;
+
   // physics methods
   virtual void ApplyImpulse(const MT_Vector3 &attach, const MT_Vector3 &impulse, bool local) = 0;
   virtual void ApplyTorque(const MT_Vector3 &torque, bool local) = 0;
@@ -108,6 +110,11 @@ class PHY_IPhysicsController : public PHY_IController {
   virtual void RestoreDynamics() = 0;
 
   virtual void SetActive(bool active) = 0;
+
+  virtual unsigned short GetCollisionGroup() const = 0;
+  virtual unsigned short GetCollisionMask() const = 0;
+  virtual void SetCollisionGroup(unsigned short group) = 0;
+  virtual void SetCollisionMask(unsigned short mask) = 0;
 
   // reading out information from physics
   virtual MT_Vector3 GetLinearVelocity() = 0;
@@ -167,4 +174,3 @@ class PHY_IPhysicsController : public PHY_IController {
   virtual void SetCcdMotionThreshold(float val) = 0;
   virtual void SetCcdSweptSphereRadius(float val) = 0;
 };
-

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright 2018 Blender Foundation.
+
 # - Find Embree library
 # Find the native Embree includes and library
 # This module defines
@@ -7,13 +10,6 @@
 #  EMBREE_ROOT_DIR, The base directory to search for Embree.
 #                        This can also be an environment variable.
 #  EMBREEFOUND, If false, do not try to use Embree.
-
-#=============================================================================
-# Copyright 2018 Blender Foundation.
-#
-# Distributed under the OSI-approved BSD 3-Clause License,
-# see accompanying file BSD-3-Clause-license.txt for details.
-#=============================================================================
 
 # If EMBREE_ROOT_DIR was defined in the environment, use it.
 IF(NOT EMBREE_ROOT_DIR AND NOT $ENV{EMBREE_ROOT_DIR} STREQUAL "")
@@ -34,12 +30,17 @@ FIND_PATH(EMBREE_INCLUDE_DIR
     include
 )
 
+IF(NOT (("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "aarch64") OR (APPLE AND ("${CMAKE_OSX_ARCHITECTURES}" STREQUAL "arm64"))))
+  SET(_embree_SIMD_COMPONENTS
+    embree_sse42
+    embree_avx
+    embree_avx2
+  )
+ENDIF()
 
 SET(_embree_FIND_COMPONENTS
   embree3
-  embree_sse42
-  embree_avx
-  embree_avx2
+  ${_embree_SIMD_COMPONENTS}
   lexers
   math
   simd
@@ -59,14 +60,14 @@ FOREACH(COMPONENT ${_embree_FIND_COMPONENTS})
     PATH_SUFFIXES
       lib64 lib
     )
-  IF (NOT EMBREE_${UPPERCOMPONENT}_LIBRARY)
-    IF (EMBREE_EMBREE3_LIBRARY)
+  IF(NOT EMBREE_${UPPERCOMPONENT}_LIBRARY)
+    IF(EMBREE_EMBREE3_LIBRARY)
       # If we can't find all the static libraries, try to fall back to the shared library if found.
       # This allows building with a shared embree library
       SET(_embree_LIBRARIES ${EMBREE_EMBREE3_LIBRARY})
       BREAK()
-    ENDIF ()
-  ENDIF ()
+    ENDIF()
+  ENDIF()
   LIST(APPEND _embree_LIBRARIES "${EMBREE_${UPPERCOMPONENT}_LIBRARY}")
 ENDFOREACH()
 

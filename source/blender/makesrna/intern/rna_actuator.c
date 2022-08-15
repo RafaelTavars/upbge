@@ -50,6 +50,7 @@ static const EnumPropertyItem actuator_type_items[] = {
     {ACT_ACTION, "ACTION", 0, "Action", ""},
     {ACT_ARMATURE, "ARMATURE", 0, "Armature", ""},
     {ACT_CAMERA, "CAMERA", 0, "Camera", ""},
+    {ACT_COLLECTION, "COLLECTION", 0, "Collection", ""},
     {ACT_CONSTRAINT, "CONSTRAINT", 0, "Constraint", ""},
     {ACT_EDIT_OBJECT, "EDIT_OBJECT", 0, "Edit Object", ""},
     {ACT_2DFILTER, "FILTER_2D", 0, "Filter 2D", ""},
@@ -61,7 +62,6 @@ static const EnumPropertyItem actuator_type_items[] = {
     {ACT_PROPERTY, "PROPERTY", 0, "Property", ""},
     {ACT_RANDOM, "RANDOM", 0, "Random", ""},
     {ACT_SCENE, "SCENE", 0, "Scene", ""},
-    {ACT_COLLECTION, "COLLECTION", 0, "Collection", ""},
     {ACT_SOUND, "SOUND", 0, "Sound", ""},
     {ACT_STATE, "STATE", 0, "State", ""},
     {ACT_STEERING, "STEERING", 0, "Steering", ""},
@@ -504,6 +504,7 @@ const EnumPropertyItem *rna_Actuator_type_itemf(bContext *C,
     ob = CTX_data_active_object(C);
   }
 
+  /* Keep the RNA items in alphabetic order */
   if (ob != NULL) {
     if (ob->type == OB_ARMATURE) {
       RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_ARMATURE);
@@ -512,22 +513,21 @@ const EnumPropertyItem *rna_Actuator_type_itemf(bContext *C,
 
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_ACTION);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_CAMERA);
+  RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_COLLECTION);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_CONSTRAINT);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_EDIT_OBJECT);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_2DFILTER);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_GAME);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_MESSAGE);
+  RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_OBJECT);  // MOTION
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_MOUSE);
-  RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_OBJECT);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_PARENT);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_PROPERTY);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_RANDOM);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_SCENE);
-  RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_COLLECTION);
-  RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_STEERING);
-
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_SOUND);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_STATE);
+  RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_STEERING);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_VIBRATION);
   RNA_enum_items_add_value(&item, &totitem, actuator_type_items, ACT_VISIBILITY);
 
@@ -794,6 +794,11 @@ static void rna_def_object_actuator(BlenderRNA *brna)
       {ACT_OBJECT_CHARACTER, "OBJECT_CHARACTER", 0, "Character Motion", ""},
       {0, NULL, 0, NULL, NULL}};
 
+  static EnumPropertyItem prop_servo_type_items[] = {
+      {ACT_SERVO_LINEAR, "SERVO_LINEAR", 0, "Linear", ""},
+      {ACT_SERVO_ANGULAR, "SERVO_ANGULAR", 0, "Angular", ""},
+      {0, NULL, 0, NULL, NULL}};
+
   srna = RNA_def_struct(brna, "ObjectActuator", "Actuator");
   RNA_def_struct_ui_text(srna, "Motion Actuator", "Actuator to control the object movement");
   RNA_def_struct_sdna_from(srna, "bObjectActuator", "data");
@@ -804,6 +809,11 @@ static void rna_def_object_actuator(BlenderRNA *brna)
   RNA_def_property_enum_funcs(prop, NULL, "rna_ObjectActuator_type_set", NULL);
   RNA_def_property_ui_text(prop, "Motion Type", "Specify the motion system");
   RNA_def_property_update(prop, NC_LOGIC, NULL);
+
+  prop = RNA_def_property(srna, "servo_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, NULL, "servotype");
+  RNA_def_property_enum_items(prop, prop_servo_type_items);
+  RNA_def_property_ui_text(prop, "Servo Type", "Specify the servo control system");
 
   prop = RNA_def_property(srna, "reference_object", PROP_POINTER, PROP_NONE);
   RNA_def_property_struct_type(prop, "Object");
@@ -972,17 +982,17 @@ static void rna_def_object_actuator(BlenderRNA *brna)
 
   prop = RNA_def_property(srna, "use_servo_limit_x", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, NULL, "flag", ACT_SERVO_LIMIT_X);
-  RNA_def_property_ui_text(prop, "X", "Set limit to force along the X axis");
+  RNA_def_property_ui_text(prop, "X", "Set limit to force/torque along the X axis");
   RNA_def_property_update(prop, NC_LOGIC, NULL);
 
   prop = RNA_def_property(srna, "use_servo_limit_y", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, NULL, "flag", ACT_SERVO_LIMIT_Y);
-  RNA_def_property_ui_text(prop, "Y", "Set limit to force along the Y axis");
+  RNA_def_property_ui_text(prop, "Y", "Set limit to force/torque along the Y axis");
   RNA_def_property_update(prop, NC_LOGIC, NULL);
 
   prop = RNA_def_property(srna, "use_servo_limit_z", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, NULL, "flag", ACT_SERVO_LIMIT_Z);
-  RNA_def_property_ui_text(prop, "Z", "Set limit to force along the Z axis");
+  RNA_def_property_ui_text(prop, "Z", "Set limit to force/torque along the Z axis");
   RNA_def_property_update(prop, NC_LOGIC, NULL);
 
   prop = RNA_def_property(srna, "use_character_jump", PROP_BOOLEAN, PROP_NONE);
@@ -1554,6 +1564,13 @@ static void rna_def_edit_object_actuator(BlenderRNA *brna)
   RNA_def_property_update(prop, NC_LOGIC, NULL);
 
   /* booleans */
+  prop = RNA_def_property(srna, "use_object_duplicate", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "flag", ACT_EDOB_ADD_OBJECT_DUPLI);
+  RNA_def_property_ui_text(
+      prop, "Full duplication", "Warning: works only for the selected object (not children)");
+  RNA_def_property_boolean_default(prop, false);
+  RNA_def_property_update(prop, NC_LOGIC, NULL);
+
   prop = RNA_def_property(srna, "children_recursive_suspend", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(
       prop, NULL, "dyn_operation_flag", ACT_EDOB_SUSPEND_PHY_CHILDREN_RECURSIVE);
@@ -1592,8 +1609,10 @@ static void rna_def_edit_object_actuator(BlenderRNA *brna)
 
   prop = RNA_def_property(srna, "use_replace_physics_mesh", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, NULL, "flag", ACT_EDOB_REPLACE_MESH_PHYS);
-  RNA_def_property_ui_text(prop, "Phys",
-                           "Replace the physics mesh (triangle bounds only - compound shapes not supported)");
+  RNA_def_property_ui_text(
+      prop,
+      "Phys",
+      "Replace the physics mesh (triangle bounds only - compound shapes not supported)");
   RNA_def_property_update(prop, NC_LOGIC, NULL);
 
   prop = RNA_def_property(srna, "use_3d_tracking", PROP_BOOLEAN, PROP_NONE);
@@ -1935,7 +1954,7 @@ static void rna_def_vibration_actuator(BlenderRNA *brna)
   prop = RNA_def_property(srna, "joy_index", PROP_INT, PROP_NONE);
   RNA_def_property_int_sdna(prop, NULL, "joyindex");
   RNA_def_property_range(prop, 0, 7);
-  RNA_def_property_ui_text(prop, "JoyIndex", "Joystick index");
+  RNA_def_property_ui_text(prop, "Joystick Index", "Joystick index");
   RNA_def_property_update(prop, NC_LOGIC, NULL);
 
   prop = RNA_def_property(srna, "joy_duration", PROP_INT, PROP_NONE);
@@ -1974,8 +1993,8 @@ static void rna_def_visibility_actuator(BlenderRNA *brna)
   RNA_def_property_ui_text(
       prop,
       "Visible",
-      "Set the objects visible (initialized from the object render restriction toggle in "
-      "physics button)");
+      "Set the objects visible (initialized from the Renders checkbox, "
+      "in Object Properties > Visibility panel or from outliner's camera icon)");
   RNA_def_property_update(prop, NC_LOGIC, NULL);
 
   prop = RNA_def_property(srna, "use_occlusion", PROP_BOOLEAN, PROP_NONE);
@@ -2005,7 +2024,7 @@ static void rna_def_twodfilter_actuator(BlenderRNA *brna)
       {ACT_2DFILTER_ENABLED, "ENABLE", 0, "Enable Filter", ""},
       {ACT_2DFILTER_DISABLED, "DISABLE", 0, "Disable Filter", ""},
       {ACT_2DFILTER_NOFILTER, "REMOVE", 0, "Remove Filter", ""},
-      {ACT_2DFILTER_MOTIONBLUR, "MOTIONBLUR", 0, "Motion Blur", ""},
+      //{ACT_2DFILTER_MOTIONBLUR, "MOTIONBLUR", 0, "Motion Blur", ""}, Deprecated since 0.3.0
       {ACT_2DFILTER_BLUR, "BLUR", 0, "Blur", ""},
       {ACT_2DFILTER_SHARPEN, "SHARPEN", 0, "Sharpen", ""},
       {ACT_2DFILTER_DILATION, "DILATION", 0, "Dilation", ""},

@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup DNA
@@ -106,7 +92,7 @@ enum {
   LIGHTPROBE_DISP_REFLECTIVE = 3,
 };
 
-/* Probe->parallax && Probe->attenuation_type*/
+/* Probe->parallax && Probe->attenuation_type. */
 enum {
   LIGHTPROBE_SHAPE_ELIPSOID = 0,
   LIGHTPROBE_SHAPE_BOX = 1,
@@ -141,7 +127,7 @@ typedef struct LightGridCache {
   float visibility_bias, visibility_bleed, visibility_range, _pad5;
 } LightGridCache;
 
-/* These are used as ubo data. They need to be aligned to size of vec4. */
+/* These are used as UBO data. They need to be aligned to size of vec4. */
 BLI_STATIC_ASSERT_ALIGN(LightProbeCache, 16)
 BLI_STATIC_ASSERT_ALIGN(LightGridCache, 16)
 
@@ -149,7 +135,7 @@ BLI_STATIC_ASSERT_ALIGN(LightGridCache, 16)
 
 typedef struct LightCacheTexture {
   struct GPUTexture *tex;
-  /** Copy of GPU datas to create GPUTextures on file read. */
+  /** Copy of GPU data to create GPUTextures on file read. */
   char *data;
   int tex_size[3];
   char data_type;
@@ -185,7 +171,7 @@ typedef struct LightCache {
 } LightCache;
 
 /* Bump the version number for lightcache data structure changes. */
-#define LIGHTCACHE_STATIC_VERSION 1
+#define LIGHTCACHE_STATIC_VERSION 2
 
 /* LightCache->type */
 enum {

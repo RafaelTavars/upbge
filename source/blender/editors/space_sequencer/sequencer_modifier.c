@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2012 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2012 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup spseq
@@ -48,7 +32,7 @@
 static bool strip_modifier_active_poll(bContext *C)
 {
   Scene *scene = CTX_data_scene(C);
-  Editing *ed = SEQ_editing_get(scene, false);
+  Editing *ed = SEQ_editing_get(scene);
 
   if (ed) {
     Sequence *seq = SEQ_select_active_get(scene);
@@ -230,14 +214,13 @@ static int strip_modifier_copy_exec(bContext *C, wmOperator *op)
   Scene *scene = CTX_data_scene(C);
   Editing *ed = scene->ed;
   Sequence *seq = SEQ_select_active_get(scene);
-  Sequence *seq_iter;
   const int type = RNA_enum_get(op->ptr, "type");
 
   if (!seq || !seq->modifiers.first) {
     return OPERATOR_CANCELLED;
   }
 
-  SEQ_CURRENT_BEGIN (ed, seq_iter) {
+  LISTBASE_FOREACH (Sequence *, seq_iter, SEQ_active_seqbase_get(ed)) {
     if (seq_iter->flag & SELECT) {
       if (seq_iter == seq) {
         continue;
@@ -259,7 +242,6 @@ static int strip_modifier_copy_exec(bContext *C, wmOperator *op)
       SEQ_modifier_list_copy(seq_iter, seq);
     }
   }
-  SEQ_CURRENT_END;
 
   SEQ_relations_invalidate_cache_preprocessed(scene, seq);
   WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);

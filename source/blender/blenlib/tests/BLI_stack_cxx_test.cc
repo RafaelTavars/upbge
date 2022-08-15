@@ -1,4 +1,4 @@
-/* Apache License, Version 2.0 */
+/* SPDX-License-Identifier: Apache-2.0 */
 
 #include "BLI_exception_safety_test_utils.hh"
 #include "BLI_stack.hh"
@@ -91,6 +91,15 @@ TEST(stack, Push)
   EXPECT_EQ(stack.size(), 1);
   stack.push(5);
   EXPECT_EQ(stack.size(), 2);
+}
+
+TEST(stack, PushAs)
+{
+  Stack<StringRef> stack;
+  stack.push_as("hello", 3);
+  stack.push_as("world", 1);
+  EXPECT_EQ(stack.pop(), "w");
+  EXPECT_EQ(stack.pop(), "hel");
 }
 
 TEST(stack, PushMultiple)

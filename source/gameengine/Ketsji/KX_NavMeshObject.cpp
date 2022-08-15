@@ -27,14 +27,13 @@
 
 #include "KX_NavMeshObject.h"
 
-#include "BKE_DerivedMesh.h"
+#include "BKE_cdderivedmesh.h"
 #include "BKE_context.h"
-#include "BKE_layer.h"
-#include "BKE_scene.h"
 #include "BLI_sort.h"
+#include "DEG_depsgraph_query.h"
 #include "MEM_guardedalloc.h"
 
-#include "BL_BlenderConverter.h"
+#include "BL_Converter.h"
 #include "CM_Message.h"
 #include "DetourStatNavMeshBuilder.h"
 #include "KX_Globals.h"
@@ -95,20 +94,20 @@ static int polyNumVerts(const unsigned short *p, const int vertsPerPoly)
   return nv;
 }
 
-static int polyIsConvex(const unsigned short *p, const int vertsPerPoly, const float *verts)
-{
-  int j, nv = polyNumVerts(p, vertsPerPoly);
-  if (nv < 3)
-    return 0;
-  for (j = 0; j < nv; j++) {
-    const float *v = &verts[3 * p[j]];
-    const float *v_next = &verts[3 * p[(j + 1) % nv]];
-    const float *v_prev = &verts[3 * p[(nv + j - 1) % nv]];
-    if (!left(v_prev, v, v_next))
-      return 0;
-  }
-  return 1;
-}
+// static int polyIsConvex(const unsigned short *p, const int vertsPerPoly, const float *verts)
+//{
+//  int j, nv = polyNumVerts(p, vertsPerPoly);
+//  if (nv < 3)
+//    return 0;
+//  for (j = 0; j < nv; j++) {
+//    const float *v = &verts[3 * p[j]];
+//    const float *v_next = &verts[3 * p[(j + 1) % nv]];
+//    const float *v_prev = &verts[3 * p[(nv + j - 1) % nv]];
+//    if (!left(v_prev, v, v_next))
+//      return 0;
+//  }
+//  return 1;
+//}
 
 /* XXX, could replace with #dist_to_line_segment_v3(), or add a squared version */
 static float distPointToSegmentSq(const float point[3], const float a[3], const float b[3])
@@ -573,8 +572,7 @@ static int polyFindVertex(const unsigned short *p,
   return res;
 }
 
-KX_NavMeshObject::KX_NavMeshObject(void *sgReplicationInfo, SG_Callbacks callbacks)
-    : KX_GameObject(sgReplicationInfo, callbacks), m_navMesh(nullptr)
+KX_NavMeshObject::KX_NavMeshObject() : KX_GameObject(), m_navMesh(nullptr)
 {
 }
 
@@ -584,11 +582,9 @@ KX_NavMeshObject::~KX_NavMeshObject()
     delete m_navMesh;
 }
 
-EXP_Value *KX_NavMeshObject::GetReplica()
+KX_PythonProxy *KX_NavMeshObject::NewInstance()
 {
-  KX_NavMeshObject *replica = new KX_NavMeshObject(*this);
-  replica->ProcessReplica();
-  return replica;
+  return new KX_NavMeshObject(*this);
 }
 
 void KX_NavMeshObject::ProcessReplica()
@@ -618,8 +614,10 @@ bool KX_NavMeshObject::BuildVertIndArrays(float *&vertices,
   /* TODO: This doesn't work currently because of eval_ctx. */
   bContext *C = KX_GetActiveEngine()->GetContext();
   Depsgraph *depsgraph = CTX_data_depsgraph_on_load(C);
-  DerivedMesh *dm = mesh_create_derived_no_virtual(
-      depsgraph, GetScene()->GetBlenderScene(), GetBlenderObject(), nullptr, &CD_MASK_MESH);
+  Object *ob_eval = DEG_get_evaluated_object(depsgraph, GetBlenderObject());
+  Mesh *final_me = (Mesh *)ob_eval->data;
+  DerivedMesh *dm = CDDM_from_mesh(final_me);
+  DM_ensure_tessface(dm);
   CustomData *pdata = dm->getPolyDataLayout(dm);
   int *recastData = (int *)CustomData_get_layer(pdata, CD_RECAST);
   if (recastData) {
@@ -685,6 +683,9 @@ bool KX_NavMeshObject::BuildVertIndArrays(float *&vertices,
             int idxInPoly = polyFindVertex(poly, vertsPerPoly, newVertexIdx);
             if (idxInPoly == -1) {
               CM_Error("building NavMeshObject, can't find vertex in polygon\n");
+              MEM_SAFE_FREE(allVerts);
+              MEM_freeN(verticesMap);
+              dm->release(dm);
               return false;
             }
             dtri[k] = idxInPoly;
@@ -813,6 +814,15 @@ bool KX_NavMeshObject::BuildNavMesh()
     if (dvertices) {
       delete[] dvertices;
     }
+    if (polys) {
+      MEM_freeN(polys);
+    }
+    if (dmeshes) {
+      MEM_freeN(dmeshes);
+    }
+    if (dtris) {
+      MEM_freeN(dtris);
+    }
     return false;
   }
 
@@ -828,15 +838,42 @@ bool KX_NavMeshObject::BuildNavMesh()
 
   if (!buildMeshAdjacency(polys, npolys, nverts, vertsPerPoly)) {
     CM_FunctionError("unable to build mesh adjacency information.");
-    delete[] vertices;
+    if (vertices) {
+      delete[] vertices;
+    }
+    if (dvertices) {
+      delete[] dvertices;
+    }
+    if (polys) {
+      MEM_freeN(polys);
+    }
+    if (dmeshes) {
+      MEM_freeN(dmeshes);
+    }
+    if (dtris) {
+      MEM_freeN(dtris);
+    }
     return false;
   }
 
   float cs = 0.2f;
 
   if (!nverts || !npolys) {
-    if (vertices)
+    if (vertices) {
       delete[] vertices;
+    }
+    if (dvertices) {
+      delete[] dvertices;
+    }
+    if (polys) {
+      MEM_freeN(polys);
+    }
+    if (dmeshes) {
+      MEM_freeN(dmeshes);
+    }
+    if (dtris) {
+      MEM_freeN(dtris);
+    }
     return false;
   }
 
@@ -1137,6 +1174,18 @@ void KX_NavMeshObject::DrawPath(const float *path, int pathLen, const MT_Vector4
 #ifdef WITH_PYTHON
 //----------------------------------------------------------------------------
 // Python
+PyObject *KX_NavMeshObject::game_object_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+  KX_NavMeshObject *obj = new KX_NavMeshObject();
+
+  PyObject *proxy = py_base_new(type, PyTuple_Pack(1, obj->GetProxy()), kwds);
+  if (!proxy) {
+    delete obj;
+    return nullptr;
+  }
+
+  return proxy;
+}
 
 PyTypeObject KX_NavMeshObject::Type = {PyVarObject_HEAD_INIT(nullptr, 0) "KX_NavMeshObject",
                                        sizeof(EXP_PyObjectPlus_Proxy),
@@ -1174,7 +1223,7 @@ PyTypeObject KX_NavMeshObject::Type = {PyVarObject_HEAD_INIT(nullptr, 0) "KX_Nav
                                        0,
                                        0,
                                        0,
-                                       py_base_new};
+                                       game_object_new};
 
 PyAttributeDef KX_NavMeshObject::Attributes[] = {
     EXP_PYATTRIBUTE_NULL  // Sentinel
@@ -1190,9 +1239,9 @@ PyMethodDef KX_NavMeshObject::Methods[] = {
 };
 
 EXP_PYMETHODDEF_DOC(KX_NavMeshObject,
-                   findPath,
-                   "findPath(start, goal): find path from start to goal points\n"
-                   "Returns a path as list of points)\n")
+                    findPath,
+                    "findPath(start, goal): find path from start to goal points\n"
+                    "Returns a path as list of points)\n")
 {
   PyObject *ob_from, *ob_to;
   if (!PyArg_ParseTuple(args, "OO:getPath", &ob_from, &ob_to))
@@ -1213,9 +1262,9 @@ EXP_PYMETHODDEF_DOC(KX_NavMeshObject,
 }
 
 EXP_PYMETHODDEF_DOC(KX_NavMeshObject,
-                   raycast,
-                   "raycast(start, goal): raycast from start to goal points\n"
-                   "Returns hit factor)\n")
+                    raycast,
+                    "raycast(start, goal): raycast from start to goal points\n"
+                    "Returns hit factor)\n")
 {
   PyObject *ob_from, *ob_to;
   if (!PyArg_ParseTuple(args, "OO:getPath", &ob_from, &ob_to))
@@ -1228,9 +1277,9 @@ EXP_PYMETHODDEF_DOC(KX_NavMeshObject,
 }
 
 EXP_PYMETHODDEF_DOC(KX_NavMeshObject,
-                   draw,
-                   "draw(mode): navigation mesh debug drawing\n"
-                   "mode: WALLS, POLYS, TRIS\n")
+                    draw,
+                    "draw(mode): navigation mesh debug drawing\n"
+                    "mode: WALLS, POLYS, TRIS\n")
 {
   int arg;
   NavMeshRenderMode renderMode = RM_TRIS;

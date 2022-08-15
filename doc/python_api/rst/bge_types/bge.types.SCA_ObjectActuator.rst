@@ -1,11 +1,13 @@
 SCA_ObjectActuator(SCA_IActuator)
-================================
+=================================
 
-base class --- :class:`SCA_IActuator`
+.. currentmodule:: bge.types
 
-.. class:: SCA_ObjectActuator(SCA_IActuator)
+base class --- :class:`~bge.types.SCA_IActuator`
 
-   The object actuator ("Motion Actuator") applies force, torque, displacement, angular displacement, 
+.. class:: SCA_ObjectActuator
+
+   The object actuator ("Motion Actuator") applies force, torque, displacement, angular displacement,
    velocity, or angular velocity to an object.
    Servo control allows to regulate force to achieve a certain speed target.
 
@@ -50,9 +52,9 @@ base class --- :class:`SCA_IActuator`
       The angular displacement vector applied by the actuator
 
       :type: Vector((x, y, z))
-      
+
       .. note::
-      
+
          Since the displacement is applied every frame, you must adjust the displacement based on the frame rate, or you game experience will depend on the player's computer speed.
 
    .. attribute:: useLocalDRot
@@ -72,9 +74,9 @@ base class --- :class:`SCA_IActuator`
       A flag specifying if the linear velocity is local.
 
       :type: boolean
-      
+
       .. note::
-      
+
          This is the target speed for servo controllers.
 
    .. attribute:: angV
@@ -93,7 +95,7 @@ base class --- :class:`SCA_IActuator`
 
       The damping parameter of the servo controller.
 
-      :type: short
+      :type: integer (short)
 
    .. attribute:: forceLimitX
 
@@ -123,4 +125,4 @@ base class --- :class:`SCA_IActuator`
 
       The object that is used as reference to compute the velocity for the servo controller.
 
-      :type: :class:`KX_GameObject` or None
+      :type: :class:`~bge.types.KX_GameObject` or None

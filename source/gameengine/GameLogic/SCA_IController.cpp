@@ -31,8 +31,7 @@
 
 #include "SCA_IController.h"
 
-#include <algorithm>
-
+#include "CM_List.h"
 #include "CM_Message.h"
 #include "EXP_ListWrapper.h"
 #include "SCA_IActuator.h"
@@ -89,10 +88,7 @@ void SCA_IController::LinkToActuator(SCA_IActuator *actua)
 
 void SCA_IController::UnlinkActuator(SCA_IActuator *actua)
 {
-  std::vector<SCA_IActuator *>::iterator it = std::find(
-      m_linkedactuators.begin(), m_linkedactuators.end(), actua);
-  if (it != m_linkedactuators.end()) {
-    m_linkedactuators.erase(it);
+  if (CM_ListRemoveIfFound(m_linkedactuators, actua)) {
     if (IsActive()) {
       actua->DecLink();
     }
@@ -115,10 +111,7 @@ void SCA_IController::LinkToSensor(SCA_ISensor *sensor)
 
 void SCA_IController::UnlinkSensor(SCA_ISensor *sensor)
 {
-  std::vector<SCA_ISensor *>::iterator it = std::find(
-      m_linkedsensors.begin(), m_linkedsensors.end(), sensor);
-  if (it != m_linkedsensors.end()) {
-    m_linkedsensors.erase(it);
+  if (CM_ListRemoveIfFound(m_linkedsensors, sensor)) {
     if (IsActive()) {
       sensor->DecLink();
     }
@@ -190,12 +183,14 @@ void SCA_IController::Activate(SG_DList &head)
 {
   if (QEmpty()) {
     if (m_bookmark) {
-      m_gameobj->m_activeBookmarkedControllers.QAddBack(this);
-      head.AddFront(&m_gameobj->m_activeBookmarkedControllers);
+      SG_QList &list = SCA_IObject::GetActiveBookmarkedControllers();
+      list.QAddBack(this);
+      head.AddFront(&list);
     }
     else {
-      InsertActiveQList(m_gameobj->m_activeControllers);
-      head.AddBack(&m_gameobj->m_activeControllers);
+      SG_QList &list = m_gameobj->GetActiveControllers();
+      InsertActiveQList(list);
+      head.AddBack(&list);
     }
   }
 }
@@ -280,12 +275,12 @@ PyObject *SCA_IController::pyattr_get_sensors(EXP_PyObjectPlus *self_v,
                                               const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   return (new EXP_ListWrapper(self_v,
-                           ((SCA_IController *)self_v)->GetProxy(),
-                           nullptr,
-                           sca_icontroller_get_sensors_size_cb,
-                           sca_icontroller_get_sensors_item_cb,
-                           sca_icontroller_get_sensors_item_name_cb,
-                           nullptr))
+                              ((SCA_IController *)self_v)->GetProxy(),
+                              nullptr,
+                              sca_icontroller_get_sensors_size_cb,
+                              sca_icontroller_get_sensors_item_cb,
+                              sca_icontroller_get_sensors_item_name_cb,
+                              nullptr))
       ->NewProxy(true);
 }
 
@@ -308,12 +303,12 @@ PyObject *SCA_IController::pyattr_get_actuators(EXP_PyObjectPlus *self_v,
                                                 const EXP_PYATTRIBUTE_DEF *attrdef)
 {
   return (new EXP_ListWrapper(self_v,
-                           ((SCA_IController *)self_v)->GetProxy(),
-                           nullptr,
-                           sca_icontroller_get_actuators_size_cb,
-                           sca_icontroller_get_actuators_item_cb,
-                           sca_icontroller_get_actuators_item_name_cb,
-                           nullptr))
+                              ((SCA_IController *)self_v)->GetProxy(),
+                              nullptr,
+                              sca_icontroller_get_actuators_size_cb,
+                              sca_icontroller_get_actuators_item_cb,
+                              sca_icontroller_get_actuators_item_name_cb,
+                              nullptr))
       ->NewProxy(true);
 }
 #endif  // WITH_PYTHON

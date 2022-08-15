@@ -31,7 +31,6 @@
 
 #pragma once
 
-
 #include "KX_GameObject.h"
 
 struct Light;
@@ -46,11 +45,11 @@ class KX_LightObject : public KX_GameObject {
   Light *m_light;
 
  public:
-  KX_LightObject(void *sgReplicationInfo, SG_Callbacks callbacks, Object *ob);
+  KX_LightObject();
   virtual ~KX_LightObject();
 
+  virtual KX_PythonProxy *NewInstance();
   virtual void ProcessReplica();
-  virtual EXP_Value *GetReplica();
 
   virtual int GetGameObjectType() const
   {
@@ -59,7 +58,9 @@ class KX_LightObject : public KX_GameObject {
 
   Light *GetLight();
 
+  virtual void SetBlenderObject(Object *obj);
+
 #ifdef WITH_PYTHON
+  static PyObject *game_object_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
 #endif
 };
-

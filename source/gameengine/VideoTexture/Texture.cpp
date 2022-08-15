@@ -1,28 +1,5 @@
-/*
- * ***** BEGIN GPL LICENSE BLOCK *****
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software  Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Copyright (c) 2007 The Zdeno Ash Miklas
- *
- * This source file is part of VideoTexture library
- *
- * Contributor(s):
- *
- * ***** END GPL LICENSE BLOCK *****
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2007 The Zdeno Ash Miklas. */
 
 /** \file gameengine/VideoTexture/Texture.cpp
  *  \ingroup bgevideotex
@@ -32,8 +9,11 @@
 
 #include "Texture.h"
 
-
 #include "BKE_image.h"
+#include "BKE_node.h"
+#include "BLI_listbase.h"
+#include "DEG_depsgraph_query.h"
+#include "DNA_material_types.h"
 #include "GPU_glew.h"
 #include "GPU_texture.h"
 #include "IMB_imbuf.h"
@@ -42,6 +22,13 @@
 #include "KX_GameObject.h"
 #include "KX_Globals.h"
 #include "RAS_IPolygonMaterial.h"
+
+#ifdef WITH_FFMPEG
+extern PyTypeObject VideoFFmpegType;
+extern PyTypeObject ImageFFmpegType;
+#endif
+extern PyTypeObject ImageMixType;
+extern PyTypeObject ImageViewportType;
 
 static std::vector<Texture *> textures;
 
@@ -64,6 +51,7 @@ Texture::Texture()
       m_imgTexture(nullptr),
       m_matTexture(nullptr),
       m_scene(nullptr),
+      m_gameobj(nullptr),
       m_mipmap(false),
       m_scaledImBuf(nullptr),
       m_lastClock(0.0),
@@ -155,7 +143,7 @@ void loadTexture(unsigned int texId,
 {
   // load texture for rendering
   glBindTexture(GL_TEXTURE_2D, texId);
-  if (1/*mipmap*/) {
+  if (1 /*mipmap*/) {
     int i;
     ImBuf *ibuf;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
@@ -291,6 +279,7 @@ static int Texture_init(PyObject *self, PyObject *args, PyObject *kwds)
           KX_GetActiveScene()->GetLogicManager(), obj, &gameObj, false, "")) {
     // process polygon material or blender material
     try {
+      tex->m_gameobj = gameObj;
       tex->m_scene = gameObj->GetScene();
       // get pointer to texture image
       RAS_IPolyMaterial *mat = getMaterial(gameObj, matID);
@@ -307,6 +296,25 @@ static int Texture_init(PyObject *self, PyObject *args, PyObject *kwds)
         }
         tex->m_imgTexture = tex->m_matTexture->GetImage();
         tex->m_useMatTexture = true;
+
+        Material *bl_mat = mat->GetBlenderMaterial();
+        bNodeTree *ntree = bl_mat->nodetree;
+        LISTBASE_FOREACH (bNode *, node, &ntree->nodes) {
+          if (node->id) {
+            if (node->type == SH_NODE_TEX_IMAGE) {
+              Image *ima = (Image *)node->id;
+              if (ima == tex->m_imgTexture) {
+                NodeTexImage *ntex = (NodeTexImage *)node->storage;
+                if (ntex->interpolation != SHD_INTERP_CLOSEST) {
+                  std::cout << "VideoTexture: Image Texture node interpolation mode is not set to "
+                               "closest. VideoTexture might not work correctly."
+                            << std::endl;
+                  break;
+                }
+              }
+            }
+          }
+        }
       }
       else if (lamp != nullptr) {
         // tex->m_imgTexture = lamp->GetLightData()->GetTextureImage(texID);
@@ -429,6 +437,23 @@ EXP_PYMETHODDEF_DOC(Texture, refresh, "Refresh texture from source")
         if (refreshSource) {
           m_source->m_image->refresh();
         }
+      }
+
+      /* Add a depsgraph notifier to trigger
+       * DRW_notify_view_update on next draw loop
+       * for some VideoTexture types (types which have a
+       * "refresh" method), because the depsgraph has not been warned yet. */
+      bool needs_notifier = m_source && (
+#ifdef WITH_FFMPEG
+                            _Py_IS_TYPE(&m_source->ob_base, &VideoFFmpegType) ||
+                             _Py_IS_TYPE(&m_source->ob_base, &ImageFFmpegType) ||
+#endif  // WITH_FFMPEG
+                             _Py_IS_TYPE(&m_source->ob_base, &ImageMixType) ||
+                             _Py_IS_TYPE(&m_source->ob_base, &ImageViewportType));
+      if (needs_notifier) {
+        /* This update notifier will be flushed next time
+         * BKE_scene_graph_update_tagged will be called */
+        DEG_id_tag_update(&m_gameobj->GetBlenderObject()->id, ID_RECALC_TRANSFORM);
       }
     }
     CATCH_EXCP;

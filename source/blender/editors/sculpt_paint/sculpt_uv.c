@@ -1,25 +1,9 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) Blender Foundation, 2002-2009
- * All rights reserved.
- * UV Sculpt tools
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2002-2009 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup edsculpt
+ * UV Sculpt tools.
  */
 
 #include "MEM_guardedalloc.h"
@@ -92,7 +76,7 @@ typedef struct UVInitialStroke {
   /* Initial Selection,for grab brushes for instance */
   UVInitialStrokeElement *initialSelection;
 
-  /* total initially selected UVs*/
+  /* Total initially selected UV's. */
   int totalInitialSelected;
 
   /* initial mouse coordinates */
@@ -101,9 +85,9 @@ typedef struct UVInitialStroke {
 
 /* custom data for uv smoothing brush */
 typedef struct UvSculptData {
-  /* Contains the first of each set of coincident uvs.
+  /* Contains the first of each set of coincident UV's.
    * These will be used to perform smoothing on and propagate the changes
-   * to their coincident uvs */
+   * to their coincident UV's */
   UvAdjacencyElement *uv;
 
   /* ...Is what it says */
@@ -121,7 +105,7 @@ typedef struct UvSculptData {
   /* timer to be used for airbrush-type brush */
   wmTimer *timer;
 
-  /* to determine quickly adjacent uvs */
+  /* to determine quickly adjacent UV's */
   UvElementMap *elementMap;
 
   /* uvsmooth Paint for fast reference */
@@ -190,7 +174,7 @@ static void HC_relaxation_iteration_uv(BMEditMesh *em,
     /* This is supposed to happen only if "Pin Edges" is on,
      * since we have initialization on stroke start.
      * If ever uv brushes get their own mode we should check for toolsettings option too. */
-    if ((sculptdata->uv[i].flag & MARK_BOUNDARY)) {
+    if (sculptdata->uv[i].flag & MARK_BOUNDARY) {
       continue;
     }
 
@@ -227,7 +211,7 @@ static void HC_relaxation_iteration_uv(BMEditMesh *em,
     }
   }
 
-  MEM_freeN(tmp_uvdata);
+  MEM_SAFE_FREE(tmp_uvdata);
 }
 
 static void laplacian_relaxation_iteration_uv(BMEditMesh *em,
@@ -256,7 +240,7 @@ static void laplacian_relaxation_iteration_uv(BMEditMesh *em,
     add_v2_v2(tmp_uvdata[tmpedge->uv1].sum_co, sculptdata->uv[tmpedge->uv2].uv);
   }
 
-  /* Original Lacplacian algorithm included removal of normal component of translation.
+  /* Original Laplacian algorithm included removal of normal component of translation.
    * here it is not needed since we translate along the UV plane always. */
   for (i = 0; i < sculptdata->totalUniqueUvs; i++) {
     copy_v2_v2(tmp_uvdata[i].p, tmp_uvdata[i].sum_co);
@@ -268,7 +252,7 @@ static void laplacian_relaxation_iteration_uv(BMEditMesh *em,
     /* This is supposed to happen only if "Pin Edges" is on,
      * since we have initialization on stroke start.
      * If ever uv brushes get their own mode we should check for toolsettings option too. */
-    if ((sculptdata->uv[i].flag & MARK_BOUNDARY)) {
+    if (sculptdata->uv[i].flag & MARK_BOUNDARY) {
       continue;
     }
 
@@ -299,7 +283,7 @@ static void laplacian_relaxation_iteration_uv(BMEditMesh *em,
     }
   }
 
-  MEM_freeN(tmp_uvdata);
+  MEM_SAFE_FREE(tmp_uvdata);
 }
 
 static void uv_sculpt_stroke_apply(bContext *C,
@@ -430,23 +414,16 @@ static void uv_sculpt_stroke_exit(bContext *C, wmOperator *op)
   if (data->timer) {
     WM_event_remove_timer(CTX_wm_manager(C), CTX_wm_window(C), data->timer);
   }
-  if (data->elementMap) {
-    BM_uv_element_map_free(data->elementMap);
-  }
-  if (data->uv) {
-    MEM_freeN(data->uv);
-  }
-  if (data->uvedges) {
-    MEM_freeN(data->uvedges);
-  }
+  BM_uv_element_map_free(data->elementMap);
+  data->elementMap = NULL;
+  MEM_SAFE_FREE(data->uv);
+  MEM_SAFE_FREE(data->uvedges);
   if (data->initial_stroke) {
-    if (data->initial_stroke->initialSelection) {
-      MEM_freeN(data->initial_stroke->initialSelection);
-    }
-    MEM_freeN(data->initial_stroke);
+    MEM_SAFE_FREE(data->initial_stroke->initialSelection);
+    MEM_SAFE_FREE(data->initial_stroke);
   }
 
-  MEM_freeN(data);
+  MEM_SAFE_FREE(data);
   op->customdata = NULL;
 }
 
@@ -457,7 +434,7 @@ static int uv_element_offset_from_face_get(
   if (!element || (doIslands && element->island != island_index)) {
     return -1;
   }
-  return element - map->buf;
+  return element - map->storage;
 }
 
 static uint uv_edge_hash(const void *key)
@@ -491,7 +468,6 @@ static UvSculptData *uv_sculpt_stroke_init(bContext *C, wmOperator *op, const wm
   BKE_curvemapping_init(ts->uvsculpt->paint.brush->curve);
 
   if (data) {
-    int counter = 0, i;
     ARegion *region = CTX_wm_region(C);
     float co[2];
     BMFace *efa;
@@ -505,7 +481,7 @@ static UvSculptData *uv_sculpt_stroke_init(bContext *C, wmOperator *op, const wm
 
     bool do_island_optimization = !(ts->uv_sculpt_settings & UV_SCULPT_ALL_ISLANDS);
     int island_index = 0;
-    /* Holds, for each UvElement in elementMap, a pointer to its unique uv.*/
+    /* Holds, for each UvElement in elementMap, an index of its unique UV. */
     int *uniqueUv;
     data->tool = (RNA_enum_get(op->ptr, "mode") == BRUSH_STROKE_SMOOTH) ?
                      UV_SCULPT_TOOL_RELAX :
@@ -514,23 +490,12 @@ static UvSculptData *uv_sculpt_stroke_init(bContext *C, wmOperator *op, const wm
 
     data->uvsculpt = &ts->uvsculpt->paint;
 
-    if (do_island_optimization) {
-      /* We will need island information */
-      if (ts->uv_flag & UV_SYNC_SELECTION) {
-        data->elementMap = BM_uv_element_map_create(bm, scene, false, false, true, true);
-      }
-      else {
-        data->elementMap = BM_uv_element_map_create(bm, scene, true, false, true, true);
-      }
-    }
-    else {
-      if (ts->uv_flag & UV_SYNC_SELECTION) {
-        data->elementMap = BM_uv_element_map_create(bm, scene, false, false, true, false);
-      }
-      else {
-        data->elementMap = BM_uv_element_map_create(bm, scene, true, false, true, false);
-      }
-    }
+    /* Winding was added to island detection in 5197aa04c6bd
+     * However the sculpt tools can flip faces, potentially creating orphaned islands.
+     * See T100132 */
+    bool use_winding = false;
+    data->elementMap = BM_uv_element_map_create(
+        bm, scene, false, use_winding, do_island_optimization);
 
     if (!data->elementMap) {
       uv_sculpt_stroke_exit(C, op);
@@ -550,28 +515,22 @@ static UvSculptData *uv_sculpt_stroke_init(bContext *C, wmOperator *op, const wm
       island_index = element->island;
     }
 
-    /* Count 'unique' uvs */
-    for (i = 0; i < data->elementMap->totalUVs; i++) {
-      if (data->elementMap->buf[i].separate &&
-          (!do_island_optimization || data->elementMap->buf[i].island == island_index)) {
-        counter++;
-      }
+    /* Count 'unique' UV's */
+    int unique_uvs = data->elementMap->total_unique_uvs;
+    if (do_island_optimization) {
+      unique_uvs = data->elementMap->island_total_unique_uvs[island_index];
     }
 
     /* Allocate the unique uv buffers */
-    data->uv = MEM_mallocN(sizeof(*data->uv) * counter, "uv_brush_unique_uvs");
-    uniqueUv = MEM_mallocN(sizeof(*uniqueUv) * data->elementMap->totalUVs,
+    data->uv = MEM_mallocN(sizeof(*data->uv) * unique_uvs, "uv_brush_unique_uvs");
+    uniqueUv = MEM_mallocN(sizeof(*uniqueUv) * data->elementMap->total_uvs,
                            "uv_brush_unique_uv_map");
     edgeHash = BLI_ghash_new(uv_edge_hash, uv_edge_compare, "uv_brush_edge_hash");
     /* we have at most totalUVs edges */
-    edges = MEM_mallocN(sizeof(*edges) * data->elementMap->totalUVs, "uv_brush_all_edges");
+    edges = MEM_mallocN(sizeof(*edges) * data->elementMap->total_uvs, "uv_brush_all_edges");
     if (!data->uv || !uniqueUv || !edgeHash || !edges) {
-      if (edges) {
-        MEM_freeN(edges);
-      }
-      if (uniqueUv) {
-        MEM_freeN(uniqueUv);
-      }
+      MEM_SAFE_FREE(edges);
+      MEM_SAFE_FREE(uniqueUv);
       if (edgeHash) {
         BLI_ghash_free(edgeHash, NULL, NULL);
       }
@@ -579,12 +538,12 @@ static UvSculptData *uv_sculpt_stroke_init(bContext *C, wmOperator *op, const wm
       return NULL;
     }
 
-    data->totalUniqueUvs = counter;
-    /* So that we can use this as index for the UvElements */
-    counter = -1;
+    data->totalUniqueUvs = unique_uvs;
+    /* Index for the UvElements. */
+    int counter = -1;
     /* initialize the unique UVs */
-    for (i = 0; i < bm->totvert; i++) {
-      UvElement *element = data->elementMap->vert[i];
+    for (int i = 0; i < bm->totvert; i++) {
+      UvElement *element = data->elementMap->vertex[i];
       for (; element; element = element->next) {
         if (element->separate) {
           if (do_island_optimization && (element->island != island_index)) {
@@ -603,10 +562,11 @@ static UvSculptData *uv_sculpt_stroke_init(bContext *C, wmOperator *op, const wm
           data->uv[counter].flag = 0;
           data->uv[counter].uv = luv->uv;
         }
-        /* pointer arithmetic to the rescue, as always :)*/
-        uniqueUv[element - data->elementMap->buf] = counter;
+        /* Pointer arithmetic to the rescue, as always :). */
+        uniqueUv[element - data->elementMap->storage] = counter;
       }
     }
+    BLI_assert(counter + 1 == unique_uvs);
 
     /* Now, on to generate our uv connectivity data */
     counter = 0;
@@ -627,8 +587,8 @@ static UvSculptData *uv_sculpt_stroke_init(bContext *C, wmOperator *op, const wm
         offset2 = uniqueUv[itmp2];
 
         edges[counter].flag = 0;
-        /* using an order policy, sort uvs according to address space. This avoids
-         * Having two different UvEdges with the same uvs on different positions  */
+        /* Using an order policy, sort UV's according to address space.
+         * This avoids having two different UvEdges with the same UV's on different positions. */
         if (offset1 < offset2) {
           edges[counter].uv1 = offset1;
           edges[counter].uv2 = offset2;
@@ -651,32 +611,34 @@ static UvSculptData *uv_sculpt_stroke_init(bContext *C, wmOperator *op, const wm
       }
     }
 
-    MEM_freeN(uniqueUv);
+    MEM_SAFE_FREE(uniqueUv);
 
     /* Allocate connectivity data, we allocate edges once */
     data->uvedges = MEM_mallocN(sizeof(*data->uvedges) * BLI_ghash_len(edgeHash),
                                 "uv_brush_edge_connectivity_data");
     if (!data->uvedges) {
       BLI_ghash_free(edgeHash, NULL, NULL);
-      MEM_freeN(edges);
+      MEM_SAFE_FREE(edges);
       uv_sculpt_stroke_exit(C, op);
       return NULL;
     }
 
     /* fill the edges with data */
-    i = 0;
-    GHASH_ITER (gh_iter, edgeHash) {
-      data->uvedges[i++] = *((UvEdge *)BLI_ghashIterator_getKey(&gh_iter));
+    {
+      int i = 0;
+      GHASH_ITER (gh_iter, edgeHash) {
+        data->uvedges[i++] = *((UvEdge *)BLI_ghashIterator_getKey(&gh_iter));
+      }
+      data->totalUvEdges = BLI_ghash_len(edgeHash);
     }
-    data->totalUvEdges = BLI_ghash_len(edgeHash);
 
     /* cleanup temporary stuff */
     BLI_ghash_free(edgeHash, NULL, NULL);
-    MEM_freeN(edges);
+    MEM_SAFE_FREE(edges);
 
-    /* transfer boundary edge property to uvs */
+    /* transfer boundary edge property to UV's */
     if (ts->uv_sculpt_settings & UV_SCULPT_LOCK_BORDERS) {
-      for (i = 0; i < data->totalUvEdges; i++) {
+      for (int i = 0; i < data->totalUvEdges; i++) {
         if (!data->uvedges[i].flag) {
           data->uv[data->uvedges[i].uv1].flag |= MARK_BOUNDARY;
           data->uv[data->uvedges[i].uv2].flag |= MARK_BOUNDARY;
@@ -723,7 +685,7 @@ static UvSculptData *uv_sculpt_stroke_init(bContext *C, wmOperator *op, const wm
 
       counter = 0;
 
-      for (i = 0; i < data->totalUniqueUvs; i++) {
+      for (int i = 0; i < data->totalUniqueUvs; i++) {
         float dist, diff[2];
         if (data->uv[i].flag & MARK_BOUNDARY) {
           continue;

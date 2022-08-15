@@ -1,13 +1,15 @@
 BL_Shader(EXP_PyObjectPlus)
-=======================
+===========================
 
-base class --- :class:`EXP_PyObjectPlus`
+.. currentmodule:: bge.types
 
-.. class:: BL_Shader(EXP_PyObjectPlus)
+base class --- :class:`~bge.types.EXP_PyObjectPlus`
 
-   BL_Shader is a class used to compile and use custom shaders scripts. It supports vertex, fragment and geometry shader scripts.
-   The shader is compiled with a generated header for the three shaders scripts.
+.. class:: BL_Shader
+
+   BL_Shader is a class used to compile and use custom shaders scripts.
    This header set the ``#version`` directive, so the user must not define his own `#version`.
+   Since 0.3.0, this class is only used with custom 2D filters.
 
    .. attribute:: enabled
 
@@ -16,6 +18,8 @@ base class --- :class:`EXP_PyObjectPlus`
       :type: boolean
 
    .. attribute:: objectCallbacks
+
+   .. deprecated:: 0.3.0
 
       The list of python callbacks executed when the shader is used to render an object.
       All the functions can expect as argument the object currently rendered.
@@ -28,6 +32,8 @@ base class --- :class:`EXP_PyObjectPlus`
       :type: list of functions and/or methods
 
    .. attribute:: bindCallbacks
+
+   .. deprecated:: 0.3.0
 
       The list of python callbacks executed when the shader is begin used to render.
 
@@ -43,6 +49,8 @@ base class --- :class:`EXP_PyObjectPlus`
       :type fList: list[float]
 
    .. method:: delSource()
+
+   .. deprecated:: 0.3.0
 
       Clear the shader. Use this method before the source is changed with :data:`setSource`.
 
@@ -69,6 +77,8 @@ base class --- :class:`EXP_PyObjectPlus`
 
    .. method:: setAttrib(enum)
 
+   .. deprecated:: 0.3.0
+
       Set attribute location. (The parameter is ignored a.t.m. and the value of "tangent" is always used.)
 
       :arg enum: attribute location value
@@ -85,6 +95,8 @@ base class --- :class:`EXP_PyObjectPlus`
 
    .. method:: setSource(vertexProgram, fragmentProgram, apply)
 
+   .. deprecated:: 0.3.0
+
       Set the vertex and fragment programs
 
       :arg vertexProgram: Vertex program
@@ -95,6 +107,8 @@ base class --- :class:`EXP_PyObjectPlus`
       :type apply: boolean
 
    .. method:: setSourceList(sources, apply)
+
+   .. deprecated:: 0.3.0
 
       Set the vertex, fragment and geometry shader programs.
 
@@ -253,10 +267,12 @@ base class --- :class:`EXP_PyObjectPlus`
 
    .. method:: setUniformEyef(name)
 
-      Set a uniform with a float value that reflects the eye being render in stereo mode: 
+   .. deprecated:: 0.3.0
+
+      Set a uniform with a float value that reflects the eye being render in stereo mode:
       0.0 for the left eye, 0.5 for the right eye. In non stereo mode, the value of the uniform
       is fixed to 0.0. The typical use of this uniform is in stereo mode to sample stereo textures
-      containing the left and right eye images in a top-bottom order. 
+      containing the left and right eye images in a top-bottom order.
 
       :arg name: the uniform name
       :type name: string

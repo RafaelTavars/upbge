@@ -1,20 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * Copyright 2016, Blender Foundation.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2016 Blender Foundation. */
 
 /** \file
  * \ingroup draw
@@ -41,7 +26,7 @@
 
 #define MAX_TIMER_NAME 32
 #define MAX_NESTED_TIMER 8
-#define CHUNK_SIZE 8
+#define MIM_RANGE_LEN 8
 #define GPU_TIMER_FALLOFF 0.1
 
 typedef struct DRWTimer {
@@ -82,7 +67,7 @@ void DRW_stats_begin(void)
 
   if (DTP.is_recording && DTP.timers == NULL) {
     DTP.chunk_count = 1;
-    DTP.timer_count = DTP.chunk_count * CHUNK_SIZE;
+    DTP.timer_count = DTP.chunk_count * MIM_RANGE_LEN;
     DTP.timers = MEM_callocN(sizeof(DRWTimer) * DTP.timer_count, "DRWTimer stack");
   }
   else if (!DTP.is_recording && DTP.timers != NULL) {
@@ -99,7 +84,7 @@ static DRWTimer *drw_stats_timer_get(void)
   if (UNLIKELY(DTP.timer_increment >= DTP.timer_count)) {
     /* Resize the stack. */
     DTP.chunk_count++;
-    DTP.timer_count = DTP.chunk_count * CHUNK_SIZE;
+    DTP.timer_count = DTP.chunk_count * MIM_RANGE_LEN;
     DTP.timers = MEM_recallocN(DTP.timers, sizeof(DRWTimer) * DTP.timer_count);
   }
 
@@ -129,8 +114,6 @@ static void drw_stats_timer_start_ex(const char *name, const bool is_query)
   }
 }
 
-/* Use this to group the queries. It does NOT keep track
- * of the time, it only sum what the queries inside it. */
 void DRW_stats_group_start(const char *name)
 {
   drw_stats_timer_start_ex(name, false);
@@ -147,11 +130,9 @@ void DRW_stats_group_end(void)
   }
 }
 
-/* NOTE: Only call this when no sub timer will be called. */
 void DRW_stats_query_start(const char *name)
 {
   GPU_debug_group_begin(name);
-  drw_stats_timer_start_ex(name, false);
   drw_stats_timer_start_ex(name, true);
 }
 
@@ -210,16 +191,16 @@ void DRW_stats_reset(void)
 
 static void draw_stat_5row(const rcti *rect, int u, int v, const char *txt, const int size)
 {
-  BLF_draw_default_ascii(rect->xmin + (1 + u * 5) * U.widget_unit,
-                         rect->ymax - (3 + v) * U.widget_unit,
-                         0.0f,
-                         txt,
-                         size);
+  BLF_draw_default(rect->xmin + (1 + u * 5) * U.widget_unit,
+                   rect->ymax - (3 + v) * U.widget_unit,
+                   0.0f,
+                   txt,
+                   size);
 }
 
 static void draw_stat(const rcti *rect, int u, int v, const char *txt, const int size)
 {
-  BLF_draw_default_ascii(
+  BLF_draw_default(
       rect->xmin + (1 + u) * U.widget_unit, rect->ymax - (3 + v) * U.widget_unit, 0.0f, txt, size);
 }
 
@@ -258,10 +239,8 @@ void DRW_stats_draw(const rcti *rect)
 
   /* Engines rows */
   char time_to_txt[16];
-  LISTBASE_FOREACH (LinkData *, link, &DST.enabled_engines) {
+  DRW_ENABLED_ENGINE_ITER (DST.view_data_active, engine, data) {
     u = 0;
-    DrawEngineType *engine = link->data;
-    ViewportEngineData *data = drw_viewport_engine_data_ensure(engine);
 
     draw_stat_5row(rect, u++, v, engine->idname, sizeof(engine->idname));
 
@@ -298,7 +277,7 @@ void DRW_stats_draw(const rcti *rect)
   v += 2;
 
   u = 0;
-  double *cache_time = GPU_viewport_cache_time_get(DST.viewport);
+  double *cache_time = DRW_view_data_cache_time_get(DST.view_data_active);
   sprintf(col_label, "Cache Time");
   draw_stat_5row(rect, u++, v, col_label, sizeof(col_label));
   sprintf(time_to_txt, "%.2fms", *cache_time);

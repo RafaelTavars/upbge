@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2017 by Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2017 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup draw
@@ -41,8 +25,9 @@
 
 static void metaball_batch_cache_clear(MetaBall *mb);
 
-/* ---------------------------------------------------------------------- */
-/* MetaBall GPUBatch Cache */
+/* -------------------------------------------------------------------- */
+/** \name MetaBall GPUBatch Cache
+ * \{ */
 
 typedef struct MetaBallBatchCache {
   GPUBatch *batch;
@@ -140,7 +125,7 @@ static void metaball_batch_cache_clear(MetaBall *mb)
   GPU_BATCH_DISCARD_SAFE(cache->edge_detection);
   GPU_VERTBUF_DISCARD_SAFE(cache->pos_nor_in_order);
   GPU_INDEXBUF_DISCARD_SAFE(cache->edges_adj_lines);
-  /* Note: shaded_triangles[0] is already freed by cache->batch */
+  /* NOTE: shaded_triangles[0] is already freed by `cache->batch`. */
   MEM_SAFE_FREE(cache->shaded_triangles);
   cache->mat_len = 0;
   cache->is_manifold = false;
@@ -174,6 +159,8 @@ static GPUIndexBuf *mball_batch_cache_get_edges_adj_lines(Object *ob, MetaBallBa
   }
   return cache->edges_adj_lines;
 }
+
+/** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Public Object/MetaBall API
@@ -303,3 +290,5 @@ int DRW_metaball_material_count_get(MetaBall *mb)
 {
   return max_ii(1, mb->totcol);
 }
+
+/** \} */

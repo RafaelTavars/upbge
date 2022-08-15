@@ -1,11 +1,11 @@
 KX_LodLevel(EXP_PyObjectPlus)
-=========================
+=============================
 
-.. module:: bge.types
+.. currentmodule:: bge.types
 
-base class --- :class:`EXP_PyObjectPlus`
+base class --- :class:`~bge.types.EXP_PyObjectPlus`
 
-.. class:: KX_LodLevel(EXP_PyObjectPlus)
+.. class:: KX_LodLevel
 
    A single lod level for a game object lod manager.
 
@@ -13,7 +13,7 @@ base class --- :class:`EXP_PyObjectPlus`
 
       The mesh used for this lod level. (read only)
 
-      :type: :class:`RAS_MeshObject`
+      :type: :class:`~bge.types.KX_MeshProxy`
 
    .. attribute:: level
 
@@ -35,11 +35,15 @@ base class --- :class:`EXP_PyObjectPlus`
 
    .. attribute:: useMesh
 
+   .. deprecated:: 0.3.0
+
       Return True if the lod level uses a different mesh than the original object mesh. (read only)
 
       :type: boolean
 
    .. attribute:: useMaterial
+
+   .. deprecated:: 0.3.0
 
       Return True if the lod level uses a different material than the original object mesh material. (read only)
 

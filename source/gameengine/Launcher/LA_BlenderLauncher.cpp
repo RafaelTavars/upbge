@@ -31,11 +31,9 @@
 #include "BKE_screen.h"
 #undef new
 
-#include "BKE_context.h"
 #include "BLI_rect.h"
 #include "DNA_scene_types.h"
 #include "WM_api.h"
-#include "WM_types.h"
 #include "wm_event_system.h"
 
 #include "CM_Message.h"
@@ -55,7 +53,17 @@ LA_BlenderLauncher::LA_BlenderLauncher(GHOST_ISystem *system,
                                        int alwaysUseExpandFraming,
                                        bool useViewportRender,
                                        int shadingTypeRuntime)
-    : LA_Launcher(system, maggie, scene, gs, stereoMode, scene->gm.aasamples, argc, argv, context, useViewportRender, shadingTypeRuntime),
+    : LA_Launcher(system,
+                  maggie,
+                  scene,
+                  gs,
+                  stereoMode,
+                  scene->gm.aasamples,
+                  argc,
+                  argv,
+                  context,
+                  useViewportRender,
+                  shadingTypeRuntime),
       m_context(context),
       m_ar(ar),
       m_camFrame(camframe),
@@ -138,7 +146,7 @@ void LA_BlenderLauncher::InitEngine()
   m_savedBlenderData.camera = m_startScene->camera;
 
   if (m_view3d->scenelock == 0) {
-    m_startScene->lay = m_view3d->local_view_uuid;
+    // m_startScene->lay = m_view3d->local_view_uuid;
     m_startScene->camera = m_view3d->camera;
   }
 
@@ -161,7 +169,7 @@ void LA_BlenderLauncher::ExitEngine()
 
 void LA_BlenderLauncher::RenderEngine()
 {
-  if (m_drawLetterBox) { // not used
+  if (m_drawLetterBox) {  // not used
     // Clear screen to border color
     // We do this here since we set the canvas to be within the frames. This means the engine
     // itself is unaware of the extra space, so we clear the whole region for it.

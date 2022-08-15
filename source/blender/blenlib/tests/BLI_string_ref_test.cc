@@ -1,4 +1,4 @@
-/* Apache License, Version 2.0 */
+/* SPDX-License-Identifier: Apache-2.0 */
 
 #include "BLI_strict_flags.h"
 #include "BLI_string_ref.hh"
@@ -246,10 +246,18 @@ TEST(string_ref, DropPrefixN)
   EXPECT_EQ(ref3, "");
 }
 
-TEST(string_ref, DropPrefix)
+TEST(string_ref, DropPrefixLargeN)
 {
   StringRef ref("test");
-  StringRef ref2 = ref.drop_prefix("tes");
+  StringRef ref2 = ref.drop_prefix(100);
+  EXPECT_EQ(ref2.size(), 0);
+  EXPECT_EQ(ref2, "");
+}
+
+TEST(string_ref, DropKnownPrefix)
+{
+  StringRef ref("test");
+  StringRef ref2 = ref.drop_known_prefix("tes");
   EXPECT_EQ(ref2.size(), 1);
   EXPECT_EQ(ref2, "t");
 }
@@ -260,6 +268,52 @@ TEST(string_ref, DropSuffix)
   StringRef ref2 = ref.drop_suffix(1);
   EXPECT_EQ(ref2.size(), 3);
   EXPECT_EQ(ref2, "tes");
+}
+
+TEST(string_ref, DropSuffixLargeN)
+{
+  StringRef ref("test");
+  StringRef ref2 = ref.drop_suffix(100);
+  EXPECT_EQ(ref2.size(), 0);
+  EXPECT_EQ(ref2, "");
+}
+
+TEST(string_ref, TrimArbitrary)
+{
+  StringRef ref1("test");
+  StringRef ref2("   test ");
+  StringRef ref3(" \t  Urož with spaces ");
+  StringRef ref4("žžžžleepyžžž");
+  EXPECT_EQ(ref1.trim("t"), "es");
+  EXPECT_EQ(ref1.trim("te"), "s");
+  EXPECT_EQ(ref1.trim("test"), "");
+  EXPECT_EQ(ref2.trim("t"), "   test ");
+  EXPECT_EQ(ref2.trim(""), "   test ");
+  EXPECT_EQ(ref3.trim(" "), "\t  Urož with spaces"); /* TAB should be kept. */
+  EXPECT_EQ(ref4.trim("ž"), "leepy");
+}
+
+TEST(string_ref, TrimWhitespace)
+{
+  StringRef ref1("test");
+  StringRef ref2("   test ");
+  StringRef ref3(" \t  Urož with spaces ");
+  StringRef ref4(" \t \n\r  \t ");
+  EXPECT_EQ(ref1.trim(), "test");
+  EXPECT_EQ(ref2.trim(), "test");
+  EXPECT_EQ(ref3.trim(), "Urož with spaces");
+  EXPECT_EQ(ref4.trim(), "");
+}
+
+TEST(string_ref, TrimCharacter)
+{
+  StringRef ref1("test");
+  StringRef ref2("   test ");
+  StringRef ref3("does this work?");
+  EXPECT_EQ(ref1.trim('t'), "es");
+  EXPECT_EQ(ref1.trim('p'), "test");
+  EXPECT_EQ(ref2.trim(' '), "test");
+  EXPECT_EQ(ref3.trim('\000'), "does this work?");
 }
 
 TEST(string_ref, Substr)
@@ -298,7 +352,7 @@ TEST(string_ref, ToStringView)
   EXPECT_EQ(view, "hello");
 }
 
-TEST(string_ref, constexpr_)
+TEST(string_ref, Constexpr)
 {
   constexpr StringRef sref("World");
   BLI_STATIC_ASSERT(sref[2] == 'r', "");

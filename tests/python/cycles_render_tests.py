@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Apache License, Version 2.0
+# SPDX-License-Identifier: Apache-2.0
 
 import argparse
 import os
@@ -8,6 +8,55 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# List of .blend files that are known to be failing and are not ready to be
+# tested, or that only make sense on some devices. Accepts regular expressions.
+BLACKLIST_ALL = [
+    # Blacklisted due overlapping object differences between platforms.
+    "hair_geom_reflection.blend",
+    "hair_geom_transmission.blend",
+    "hair_instancer_uv.blend",
+    "principled_hair_directcoloring.blend",
+    "visibility_particles.blend",
+]
+
+BLACKLIST_OSL = [
+    # OSL only supported on CPU.
+    '.*_osl.blend',
+    'osl_.*.blend',
+]
+
+BLACKLIST_OPTIX = [
+    # Ray intersection precision issues
+    'T50164.blend',
+    'T43865.blend',
+]
+
+BLACKLIST_METAL = [
+    # No MNEE for Metal currently
+    "underwater_caustics.blend",
+]
+
+BLACKLIST_GPU = [
+    # Uninvestigated differences with GPU.
+    'image_log.blend',
+    'T40964.blend',
+    'T45609.blend',
+    'smoke_color.blend',
+    'bevel_mblur.blend',
+    # Inconsistency between Embree and Hair primitive on GPU.
+    'denoise_hair.blend',
+    'hair_basemesh_intercept.blend',
+    'hair_instancer_uv.blend',
+    'hair_length_info.blend',
+    'hair_particle_random.blend',
+    "hair_transmission.blend",
+    'principled_hair_.*.blend',
+    'transparent_shadow_hair.*.blend',
+    # Inconsistent handling of overlapping objects.
+    "T41143.blend",
+    "visibility_particles.blend",
+]
 
 
 def get_arguments(filepath, output_filepath):
@@ -51,6 +100,7 @@ def create_argparse():
     parser.add_argument("-outdir", nargs=1)
     parser.add_argument("-idiff", nargs=1)
     parser.add_argument("-device", nargs=1)
+    parser.add_argument("-blacklist", nargs="*")
     return parser
 
 
@@ -64,8 +114,18 @@ def main():
     output_dir = args.outdir[0]
     device = args.device[0]
 
+    blacklist = BLACKLIST_ALL
+    if device != 'CPU':
+        blacklist += BLACKLIST_GPU
+    if device != 'CPU' or 'OSL' in args.blacklist:
+        blacklist += BLACKLIST_OSL
+    if device == 'OPTIX':
+        blacklist += BLACKLIST_OPTIX
+    if device == 'METAL':
+        blacklist += BLACKLIST_METAL
+
     from modules import render_report
-    report = render_report.Report('Cycles', output_dir, idiff, device)
+    report = render_report.Report('Cycles', output_dir, idiff, device, blacklist)
     report.set_pixelated(True)
     report.set_reference_dir("cycles_renders")
     if device == 'CPU':

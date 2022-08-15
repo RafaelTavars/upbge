@@ -27,6 +27,7 @@ set(INC
   .
   ../Expressions
   ../GameLogic
+  ../Ketsji
   ../SceneGraph
   ../../blender/blenlib
   ../../blender/python/generic
@@ -40,11 +41,14 @@ set(INC_SYS
 )
 
 set(SRC
+  CM_Clock.cpp
   CM_Message.cpp
   CM_Thread.cpp
   CM_Utils.cpp
 
+  CM_Clock.h
   CM_Format.h
+  CM_List.h
   CM_Message.h
   CM_RefCount.h
   CM_Thread.h

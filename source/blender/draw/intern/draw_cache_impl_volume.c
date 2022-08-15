@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2017 by Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2017 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup draw
@@ -152,7 +136,7 @@ typedef struct VolumeWireframeUserData {
 } VolumeWireframeUserData;
 
 static void drw_volume_wireframe_cb(
-    void *userdata, float (*verts)[3], int (*edges)[2], int totvert, int totedge)
+    void *userdata, const float (*verts)[3], const int (*edges)[2], int totvert, int totedge)
 {
   VolumeWireframeUserData *data = userdata;
   Scene *scene = data->scene;
@@ -225,7 +209,7 @@ GPUBatch *DRW_volume_batch_cache_get_wireframes_face(Volume *volume)
   VolumeBatchCache *cache = volume_batch_cache_get(volume);
 
   if (cache->face_wire.batch == NULL) {
-    VolumeGrid *volume_grid = BKE_volume_grid_active_get(volume);
+    const VolumeGrid *volume_grid = BKE_volume_grid_active_get_for_read(volume);
     if (volume_grid == NULL) {
       return NULL;
     }
@@ -274,7 +258,7 @@ GPUBatch *DRW_volume_batch_cache_get_selection_surface(Volume *volume)
 {
   VolumeBatchCache *cache = volume_batch_cache_get(volume);
   if (cache->selection_surface == NULL) {
-    VolumeGrid *volume_grid = BKE_volume_grid_active_get(volume);
+    const VolumeGrid *volume_grid = BKE_volume_grid_active_get_for_read(volume);
     if (volume_grid == NULL) {
       return NULL;
     }
@@ -284,8 +268,8 @@ GPUBatch *DRW_volume_batch_cache_get_selection_surface(Volume *volume)
   return cache->selection_surface;
 }
 
-static DRWVolumeGrid *volume_grid_cache_get(Volume *volume,
-                                            VolumeGrid *grid,
+static DRWVolumeGrid *volume_grid_cache_get(const Volume *volume,
+                                            const VolumeGrid *grid,
                                             VolumeBatchCache *cache)
 {
   const char *name = BKE_volume_grid_name(grid);
@@ -304,7 +288,7 @@ static DRWVolumeGrid *volume_grid_cache_get(Volume *volume,
   BLI_addtail(&cache->grids, cache_grid);
 
   /* TODO: can we load this earlier, avoid accessing the global and take
-   * advantage of dependency graph multithreading? */
+   * advantage of dependency graph multi-threading? */
   BKE_volume_load(volume, G.main);
 
   /* Test if we support textures with the number of channels. */
@@ -351,7 +335,7 @@ static DRWVolumeGrid *volume_grid_cache_get(Volume *volume,
   return cache_grid;
 }
 
-DRWVolumeGrid *DRW_volume_batch_cache_get_grid(Volume *volume, VolumeGrid *volume_grid)
+DRWVolumeGrid *DRW_volume_batch_cache_get_grid(Volume *volume, const VolumeGrid *volume_grid)
 {
   VolumeBatchCache *cache = volume_batch_cache_get(volume);
   DRWVolumeGrid *grid = volume_grid_cache_get(volume, volume_grid, cache);

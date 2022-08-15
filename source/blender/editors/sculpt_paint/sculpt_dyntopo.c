@@ -1,21 +1,5 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2020 Blender Foundation.
- * All rights reserved.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright 2020 Blender Foundation. All rights reserved. */
 
 /** \file
  * \ingroup edsculpt
@@ -94,15 +78,9 @@ void SCULPT_pbvh_clear(Object *ob)
     ss->pbvh = NULL;
   }
 
-  if (ss->pmap) {
-    MEM_freeN(ss->pmap);
-    ss->pmap = NULL;
-  }
+  MEM_SAFE_FREE(ss->pmap);
 
-  if (ss->pmap_mem) {
-    MEM_freeN(ss->pmap_mem);
-    ss->pmap_mem = NULL;
-  }
+  MEM_SAFE_FREE(ss->pmap_mem);
 
   BKE_object_free_derived_caches(ob);
 
@@ -114,13 +92,16 @@ void SCULPT_dyntopo_node_layers_add(SculptSession *ss)
 {
   int cd_node_layer_index;
 
-  char layer_id[] = "_dyntopo_node_id";
+  char node_vertex_id[] = "_dyntopo_vnode_id";
+  char node_face_id[] = "_dyntopo_fnode_id";
 
-  cd_node_layer_index = CustomData_get_named_layer_index(&ss->bm->vdata, CD_PROP_INT32, layer_id);
+  cd_node_layer_index = CustomData_get_named_layer_index(
+      &ss->bm->vdata, CD_PROP_INT32, node_vertex_id);
+
   if (cd_node_layer_index == -1) {
-    BM_data_layer_add_named(ss->bm, &ss->bm->vdata, CD_PROP_INT32, layer_id);
+    BM_data_layer_add_named(ss->bm, &ss->bm->vdata, CD_PROP_INT32, node_vertex_id);
     cd_node_layer_index = CustomData_get_named_layer_index(
-        &ss->bm->vdata, CD_PROP_INT32, layer_id);
+        &ss->bm->vdata, CD_PROP_INT32, node_vertex_id);
   }
 
   ss->cd_vert_node_offset = CustomData_get_n_offset(
@@ -130,11 +111,12 @@ void SCULPT_dyntopo_node_layers_add(SculptSession *ss)
 
   ss->bm->vdata.layers[cd_node_layer_index].flag |= CD_FLAG_TEMPORARY;
 
-  cd_node_layer_index = CustomData_get_named_layer_index(&ss->bm->pdata, CD_PROP_INT32, layer_id);
+  cd_node_layer_index = CustomData_get_named_layer_index(
+      &ss->bm->pdata, CD_PROP_INT32, node_face_id);
   if (cd_node_layer_index == -1) {
-    BM_data_layer_add_named(ss->bm, &ss->bm->pdata, CD_PROP_INT32, layer_id);
+    BM_data_layer_add_named(ss->bm, &ss->bm->pdata, CD_PROP_INT32, node_face_id);
     cd_node_layer_index = CustomData_get_named_layer_index(
-        &ss->bm->pdata, CD_PROP_INT32, layer_id);
+        &ss->bm->pdata, CD_PROP_INT32, node_face_id);
   }
 
   ss->cd_face_node_offset = CustomData_get_n_offset(
@@ -169,6 +151,7 @@ void SCULPT_dynamic_topology_enable_ex(Main *bmain, Depsgraph *depsgraph, Scene 
                      me,
                      (&(struct BMeshFromMeshParams){
                          .calc_face_normal = true,
+                         .calc_vert_normal = true,
                          .use_shapekey = true,
                          .active_shapekey = ob->shapenr,
                      }));
@@ -244,9 +227,9 @@ static void SCULPT_dynamic_topology_disable_ex(
     me->face_sets_color_default = 1;
 
     /* Sync the visibility to vertices manually as the pmap is still not initialized. */
-    for (int i = 0; i < me->totvert; i++) {
-      me->mvert[i].flag &= ~ME_HIDE;
-      me->mvert[i].flag |= ME_VERT_PBVH_UPDATE;
+    bool *hide_vert = (bool *)CustomData_get_layer_named(&me->vdata, CD_PROP_BOOL, ".hide_vert");
+    if (hide_vert != NULL) {
+      memset(hide_vert, 0, sizeof(bool) * me->totvert);
     }
   }
 
@@ -296,7 +279,7 @@ void sculpt_dynamic_topology_disable_with_undo(Main *bmain,
     }
     SCULPT_dynamic_topology_disable_ex(bmain, depsgraph, scene, ob, NULL);
     if (use_undo) {
-      SCULPT_undo_push_end();
+      SCULPT_undo_push_end(ob);
     }
   }
 }
@@ -316,7 +299,7 @@ static void sculpt_dynamic_topology_enable_with_undo(Main *bmain,
     SCULPT_dynamic_topology_enable_ex(bmain, depsgraph, scene, ob);
     if (use_undo) {
       SCULPT_undo_push_node(ob, NULL, SCULPT_UNDO_DYNTOPO_BEGIN);
-      SCULPT_undo_push_end();
+      SCULPT_undo_push_end(ob);
     }
   }
 }

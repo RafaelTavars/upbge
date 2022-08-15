@@ -31,15 +31,17 @@
 
 #pragma once
 
-
 #include <list>
 #include <set>
 #include <vector>
 
+#include "DNA_ID.h"  // For IDRecalcFlag
+
 #include "EXP_PyObjectPlus.h"
 #include "EXP_Value.h"
 #include "KX_PhysicsEngineEnums.h"
-#include "KX_PythonComponentManager.h"
+#include "KX_PythonProxy.h"
+#include "KX_PythonProxyManager.h"
 #include "MT_Transform.h"
 #include "RAS_FramingManager.h"
 #include "RAS_Rect.h"
@@ -50,8 +52,6 @@
 /**
  * \section Forward declarations
  */
-struct SM_MaterialProps;
-struct SM_ShapeProps;
 struct Scene;
 
 template<class T> class EXP_ListValue;
@@ -78,24 +78,22 @@ class RAS_IPolyMaterial;
 class RAS_Rasterizer;
 class RAS_DebugDraw;
 class RAS_FrameBuffer;
-class RAS_2DFilter;
 class RAS_2DFilterManager;
 class KX_2DFilterManager;
-class SCA_JoystickManager;
-class btCollisionShape;
-class BL_BlenderSceneConverter;
+class BL_SceneConverter;
 struct KX_ClientObjectInfo;
 class KX_ObstacleSimulation;
 struct TaskPool;
 
 /*********EEVEE INTEGRATION************/
-struct GPUTexture;
+struct bNodeTree;
+struct Mesh;
 struct Object;
 /**************************************/
 
 typedef struct BackupObj {
   Object *ob;
-  float obmat[4][4];
+  void *obtfm;
 } BackupObj;
 
 /* for ID freeing */
@@ -105,7 +103,7 @@ typedef struct BackupObj {
  * The KX_Scene holds all data for an independent scene. It relates
  * KX_Objects to the specific objects in the modules.
  * */
-class KX_Scene : public EXP_Value, public SCA_IScene {
+class KX_Scene : public KX_PythonProxy, public SCA_IScene {
  public:
   enum DrawingCallbackType { PRE_DRAW = 0, POST_DRAW, PRE_DRAW_SETUP, MAX_DRAW_CALLBACK };
 
@@ -117,14 +115,13 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   Py_Header
 
 #ifdef WITH_PYTHON
-  PyObject *m_attr_dict;
+      PyObject *m_attr_dict;
   PyObject *m_drawCallbacks[MAX_DRAW_CALLBACK];
   PyObject *m_removeCallbacks;
 #endif
 
  protected:
   /***************EEVEE INTEGRATION*****************/
-  bool m_resetTaaSamples;
   Object *m_lastReplicatedParentObject;
   Object *m_gameDefaultCamera;
   std::vector<struct Collection *> m_overlay_collections;
@@ -136,13 +133,24 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   struct GPUViewport *m_initMaterialsGPUViewport;
   KX_Camera *m_overlayCamera;
   std::vector<KX_Camera *> m_imageRenderCameraList;
-  BL_BlenderSceneConverter *m_sceneConverter;
+  BL_SceneConverter *m_sceneConverter;
   bool m_isPythonMainLoop;
   std::vector<KX_GameObject *> m_kxobWithLod;
   std::map<Object *, char> m_obRestrictFlags;
   bool m_collectionRemap;
   std::vector<BackupObj *> m_backupObList;
-  std::vector<Object *> m_potentialChildren;
+  int m_backupOverlayFlag;
+  int m_backupOverlayGameFlag;
+
+  /* Objects to update at each render pass */
+  /* Note: We could try to get the right render pass where
+   * we need to update these objects but it would make
+   * the code more complex. We can only do that for overlay render pass
+   * because the other render pass can contain the same objects
+   * which need to be notified + flushed again.
+   */
+  std::vector<std::pair<ID *, IDRecalcFlag>> m_idsToUpdateInAllRenderPasses;
+  std::vector<std::pair<ID *, IDRecalcFlag>> m_idsToUpdateInOverlayPass;
   /*************************************************/
 
   RAS_BucketManager *m_bucketmanager;
@@ -181,7 +189,7 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   SCA_MouseManager *m_mousemgr;
   SCA_TimeEventManager *m_timemgr;
 
-  KX_PythonComponentManager m_componentManager;
+  KX_PythonProxyManager m_proxyManager;
 
   /**
    * physics engine abstraction
@@ -256,14 +264,9 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   int m_ueberExecutionPriority;
 
   /**
-   * Radius in Manhattan distance of the box for activity culling.
-   */
-  float m_activity_box_radius;
-
-  /**
    * Toggle to enable or disable activity culling.
    */
-  bool m_activity_culling;
+  bool m_activityCulling;
 
   /**
    * Toggle to enable or disable culling via DBVT broadphase of Bullet.
@@ -321,18 +324,19 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   virtual ~KX_Scene();
 
   /******************EEVEE INTEGRATION************************/
-  void ResetTaaSamples();
   void ConvertBlenderObject(struct Object *ob);
   void ConvertBlenderObjectsList(std::vector<Object *> objectslist, bool asynchronous);
   void ConvertBlenderCollection(struct Collection *co, bool asynchronous);
+  void ConvertBlenderAction(struct bAction *act);
 
   bool m_isRuntime;  // Too lazy to put that in protected
   std::vector<Object *> m_hiddenObjectsDuringRuntime;
 
-  void RenderAfterCameraSetup(KX_Camera *cam, const RAS_Rect &viewport, bool is_overlay_pass);
-  void RenderAfterCameraSetupImageRender(KX_Camera *cam,
-                                         RAS_Rasterizer *rasty,
-                                         const struct rcti *window);
+  void RenderAfterCameraSetup(KX_Camera *cam,
+                              const RAS_Rect &viewport,
+                              bool is_overlay_pass,
+                              bool is_last_render_pass);
+  void RenderAfterCameraSetupImageRender(KX_Camera *cam, const struct rcti *window);
 
   void SetLastReplicatedParentObject(Object *ob);
   Object *GetLastReplicatedParentObject();
@@ -360,12 +364,22 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   KX_GameObject *GetGameObjectFromObject(Object *ob);
   void BackupObjectsObmat(BackupObj *back);
   void RestoreObjectsObmat();
-  void TagForObmatRestore(std::vector<Object *> potentialChildren);
+  void TagForObmatRestore();
   bool OrigObCanBeTransformedInRealtime(Object *ob);
   void IgnoreParentTxBGE(struct Main *bmain,
                          struct Depsgraph *depsgraph,
                          Object *ob,
                          std::vector<Object *> children);
+  bool SomethingIsMoving();
+  void AppendToIdsToUpdateInAllRenderPasses(ID *id, IDRecalcFlag flag);
+  void AppendToIdsToUpdateInOverlayPass(ID *id, IDRecalcFlag flag);
+  void TagForExtraIdsUpdate(Main *bmain, KX_Camera *cam);
+  KX_GameObject *AddDuplicaObject(KX_GameObject *gameobj,
+                                  KX_GameObject *reference,
+                                  float lifespan);
+  void OverlayPassDisableEffects(struct Depsgraph *depsgraph,
+                                 KX_Camera *kxcam,
+                                 bool isOverlayPass);
   /***************End of EEVEE INTEGRATION**********************/
 
   RAS_BucketManager *GetBucketManager() const;
@@ -392,7 +406,6 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   void RemoveObject(KX_GameObject *gameobj);
   void RemoveDupliGroup(KX_GameObject *gameobj);
   void DelayedRemoveObject(KX_GameObject *gameobj);
-  void RemoveObjectSpawn(KX_GameObject *groupobj);
 
   bool NewRemoveObject(KX_GameObject *gameobj);
   void ReplaceMesh(KX_GameObject *gameobj, RAS_MeshObject *mesh, bool use_gfx, bool use_phys);
@@ -418,7 +431,7 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
 
   SCA_TimeEventManager *GetTimeEventManager() const;
 
-  KX_PythonComponentManager& GetPythonComponentManager();
+  KX_PythonProxyManager &GetPythonProxyManager();
 
   EXP_ListValue<KX_Camera> *GetCameraList() const;
   void SetCameraList(EXP_ListValue<KX_Camera> *camList);
@@ -442,28 +455,6 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
    * If the camera is not on the list, it will be added
    */
   void SetCameraOnTop(class KX_Camera *);
-
-  /**
-   * Activates new desired canvas width set at design time.
-   * \param width	The new desired width.
-   */
-  void SetCanvasDesignWidth(unsigned int width);
-  /**
-   * Activates new desired canvas height set at design time.
-   * \param width	The new desired height.
-   */
-  void SetCanvasDesignHeight(unsigned int height);
-  /**
-   * Returns the current desired canvas width set at design time.
-   * \return The desired width.
-   */
-  unsigned int GetCanvasDesignWidth(void) const;
-
-  /**
-   * Returns the current desired canvas height set at design time.
-   * \return The desired height.
-   */
-  unsigned int GetCanvasDesignHeight(void) const;
 
   /**
    * Set the framing options for this scene
@@ -502,7 +493,7 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   static SG_Callbacks m_callbacks;
 
   /// Update the mesh for objects based on level of detail settings
-  void UpdateObjectLods(KX_Camera *cam /*, const KX_CullingNodeList& nodes*/);
+  void UpdateObjectLods(KX_Camera *cam);
 
   // LoD Hysteresis functions
   void SetLodHysteresis(bool active);
@@ -516,8 +507,6 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   // Enable/disable activity culling.
   void SetActivityCulling(bool b);
 
-  // Set the radius of the activity culling box.
-  void SetActivityCullingRadius(float f);
   // use of DBVT tree for camera culling
   void SetDbvtCulling(bool b)
   {
@@ -536,8 +525,8 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
     return m_dbvt_occlusion_res;
   }
 
-  void SetBlenderSceneConverter(class BL_BlenderSceneConverter *sceneConverter);
-  class BL_BlenderSceneConverter *GetBlenderSceneConverter();
+  void SetBlenderSceneConverter(class BL_SceneConverter *sceneConverter);
+  class BL_SceneConverter *GetBlenderSceneConverter();
 
   class PHY_IPhysicsEnvironment *GetPhysicsEnvironment()
   {
@@ -571,6 +560,8 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   /** Inherited from EXP_Value -- set the name of this object. */
   virtual void SetName(const std::string &name);
 
+  virtual KX_Scene *NewInstance();
+
 #ifdef WITH_PYTHON
   /* --------------------------------------------------------------------- */
   /* Python interface ---------------------------------------------------- */
@@ -585,18 +576,22 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   EXP_PYMETHOD_DOC(KX_Scene, convertBlenderObject);
   EXP_PYMETHOD_DOC(KX_Scene, convertBlenderObjectsList);
   EXP_PYMETHOD_DOC(KX_Scene, convertBlenderCollection);
+  EXP_PYMETHOD_DOC(KX_Scene, convertBlenderAction);
+  EXP_PYMETHOD_DOC(KX_Scene, unregisterBlenderAction);
   EXP_PYMETHOD_DOC(KX_Scene, addOverlayCollection);
   EXP_PYMETHOD_DOC(KX_Scene, removeOverlayCollection);
   EXP_PYMETHOD_DOC(KX_Scene, getGameObjectFromObject);
 
   /* attributes */
   static PyObject *pyattr_get_name(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
-  static PyObject *pyattr_get_objects(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *pyattr_get_objects(EXP_PyObjectPlus *self_v,
+                                      const EXP_PYATTRIBUTE_DEF *attrdef);
   static PyObject *pyattr_get_objects_inactive(EXP_PyObjectPlus *self_v,
                                                const EXP_PYATTRIBUTE_DEF *attrdef);
   static PyObject *pyattr_get_lights(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
   static PyObject *pyattr_get_texts(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
-  static PyObject *pyattr_get_cameras(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *pyattr_get_cameras(EXP_PyObjectPlus *self_v,
+                                      const EXP_PYATTRIBUTE_DEF *attrdef);
   static PyObject *pyattr_get_filter_manager(EXP_PyObjectPlus *self_v,
                                              const EXP_PYATTRIBUTE_DEF *attrdef);
   static PyObject *pyattr_get_active_camera(EXP_PyObjectPlus *self_v,
@@ -614,9 +609,13 @@ class KX_Scene : public EXP_Value, public SCA_IScene {
   static int pyattr_set_drawing_callback(EXP_PyObjectPlus *self_v,
                                          const EXP_PYATTRIBUTE_DEF *attrdef,
                                          PyObject *value);
-  static PyObject *pyattr_get_remove_callback(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
-  static int pyattr_set_remove_callback(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef, PyObject *value);
-  static PyObject *pyattr_get_gravity(EXP_PyObjectPlus *self_v, const EXP_PYATTRIBUTE_DEF *attrdef);
+  static PyObject *pyattr_get_remove_callback(EXP_PyObjectPlus *self_v,
+                                              const EXP_PYATTRIBUTE_DEF *attrdef);
+  static int pyattr_set_remove_callback(EXP_PyObjectPlus *self_v,
+                                        const EXP_PYATTRIBUTE_DEF *attrdef,
+                                        PyObject *value);
+  static PyObject *pyattr_get_gravity(EXP_PyObjectPlus *self_v,
+                                      const EXP_PYATTRIBUTE_DEF *attrdef);
   static int pyattr_set_gravity(EXP_PyObjectPlus *self_v,
                                 const EXP_PYATTRIBUTE_DEF *attrdef,
                                 PyObject *value);
@@ -655,4 +654,3 @@ bool ConvertPythonToScene(PyObject *value,
 #endif
 
 typedef std::vector<KX_Scene *> KX_SceneList;
-

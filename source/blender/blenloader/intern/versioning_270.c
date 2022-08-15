@@ -1,18 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 /** \file
  * \ingroup blenloader
@@ -264,8 +250,8 @@ static void do_version_action_editor_properties_region(ListBase *regionbase)
 static void do_version_bones_super_bbone(ListBase *lb)
 {
   LISTBASE_FOREACH (Bone *, bone, lb) {
-    bone->scale_in_x = bone->scale_in_y = 1.0f;
-    bone->scale_out_x = bone->scale_out_y = 1.0f;
+    bone->scale_in_x = bone->scale_in_z = 1.0f;
+    bone->scale_out_x = bone->scale_out_z = 1.0f;
 
     do_version_bones_super_bbone(&bone->childbase);
   }
@@ -292,7 +278,7 @@ static void do_version_hue_sat_node(bNodeTree *ntree, bNode *node)
   }
 
   /* Make sure new sockets are properly created. */
-  node_verify_socket_templates(ntree, node);
+  node_verify_sockets(ntree, node, false);
   /* Convert value from old storage to new sockets. */
   NodeHueSat *nhs = node->storage;
   bNodeSocket *hue = nodeFindSocket(node, SOCK_IN, "Hue"),
@@ -358,7 +344,7 @@ static void do_versions_compositor_render_passes(bNodeTree *ntree)
        */
       do_versions_compositor_render_passes_storage(node);
       /* Make sure new sockets are properly created. */
-      node_verify_socket_templates(ntree, node);
+      node_verify_sockets(ntree, node, false);
       /* Make sure all possibly created sockets have proper storage. */
       do_versions_compositor_render_passes_storage(node);
     }
@@ -424,6 +410,45 @@ static void do_version_bbone_easing_fcurve_fix(ID *UNUSED(id),
       }
     }
   }
+}
+
+static bool seq_update_proxy_cb(Sequence *seq, void *UNUSED(user_data))
+{
+  seq->stereo3d_format = MEM_callocN(sizeof(Stereo3dFormat), "Stereo Display 3d Format");
+
+#define SEQ_USE_PROXY_CUSTOM_DIR (1 << 19)
+#define SEQ_USE_PROXY_CUSTOM_FILE (1 << 21)
+  if (seq->strip && seq->strip->proxy && !seq->strip->proxy->storage) {
+    if (seq->flag & SEQ_USE_PROXY_CUSTOM_DIR) {
+      seq->strip->proxy->storage = SEQ_STORAGE_PROXY_CUSTOM_DIR;
+    }
+    if (seq->flag & SEQ_USE_PROXY_CUSTOM_FILE) {
+      seq->strip->proxy->storage = SEQ_STORAGE_PROXY_CUSTOM_FILE;
+    }
+  }
+#undef SEQ_USE_PROXY_CUSTOM_DIR
+#undef SEQ_USE_PROXY_CUSTOM_FILE
+  return true;
+}
+
+static bool seq_update_effectdata_cb(Sequence *seq, void *UNUSED(user_data))
+{
+
+  if (seq->type != SEQ_TYPE_TEXT) {
+    return true;
+  }
+
+  if (seq->effectdata == NULL) {
+    struct SeqEffectHandle effect_handle = SEQ_effect_handle_get(seq);
+    effect_handle.init(seq);
+  }
+
+  TextVars *data = seq->effectdata;
+  if (data->color[3] == 0.0f) {
+    copy_v4_fl(data->color, 1.0f);
+    data->shadow_color[3] = 1.0f;
+  }
+  return true;
 }
 
 /* NOLINTNEXTLINE: readability-function-size */
@@ -613,13 +638,6 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
         mat->line_col[3] = mat->alpha;
       }
     }
-
-    if (!DNA_struct_elem_find(fd->filesdna, "RenderData", "int", "preview_start_resolution")) {
-      Scene *scene;
-      for (scene = bmain->scenes.first; scene; scene = scene->id.next) {
-        scene->r.preview_start_resolution = 64;
-      }
-    }
   }
 
   if (!MAIN_VERSION_ATLEAST(bmain, 271, 3)) {
@@ -656,15 +674,6 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
             pmd->psys->clmd->sim_parms->vel_damping = 1.0f;
           }
         }
-      }
-    }
-  }
-
-  if (!MAIN_VERSION_ATLEAST(bmain, 272, 0)) {
-    if (!DNA_struct_elem_find(fd->filesdna, "RenderData", "int", "preview_start_resolution")) {
-      Scene *scene;
-      for (scene = bmain->scenes.first; scene; scene = scene->id.next) {
-        scene->r.preview_start_resolution = 64;
       }
     }
   }
@@ -898,8 +907,7 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
       }
     }
     /* hysteresis set to 10% but not activated */
-    if (!DNA_struct_elem_find(fd->filesdna, "LodLevel", "int", "obhysteresis"))
-    {
+    if (!DNA_struct_elem_find(fd->filesdna, "LodLevel", "int", "obhysteresis")) {
       Object *ob;
       for (ob = bmain->objects.first; ob; ob = ob->id.next) {
         LodLevel *level;
@@ -920,8 +928,6 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
     Image *ima;
 
     for (scene = bmain->scenes.first; scene; scene = scene->id.next) {
-      Sequence *seq;
-
       BKE_scene_add_render_view(scene, STEREO_LEFT_NAME);
       srv = scene->r.views.first;
       BLI_strncpy(srv->suffix, STEREO_LEFT_SUFFIX, sizeof(srv->suffix));
@@ -930,23 +936,9 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
       srv = scene->r.views.last;
       BLI_strncpy(srv->suffix, STEREO_RIGHT_SUFFIX, sizeof(srv->suffix));
 
-      SEQ_ALL_BEGIN (scene->ed, seq) {
-        seq->stereo3d_format = MEM_callocN(sizeof(Stereo3dFormat), "Stereo Display 3d Format");
-
-#define SEQ_USE_PROXY_CUSTOM_DIR (1 << 19)
-#define SEQ_USE_PROXY_CUSTOM_FILE (1 << 21)
-        if (seq->strip && seq->strip->proxy && !seq->strip->proxy->storage) {
-          if (seq->flag & SEQ_USE_PROXY_CUSTOM_DIR) {
-            seq->strip->proxy->storage = SEQ_STORAGE_PROXY_CUSTOM_DIR;
-          }
-          if (seq->flag & SEQ_USE_PROXY_CUSTOM_FILE) {
-            seq->strip->proxy->storage = SEQ_STORAGE_PROXY_CUSTOM_FILE;
-          }
-        }
-#undef SEQ_USE_PROXY_CUSTOM_DIR
-#undef SEQ_USE_PROXY_CUSTOM_FILE
+      if (scene->ed) {
+        SEQ_for_each_callback(&scene->ed->seqbase, seq_update_proxy_cb, NULL);
       }
-      SEQ_ALL_END;
     }
 
     for (screen = bmain->screens.first; screen; screen = screen->id.next) {
@@ -1127,8 +1119,6 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
       if (!DNA_struct_elem_find(fd->filesdna, "ToolSettings", "char", "gpencil_v3d_align")) {
         ts->gpencil_v3d_align = GP_PROJECT_VIEWSPACE;
         ts->gpencil_v2d_align = GP_PROJECT_VIEWSPACE;
-        ts->gpencil_seq_align = GP_PROJECT_VIEWSPACE;
-        ts->gpencil_ima_align = GP_PROJECT_VIEWSPACE;
       }
     }
 
@@ -1153,7 +1143,7 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
     }
   }
   if (!MAIN_VERSION_ATLEAST(bmain, 276, 5)) {
-    ListBase *lbarray[MAX_LIBARRAY];
+    ListBase *lbarray[INDEX_ID_MAX];
     int a;
 
     /* Important to clear all non-persistent flags from older versions here,
@@ -1202,7 +1192,7 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
               }
             }
           }
-          /* Remove old deprecated region from filebrowsers */
+          /* Remove old deprecated region from file-browsers. */
           else if (sl->spacetype == SPACE_FILE) {
             LISTBASE_FOREACH (ARegion *, region, regionbase) {
               if (region->regiontype == RGN_TYPE_CHANNELS) {
@@ -1229,25 +1219,9 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
     }
 
     for (Scene *scene = bmain->scenes.first; scene; scene = scene->id.next) {
-      Sequence *seq;
-
-      SEQ_ALL_BEGIN (scene->ed, seq) {
-        if (seq->type != SEQ_TYPE_TEXT) {
-          continue;
-        }
-
-        if (seq->effectdata == NULL) {
-          struct SeqEffectHandle effect_handle = SEQ_effect_handle_get(seq);
-          effect_handle.init(seq);
-        }
-
-        TextVars *data = seq->effectdata;
-        if (data->color[3] == 0.0f) {
-          copy_v4_fl(data->color, 1.0f);
-          data->shadow_color[3] = 1.0f;
-        }
+      if (scene->ed) {
+        SEQ_for_each_callback(&scene->ed->seqbase, seq_update_effectdata_cb, NULL);
       }
-      SEQ_ALL_END;
     }
 
     /* Adding "Properties" region to DopeSheet */
@@ -1280,8 +1254,8 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
         if (ob->pose) {
           LISTBASE_FOREACH (bPoseChannel *, pchan, &ob->pose->chanbase) {
             /* see do_version_bones_super_bbone()... */
-            pchan->scale_in_x = pchan->scale_in_y = 1.0f;
-            pchan->scale_out_x = pchan->scale_out_y = 1.0f;
+            pchan->scale_in_x = pchan->scale_in_z = 1.0f;
+            pchan->scale_out_x = pchan->scale_out_z = 1.0f;
 
             /* also make sure some legacy (unused for over a decade) flags are unset,
              * so that we can reuse them for stuff that matters now...
@@ -1441,7 +1415,7 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
         }
         if (clip->tracking.stabilization.scale == 0.0f) {
           /* ensure init.
-           * Was previously used for autoscale only,
+           * Was previously used for auto-scale only,
            * now used always (as "target scale") */
           clip->tracking.stabilization.scale = 1.0f;
         }
@@ -1669,7 +1643,7 @@ void blo_do_versions_270(FileData *fd, Library *UNUSED(lib), Main *bmain)
     if (!DNA_struct_elem_find(fd->filesdna, "Brush", "float", "falloff_angle")) {
       for (Brush *br = bmain->brushes.first; br; br = br->id.next) {
         br->falloff_angle = DEG2RADF(80);
-        /* These flags are used for new feautres. They are not related to falloff_angle */
+        /* These flags are used for new features. They are not related to `falloff_angle`. */
         br->flag &= ~(BRUSH_INVERT_TO_SCRAPE_FILL | BRUSH_ORIGINAL_PLANE |
                       BRUSH_GRAB_ACTIVE_VERTEX | BRUSH_SCENE_SPACING | BRUSH_FRONTFACE_FALLOFF);
       }

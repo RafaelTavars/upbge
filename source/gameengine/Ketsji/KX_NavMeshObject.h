@@ -26,15 +26,12 @@
  */
 #pragma once
 
-
 #include <vector>
 
 #include "DetourStatNavMesh.h"
 #include "EXP_PyObjectPlus.h"
 #include "KX_GameObject.h"
 
-class RAS_MeshObject;
-class MT_Transform;
 
 class KX_NavMeshObject : public KX_GameObject {
   Py_Header
@@ -53,10 +50,10 @@ class KX_NavMeshObject : public KX_GameObject {
                           int &vertsPerPoly);
 
  public:
-  KX_NavMeshObject(void *sgReplicationInfo, SG_Callbacks callbacks);
+  KX_NavMeshObject();
   ~KX_NavMeshObject();
 
-  virtual EXP_Value *GetReplica();
+  virtual KX_PythonProxy *NewInstance();
   virtual void ProcessReplica();
 
   bool BuildNavMesh();
@@ -75,10 +72,11 @@ class KX_NavMeshObject : public KX_GameObject {
   /* Python interface ---------------------------------------------------- */
   /* --------------------------------------------------------------------- */
 
+  static PyObject *game_object_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
+
   EXP_PYMETHOD_DOC(KX_NavMeshObject, findPath);
   EXP_PYMETHOD_DOC(KX_NavMeshObject, raycast);
   EXP_PYMETHOD_DOC(KX_NavMeshObject, draw);
   EXP_PYMETHOD_DOC_NOARGS(KX_NavMeshObject, rebuild);
 #endif /* WITH_PYTHON */
 };
-

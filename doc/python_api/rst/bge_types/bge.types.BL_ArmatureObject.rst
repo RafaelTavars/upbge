@@ -1,11 +1,11 @@
 BL_ArmatureObject(KX_GameObject)
 ================================
 
-.. module:: bge.types
+.. currentmodule:: bge.types
 
-base class --- :class:`KX_GameObject`
+base class --- :class:`~bge.types.KX_GameObject`
 
-.. class:: BL_ArmatureObject(KX_GameObject)
+.. class:: BL_ArmatureObject
 
    An armature object.
 
@@ -15,14 +15,14 @@ base class --- :class:`KX_GameObject`
       Elements of the list can be accessed by index or string.
       The key format for string access is '<bone_name>:<constraint_name>'.
 
-      :type: list of :class:`BL_ArmatureConstraint`
+      :type: list of :class:`~bge.types.BL_ArmatureConstraint`
 
    .. attribute:: channels
 
       The list of armature channels.
       Elements of the list can be accessed by index or name the bone.
 
-      :type: list of :class:`BL_ArmatureChannel`
+      :type: list of :class:`~bge.types.BL_ArmatureChannel`
 
    .. method:: update()
 
